@@ -153,6 +153,7 @@
       theme: "minimal",
       footer: "",
       link: "",
+      linkKey: "",
       notes: [],
       events: [],
       days: [],
@@ -224,10 +225,20 @@
         ].includes(key)
       )
         throw new Error(`Line ${line}: unknown setting “${key}”.`);
-      if (key === "link" && !/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(value))
-        throw new Error(
-          `Line ${line}: a link name is 3–32 lowercase letters, digits or hyphens, for example “link: la-week”.`,
-        );
+      if (key === "link") {
+        // "link: la-week" or "link: la-week <key>"; the key is the proof of
+        // ownership the link server hands out on the first publish.
+        const parts = value.match(/^([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(?:\s+([A-Za-z0-9_-]{16,40}))?$/);
+        if (!parts)
+          throw new Error(
+            `Line ${line}: a link name is 3–32 lowercase letters, digits or hyphens, for example “link: la-week”.`,
+          );
+        if (singleton.has(key)) throw new Error(`Line ${line}: duplicate setting “${key}”.`);
+        singleton.add(key);
+        model.link = parts[1];
+        model.linkKey = parts[2] || "";
+        return;
+      }
       if (key === "day") {
         if (!value) throw new Error(`Line ${line}: give the day a date, for example “day: Sun, Sep 20”.`);
         const last = model.days.at(-1);

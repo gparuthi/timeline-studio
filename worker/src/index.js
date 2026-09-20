@@ -15,15 +15,18 @@
 //
 // A named link ("link: la-week" in the timeline text) is a mutable alias:
 // KV "alias:<name>" holds { id, key }. The first PUT claims the name and
-// returns a random key; later PUTs must send it as x-link-key. The key never
-// leaves the claiming browser's localStorage, so a recipient who opens the
-// text in the studio gets a plain short link instead of overwriting yours.
+// returns a random key; later PUTs must present it, either as x-link-key
+// or inside the text as "link: la-week <key>" (the studio writes it there
+// so the owner's other devices can update too). The key is stripped from
+// every payload before it is stored, so what a short link serves never
+// carries the ability to overwrite it.
 // Nothing here is authenticated: anyone can create a link, which is the
 // point of a share service. Payloads are capped and validated so KV only
 // ever holds something the viewer can decode.
 
 const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
+const LINK_LINE = /^([ \t]*link[ \t]*:[ \t]*[a-z0-9][a-z0-9-]{1,30}[a-z0-9])[ \t]+([A-Za-z0-9_-]{16,40})[ \t]*$/m;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt)?$/;
 const ALIAS = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt)?$/;
 const CORS = {
@@ -84,7 +87,19 @@ async function readPayload(request) {
     throw new HttpError(400, "Payload does not decode");
   }
   if (!text.trim()) throw new HttpError(400, "Empty timeline");
-  return { payload, text };
+  // Never store or serve an edit key: drop it from the link line.
+  const keyed = text.match(LINK_LINE);
+  if (keyed) {
+    const stripped = text.replace(LINK_LINE, "$1");
+    return { payload: await encode(stripped), text: stripped, textKey: keyed[2] };
+  }
+  return { payload, text, textKey: "" };
+}
+
+async function encode(text) {
+  const bytes = new TextEncoder().encode(text);
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+  return "z=" + b64url(new Uint8Array(await new Response(stream).arrayBuffer()));
 }
 
 // Content-addressed store: the same timeline always gets the same id. On
@@ -105,9 +120,9 @@ async function store(env, payload, text) {
 
 async function claim(request, env, name) {
   try {
-    const { payload, text } = await readPayload(request);
+    const { payload, text, textKey } = await readPayload(request);
     const record = await env.LINKS.get("alias:" + name, "json");
-    const key = request.headers.get("x-link-key") || "";
+    const key = request.headers.get("x-link-key") || textKey || "";
     if (record && record.key !== key) throw new HttpError(403, `“${name}” is already taken`);
     if (!record && (await env.LINKS.get(name)) !== null) throw new HttpError(409, `“${name}” is not available`);
     const id = await store(env, payload, text);

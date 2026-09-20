@@ -676,8 +676,9 @@
               ticket, pin, car, road, palm. Leave the icon empty and it is
               guessed from the words (lunch → meal, park → tree, flight lands →
               land). Colors: sky, sand, sage. Add <code>link: my-week</code>
-              and the short link <code>tl.gaup.uk/my-week</code> always shows
-              your latest edit (the name is yours on this device).
+              and <code>tl.gaup.uk/my-week</code> follows your edits; the studio
+              appends an edit id to that line on the first publish, and any
+              device whose text has the id can update the name.
             </p>
             <pre>
 title: My Trip
@@ -906,6 +907,7 @@ footer: See you there ♡</pre>
             theme: "minimal",
             footer: "",
             link: "",
+            linkKey: "",
             notes: [],
             events: [],
             days: [],
@@ -977,10 +979,20 @@ footer: See you there ♡</pre>
               ].includes(key)
             )
               throw new Error(`Line ${line}: unknown setting “${key}”.`);
-            if (key === "link" && !/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(value))
-              throw new Error(
-                `Line ${line}: a link name is 3–32 lowercase letters, digits or hyphens, for example “link: la-week”.`,
-              );
+            if (key === "link") {
+              // "link: la-week" or "link: la-week <key>"; the key is the proof of
+              // ownership the link server hands out on the first publish.
+              const parts = value.match(/^([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(?:\s+([A-Za-z0-9_-]{16,40}))?$/);
+              if (!parts)
+                throw new Error(
+                  `Line ${line}: a link name is 3–32 lowercase letters, digits or hyphens, for example “link: la-week”.`,
+                );
+              if (singleton.has(key)) throw new Error(`Line ${line}: duplicate setting “${key}”.`);
+              singleton.add(key);
+              model.link = parts[1];
+              model.linkKey = parts[2] || "";
+              return;
+            }
             if (key === "day") {
               if (!value) throw new Error(`Line ${line}: give the day a date, for example “day: Sun, Sep 20”.`);
               const last = model.days.at(-1);
@@ -1519,6 +1531,7 @@ footer: See you there ♡</pre>
       // lives only in this browser's storage, so other devices and recipients
       // fall back to plain short links.
       let namedLink = "",
+        namedKey = "",
         publishedText = "",
         publishedUrl = "",
         namedTimer;
@@ -1542,7 +1555,7 @@ footer: See you there ♡</pre>
         const name = namedLink,
           text = editor.value;
         if (!name || !latestHTML) return "";
-        const key = linkKeys()[name];
+        const key = namedKey || linkKeys()[name];
         if (text === publishedText) return publishedUrl;
         if (!key && namedFailed.has(name)) return "";
         const payload = await TimelineText.encodeLink(text);
@@ -1561,7 +1574,30 @@ footer: See you there ♡</pre>
               : `Named link failed: ${body.error || response.status}`;
           return "";
         }
-        if (body.key) linkKeys({ [name]: body.key });
+        if (body.key) {
+          linkKeys({ [name]: body.key });
+          // Write the edit id into the link line so the text itself is the
+          // proof of ownership: paste it into any device's studio and that
+          // device can update the name too. The link server strips it from
+          // what it stores, so shared short links never carry it.
+          const linePattern = new RegExp(`^([ \\t]*link[ \\t]*:[ \\t]*${name})[ \\t]*$`, "m"),
+            before = editor.value,
+            withKey = before.replace(linePattern, `$1 ${body.key}`);
+          if (withKey !== before && before === text) {
+            const start = editor.selectionStart,
+              end = editor.selectionEnd,
+              at = before.search(linePattern),
+              grew = withKey.length - before.length,
+              shift = (pos) => (pos > at ? pos + grew : pos);
+            editor.value = withKey;
+            editor.setSelectionRange(shift(start), shift(end));
+            namedKey = body.key;
+            publishedText = withKey;
+            publishedUrl = body.url;
+            update();
+            return body.url;
+          }
+        }
         publishedText = text;
         publishedUrl = body.url;
         if (!status.classList.contains("error"))
@@ -1579,6 +1615,7 @@ footer: See you there ♡</pre>
           latestHTML = TimelineText.render(model);
           latestTitle = model.title;
           namedLink = model.link || "";
+          namedKey = model.linkKey || "";
           themePicker.value = model.theme;
           // Navigating srcdoc on each edit clears Safari's native undo history.
           if (!preview.hasAttribute("srcdoc")) {
@@ -1785,7 +1822,11 @@ footer: See you there ♡</pre>
           : `✓ Link copied · ${link}`;
         if (copied) {
           status.textContent = label;
-          toast(fallback ? "Long link copied (link server unreachable)" : `Link copied · ${link.replace(/^https?:\/\//, "")}`);
+          toast(
+            fallback
+              ? `Long link copied (link server unreachable)${namedKey ? " · it carries your edit id" : ""}`
+              : `Link copied · ${link.replace(/^https?:\/\//, "")}`,
+          );
         } else {
           status.textContent = fallback ? "Could not copy; the long link is in the dialog." : `Link: ${link}`;
           toast("Could not copy automatically", "error");
