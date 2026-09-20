@@ -120,6 +120,9 @@ html,body{margin:0;background:#0f1418;color:#dfebf2;font-family:system-ui,-apple
     document.open();
     document.write(html);
     document.close();
+    // document.open() dropped every window listener; a second link tapped
+    // into this tab must still trigger a fresh load.
+    window.addEventListener("hashchange", () => location.reload());
     document.body.insertAdjacentHTML(
       "beforeend",
       '<p style="margin:0;padding:18px 0 28px;text-align:center;font:12px system-ui,sans-serif;letter-spacing:1px"><a href="' + studio + "#" + payload + '" style="color:inherit;opacity:.55;text-decoration:none">Edit this timeline</a></p>'

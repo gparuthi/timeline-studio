@@ -1474,18 +1474,26 @@ footer: See you there ♡</pre>
       }
       editor.value = example;
       update();
-      // A studio link (index.html#z=…) opens with that timeline loaded.
-      TimelineText.decodeLink(location.hash)
-        .then((text) => {
-          if (!text) return;
-          dirty = true;
-          editor.value = text;
-          update();
-        })
-        .catch((error) => {
-          status.className = "status error";
-          status.textContent = error.message;
-        });
+      // A studio link (index.html#z=…) opens with that timeline loaded. The
+      // fragment can also change while the page is already open: on a phone,
+      // a shared link tapped while the studio is on the home screen lands in
+      // the running copy as a same-document navigation, which only fires
+      // hashchange. Load it then too, unless it is the text already shown.
+      function loadFromHash() {
+        return TimelineText.decodeLink(location.hash)
+          .then((text) => {
+            if (!text || text === editor.value) return;
+            dirty = true;
+            editor.value = text;
+            update();
+          })
+          .catch((error) => {
+            status.className = "status error";
+            status.textContent = error.message;
+          });
+      }
+      loadFromHash();
+      window.addEventListener("hashchange", loadFromHash);
       function copyViaSelection(text) {
         const scratch = document.createElement("textarea");
         scratch.value = text;
