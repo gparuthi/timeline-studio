@@ -51,6 +51,10 @@ Each day gets its own heading, hour scale and notes on the same sheet. Without a
 
 Once you edit, the studio's own address bar carries the timeline too (`index.html#z=…`, updated as you type via `history.replaceState`), so copying the browser URL is enough to share; whoever opens it sees the timeline with the editor tucked away. **Export → Copy link** puts the whole timeline text into the URL fragment of `view.html` (on plain http, where the clipboard API is missing, Copy link falls back to a selection copy, then to a dialog showing the link) (deflate-compressed, base64url; `#z=…`, or `#t=…` uncompressed in browsers without CompressionStream). Nothing is sent to a server: the fragment never leaves the browser, and `view.html` is a static page that decodes and renders it. The viewer's footer links back to the studio with the same fragment, so anyone with the link can edit a copy. Embedded images inflate links; past roughly 30k characters some browsers refuse them, so prefer **Export → Timeline (HTML)** for image-heavy days.
 
+## Short links
+
+Long links carry the whole timeline, which is unwieldy in a text message. **Export → Short link** posts the same compressed payload to a small Cloudflare Worker (`worker/`, served at `https://tl.gaup.uk`) and copies back `https://tl.gaup.uk/<id>`. The id is a prefix of the payload's SHA-256, so the same timeline always gets the same link. `GET /<id>` serves the viewer with the timeline inlined (plus `og:title` for message previews), `GET /<id>.txt` returns the text, and the viewer's footer links back to the studio for editing. This is the one feature that sends the timeline off your device: the text sits in Workers KV with no expiry. Everything else stays in the browser, so keep using the long link or the HTML export for anything you'd rather not store. Deploy the Worker with `cd worker && npx wrangler deploy` (it needs a `wrangler login` with Workers KV access on the `gaup.uk` account; the KV namespace id is in `wrangler.jsonc`). For local work, run `npx wrangler dev --local` in `worker/` and set `localStorage.shortLinkApi = "http://localhost:8787/"` in the studio.
+
 ## Share image
 
 **Export → Image (PNG)** rasterizes the timeline (720px wide, 2x) with the vendored html2canvas and hands the PNG to the system share sheet, so on a phone it goes straight into Messages; where sharing files isn't available it downloads instead. Card gradients flatten to their base tint and offset shadows are dropped in the image, since html2canvas cannot draw them. Saved studio copies need `vendor/html2canvas.min.js` beside them for this button.
@@ -109,6 +113,6 @@ Open `index.html` directly, or run `python3 -m http.server 8766` from this direc
 
 ## Publishing
 
-The public copy lives in the separate public repo `gparuthi/timeline-studio` (GitHub Pages from `main`). This folder is the source; `publish.sh` copies the web files over and pushes. The public repo carries the same sample data as here, so keep the sample free of anything private.
+The public copy lives in the separate public repo `gparuthi/timeline-studio` (GitHub Pages from `main`). This folder is the source; `publish.sh` copies the web files and `worker/` over and pushes. The public repo carries the same sample data as here, so keep the sample free of anything private.
 
 The editor uses the playground dark theme; rendered timelines retain their paper palette. Save studio downloads a new editable `.studio.html` copy.

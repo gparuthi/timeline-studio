@@ -576,6 +576,7 @@
           <summary class="primary">Export ▾</summary>
           <div class="menu-list" role="menu">
             <button id="copy-link" role="menuitem" title="Copy a link that carries the whole timeline">Copy link</button
+            ><button id="short-link" role="menuitem" title="Copy a short link; the timeline text is stored on the link server">Short link</button
             ><button id="share-image" role="menuitem" title="Render a PNG to share in a message">Image (PNG)</button
             ><button id="export" role="menuitem" title="A standalone timeline page">Timeline (HTML)</button
             ><button id="save-studio" role="menuitem" title="This editor with your timeline inside, editable later">Studio (HTML)</button>
@@ -1371,6 +1372,7 @@ footer: See you there ♡</pre>
         latestLink = hash ? new URL("view.html#" + hash, location.href).href : "";
         syncUrl(hash);
         document.querySelector("#copy-link").disabled = !latestLink;
+        document.querySelector("#short-link").disabled = !latestLink;
       }
       function update() {
         try {
@@ -1516,6 +1518,62 @@ footer: See you there ♡</pre>
         else {
           status.textContent = "Could not copy automatically; the link is in the dialog.";
           window.prompt("Copy this link:", latestLink);
+        }
+      });
+      // Short links: the same compressed payload the long link carries, stored
+      // under a short id by the Worker in worker/ (served at tl.gaup.uk).
+      // Unlike the long link, this sends the timeline text off the device.
+      let SHORT_LINK_API = "https://tl.gaup.uk/";
+      try {
+        // Dev hook: point the studio at a local `wrangler dev` of worker/.
+        SHORT_LINK_API = localStorage.getItem("shortLinkApi") || SHORT_LINK_API;
+      } catch (error) {
+        /* storage may be blocked */
+      }
+      document.querySelector("#short-link").addEventListener("click", async () => {
+        if (!latestLink) return;
+        const payload = latestLink.slice(latestLink.indexOf("#") + 1);
+        status.className = "status";
+        status.textContent = "Making short link…";
+        const request = fetch(SHORT_LINK_API, {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: payload,
+        }).then(async (response) => {
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error || `Link server answered ${response.status}`);
+          return body.url;
+        });
+        let copied = false;
+        // Safari only honours clipboard writes made during the click, so hand
+        // it the pending request as a ClipboardItem instead of awaiting first.
+        if (navigator.clipboard && typeof ClipboardItem === "function") {
+          try {
+            await navigator.clipboard.write([
+              new ClipboardItem({ "text/plain": request.then((url) => new Blob([url], { type: "text/plain" })) }),
+            ]);
+            copied = true;
+          } catch (error) {
+            copied = false;
+          }
+        }
+        let short;
+        try {
+          short = await request;
+        } catch (error) {
+          status.className = "status error";
+          status.textContent = `Short link failed: ${error.message}`;
+          return;
+        }
+        if (!copied)
+          copied = navigator.clipboard
+            ? await navigator.clipboard.writeText(short).then(() => true, () => false)
+            : copyViaSelection(short);
+        status.className = "status";
+        if (copied) status.textContent = `✓ Short link copied · ${short}`;
+        else {
+          status.textContent = `Short link: ${short}`;
+          window.prompt("Copy this link:", short);
         }
       });
       editor.addEventListener("input", () => {

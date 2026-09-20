@@ -1,0 +1,18 @@
+{
+  // Short links for Timeline Studio (see src/index.js). One KV namespace
+  // maps a short id to the same compressed payload a long share link carries
+  // in its fragment; GET /<id> serves the viewer with that payload inlined.
+  "name": "timeline-links",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  // Served only on the custom domain. workers.dev stays off so there is
+  // exactly one public hostname to reason about.
+  "workers_dev": false,
+  "routes": [{ "pattern": "tl.gaup.uk", "custom_domain": true }],
+  "kv_namespaces": [{ "binding": "LINKS", "id": "8813242d0bbf41a89fbe4ab0da1170ca" }],
+  "vars": {
+    // Where the static studio lives; the viewer page loads the renderer from
+    // here and the "Edit this timeline" link points back at it.
+    "STUDIO_URL": "https://gparuthi.github.io/timeline-studio/"
+  }
+}
