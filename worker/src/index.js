@@ -123,6 +123,12 @@ html,body{margin:0;background:#0f1418;color:#dfebf2;font-family:system-ui,-apple
     // document.open() dropped every window listener; a second link tapped
     // into this tab must still trigger a fresh load.
     window.addEventListener("hashchange", () => location.reload());
+    // Tapping a card opens the studio on that line, like the live preview.
+    document.head.insertAdjacentHTML("beforeend", "<style>[data-line]{cursor:pointer}</style>");
+    document.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-line]");
+      if (target) location.href = studio + "?line=" + target.dataset.line + "#" + payload;
+    });
     document.body.insertAdjacentHTML(
       "beforeend",
       '<a href="' + studio + "#" + payload + '" style="position:fixed;right:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:28;padding:9px 14px;border-radius:999px;background:#143e55;color:#fff;font:600 13px system-ui,-apple-system,sans-serif;text-decoration:none;opacity:.85;box-shadow:0 4px 18px #0004">✎ Edit</a>'
