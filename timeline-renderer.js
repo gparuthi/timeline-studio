@@ -489,6 +489,7 @@
     // In the studio's live preview a tap on a card (or a day heading) asks
     // the editor to open on that source line.
     document.addEventListener("click", (event) => {
+      if (event.target.closest("a")) return;
       const target = event.target.closest("[data-line]");
       if (!target) return;
       event.preventDefault();
@@ -558,9 +559,32 @@
       ? `(${previewRuntime.toString()})(${layoutRuntime.toString()});`
       : `(${layoutRuntime.toString()})();`;
     const m = typeof text === "string" ? parse(text) : text;
+    // URLs in a description or note become links. Map links (Google or
+    // Apple Maps, including the short goo.gl form) render as a small pin
+    // chip so the address text stays readable; other links show their host.
+    const isMapUrl = (url) =>
+      /^https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|maps\.google\.[a-z.]+|(?:www\.)?google\.[a-z.]+\/maps|maps\.apple\.com)/i.test(url);
+    const linkify = (text) =>
+      String(text)
+        .split(/(https?:\/\/[^\s<>|]+)/)
+        .map((part, i) => {
+          if (i % 2 === 0) return escape(part);
+          const url = part.replace(/[.,;:!?)]+$/, ""),
+            trail = part.slice(url.length);
+          if (isMapUrl(url))
+            return `<a class="map-link" href="${escape(url)}" target="_blank" rel="noopener"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg>Map</a>${escape(trail)}`;
+          let host = url;
+          try {
+            host = new URL(url).hostname.replace(/^www\./, "");
+          } catch (error) {
+            /* keep the raw text */
+          }
+          return `<a href="${escape(url)}" target="_blank" rel="noopener">${escape(host)}</a>${escape(trail)}`;
+        })
+        .join("");
     const notesHtml = (notes) =>
       notes.length
-        ? `<aside class="notes"><div class="notes-heading">Helpful Notes</div><ul>${notes.map((note) => `<li><span class="check" aria-hidden="true">✓</span><span>${escape(note)}</span></li>`).join("")}</ul></aside>`
+        ? `<aside class="notes"><div class="notes-heading">Helpful Notes</div><ul>${notes.map((note) => `<li><span class="check" aria-hidden="true">✓</span><span>${linkify(note)}</span></li>`).join("")}</ul></aside>`
         : "";
     const days = m.days
       .map((day, index) => {
@@ -572,7 +596,7 @@
         const events = day.events
           .map(
             (e) =>
-              `<li class="event ${e.color}" data-line="${e.line}" data-minute="${e.minutes - day.start}"${e.end ? ` data-end="${e.end - day.start}"` : ""} style="--m:${e.minutes - day.start}"><time${e.end ? ' class="span"' : ""}>${e.end ? spanLabel2(e.minutes, e.end) : label(e.minutes)}</time><div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail ? `<p>${escape(e.detail)}</p>` : ""}</div></li>`,
+              `<li class="event ${e.color}" data-line="${e.line}" data-minute="${e.minutes - day.start}"${e.end ? ` data-end="${e.end - day.start}"` : ""} style="--m:${e.minutes - day.start}"><time${e.end ? ' class="span"' : ""}>${e.end ? spanLabel2(e.minutes, e.end) : label(e.minutes)}</time><div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail ? `<p>${linkify(e.detail)}</p>` : ""}</div></li>`,
           )
           .join("");
         const heading =
@@ -589,7 +613,7 @@
       : m.theme === "travel"
         ? art.flight + art.city
         : "";
-    const extraCss = `html,body{touch-action:manipulation;} .event{z-index:1;} .span{opacity:.45;} .span.sky{fill:#8fd0f0;} .span.sand{fill:#f2c37a;} .span.sage{fill:#9ec9a8;} .span.past{opacity:.2;} .event time.span{font-size:.72em;line-height:1.15;letter-spacing:0;white-space:normal;} @media(max-width:580px){.event time.span{font-size:12px;white-space:nowrap;}} .event.live .event-body{box-shadow:0 0 0 2px #e2573f66;} body.live .event,body.live .day-heading{cursor:pointer;} body.live .event:hover .event-body{outline:2px solid #8fc7dd88;outline-offset:2px;} .now{position:absolute;left:var(--axis);right:0;height:0;border-top:2px solid #e2573f;z-index:0;pointer-events:none;animation:now-blink 2.6s ease-in-out infinite;} .now-dot{position:absolute;left:0;top:-1px;width:14px;height:14px;border-radius:50%;background:#e2573f;transform:translate(-50%,-50%);box-shadow:0 0 0 4px #e2573f33;} @keyframes now-blink{0%,100%{opacity:1}50%{opacity:.3}} .event.past{opacity:.42;} .connector.past,.event-dot.past{opacity:.35;} .until{position:absolute;right:10px;top:6px;font-size:12px;font-weight:600;letter-spacing:.3px;color:var(--blue);opacity:.75;white-space:nowrap;} @media(max-width:580px){.until{right:8px;top:5px;font-size:11px;}} @media print{.now{display:none;}.event.past,.connector.past,.event-dot.past{opacity:1;}} .event{top:calc(var(--m) / 60 * var(--hour-height));} .masthead{height:auto;min-height:180px;padding-bottom:38px;}h1{overflow-wrap:anywhere;} .event-icon img{width:100%;height:100%;object-fit:cover;border-radius:50%;} .custom-art{object-fit:contain;} .event-body{overflow-wrap:anywhere;} .notes{grid-template-columns:230px 1fr;} .notes-heading{font-family:Georgia,serif;font-size:30px;font-weight:bold;} .notes:empty{display:none;} footer{height:auto;min-height:85px;padding:20px 0;overflow-wrap:anywhere;} footer:empty{display:none;}@media(max-width:850px){.notes{grid-template-columns:165px 1fr;}.notes-heading{font-size:25px;}} @media(max-width:580px){.masthead{min-height:160px;padding-bottom:28px;}.notes{display:block;}} .day-heading{display:flex;align-items:center;gap:14px;margin:36px 0 0;font-size:14px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--blue);} .day-heading::after{content:'';flex:1;height:1px;background:currentColor;opacity:.35;} .day:first-of-type .day-heading{margin-top:8px;} @media(max-width:580px){.day-heading{font-size:12px;letter-spacing:2px;margin-top:26px;}}`;
+    const extraCss = `html,body{touch-action:manipulation;} .event p a,.notes a{color:inherit;text-decoration:underline;text-decoration-color:#8fb4c8;text-underline-offset:2px;} .map-link{display:inline-flex;align-items:center;gap:4px;vertical-align:middle;margin:0 2px;padding:2px 9px 2px 6px;border-radius:999px;background:var(--blue);color:#fff!important;font-size:.72em;font-weight:700;letter-spacing:.3px;text-decoration:none!important;line-height:1.5;} .map-link svg{width:.95em;height:.95em;fill:currentColor;} .event{z-index:1;} .span{opacity:.45;} .span.sky{fill:#8fd0f0;} .span.sand{fill:#f2c37a;} .span.sage{fill:#9ec9a8;} .span.past{opacity:.2;} .event time.span{font-size:.72em;line-height:1.15;letter-spacing:0;white-space:normal;} @media(max-width:580px){.event time.span{font-size:12px;white-space:nowrap;}} .event.live .event-body{box-shadow:0 0 0 2px #e2573f66;} body.live .event,body.live .day-heading{cursor:pointer;} body.live .event:hover .event-body{outline:2px solid #8fc7dd88;outline-offset:2px;} .now{position:absolute;left:var(--axis);right:0;height:0;border-top:2px solid #e2573f;z-index:0;pointer-events:none;animation:now-blink 2.6s ease-in-out infinite;} .now-dot{position:absolute;left:0;top:-1px;width:14px;height:14px;border-radius:50%;background:#e2573f;transform:translate(-50%,-50%);box-shadow:0 0 0 4px #e2573f33;} @keyframes now-blink{0%,100%{opacity:1}50%{opacity:.3}} .event.past{opacity:.42;} .connector.past,.event-dot.past{opacity:.35;} .until{position:absolute;right:10px;top:6px;font-size:12px;font-weight:600;letter-spacing:.3px;color:var(--blue);opacity:.75;white-space:nowrap;} @media(max-width:580px){.until{right:8px;top:5px;font-size:11px;}} @media print{.now{display:none;}.event.past,.connector.past,.event-dot.past{opacity:1;}} .event{top:calc(var(--m) / 60 * var(--hour-height));} .masthead{height:auto;min-height:180px;padding-bottom:38px;}h1{overflow-wrap:anywhere;} .event-icon img{width:100%;height:100%;object-fit:cover;border-radius:50%;} .custom-art{object-fit:contain;} .event-body{overflow-wrap:anywhere;} .notes{grid-template-columns:230px 1fr;} .notes-heading{font-family:Georgia,serif;font-size:30px;font-weight:bold;} .notes:empty{display:none;} footer{height:auto;min-height:85px;padding:20px 0;overflow-wrap:anywhere;} footer:empty{display:none;}@media(max-width:850px){.notes{grid-template-columns:165px 1fr;}.notes-heading{font-size:25px;}} @media(max-width:580px){.masthead{min-height:160px;padding-bottom:28px;}.notes{display:block;}} .day-heading{display:flex;align-items:center;gap:14px;margin:36px 0 0;font-size:14px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--blue);} .day-heading::after{content:'';flex:1;height:1px;background:currentColor;opacity:.35;} .day:first-of-type .day-heading{margin-top:8px;} @media(max-width:580px){.day-heading{font-size:12px;letter-spacing:2px;margin-top:26px;}}`;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(m.title)}</title><style>${art.css}
 ${extraCss}
 ${themes[m.theme]}</style></head><body class="theme-${m.theme}${live ? " live" : ""}">${art.symbols}<main class="sheet"><header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main><script>${runtime}<\/script></body></html>`;

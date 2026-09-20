@@ -39,6 +39,7 @@
           // Tapping a card opens the studio on that line, like the live preview.
           document.head.insertAdjacentHTML("beforeend", "<style>[data-line]{cursor:pointer}</style>");
           document.addEventListener("click", (event) => {
+            if (event.target.closest("a")) return;
             const target = event.target.closest("[data-line]");
             if (target) location.href = `./?line=${target.dataset.line}${location.hash}`;
           });

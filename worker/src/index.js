@@ -9,6 +9,7 @@
 //   GET  /<id>.txt    the timeline text itself
 //   PUT  /<name>      body = the payload      -> { url, key? }   named link
 //   GET  /<name>      the viewer for whatever that name points to now
+//   GET  /resolve?u=  follows a Google/Apple Maps link -> { url, name, address }
 //
 // Ids are content-addressed (a prefix of sha256(payload)), so sharing the
 // same timeline twice yields the same link and never a second KV write.
@@ -47,6 +48,7 @@ export default {
       if (request.method === "POST") return create(request, env);
       return Response.redirect(env.STUDIO_URL, 302);
     }
+    if (url.pathname === "/resolve" && request.method === "GET") return resolveMap(url.searchParams.get("u") || "");
     const alias = url.pathname.match(ALIAS);
     if (alias && request.method === "PUT") return claim(request, env, alias[1]);
     const match = url.pathname.match(ID) || alias;
@@ -140,6 +142,56 @@ async function claim(request, env, name) {
   }
 }
 
+// Map short links (maps.app.goo.gl) only reveal the place after a redirect
+// the browser cannot follow cross-origin, so the studio asks here. Only map
+// hosts are fetched, and only the final URL's place text is returned.
+const MAP_HOSTS = /^(?:maps\.app\.goo\.gl|goo\.gl|g\.co|maps\.google\.[a-z.]+|(?:www\.)?google\.[a-z.]+|maps\.apple\.com)$/i;
+async function resolveMap(raw) {
+  let target;
+  try {
+    target = new URL(raw);
+  } catch (error) {
+    return json({ error: "Not a URL" }, 400);
+  }
+  if (!/^https?:$/.test(target.protocol) || !MAP_HOSTS.test(target.hostname)) return json({ error: "Not a map link" }, 400);
+  let final;
+  try {
+    const response = await fetch(target.href, {
+      redirect: "follow",
+      headers: { "user-agent": "Mozilla/5.0 (timeline-studio link resolver)" },
+    });
+    final = new URL(response.url || target.href);
+  } catch (error) {
+    return json({ error: "Could not reach the map service" }, 502);
+  }
+  const place = placeFromMapUrl(final);
+  return json({ url: final.href, ...place }, 200, { "cache-control": "public, max-age=604800" });
+}
+
+function placeFromMapUrl(url) {
+  const decode = (s) => {
+    try {
+      return decodeURIComponent(s.replace(/\+/g, " ")).trim();
+    } catch (error) {
+      return s;
+    }
+  };
+  let text =
+    url.searchParams.get("q") ||
+    url.searchParams.get("query") ||
+    url.searchParams.get("destination") ||
+    url.searchParams.get("address") ||
+    "";
+  if (!text) {
+    const m = url.pathname.match(/\/maps\/(?:place|search|dir)\/([^/@]+)/);
+    if (m) text = decode(m[1]);
+  } else text = decode(text);
+  text = text.replace(/\s+/g, " ").trim();
+  if (!text || /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(text)) return { name: "", address: "" };
+  const [name, ...rest] = text.split(/,\s*/);
+  return { name, address: rest.join(", ") };
+}
+
 class HttpError extends Error {
   constructor(status, message) {
     super(message);
@@ -204,6 +256,7 @@ html,body{margin:0;background:#0f1418;color:#dfebf2;font-family:system-ui,-apple
     // Tapping a card opens the studio on that line, like the live preview.
     document.head.insertAdjacentHTML("beforeend", "<style>[data-line]{cursor:pointer}</style>");
     document.addEventListener("click", (event) => {
+      if (event.target.closest("a")) return;
       const target = event.target.closest("[data-line]");
       if (target) location.href = studio + "?line=" + target.dataset.line + "#" + payload;
     });
@@ -262,10 +315,10 @@ function escape(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
-function json(body, status = 200) {
+function json(body, status = 200, extra = {}) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", ...CORS },
+    headers: { "content-type": "application/json; charset=utf-8", ...CORS, ...extra },
   });
 }
 
