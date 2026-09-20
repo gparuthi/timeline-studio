@@ -55,6 +55,10 @@ Once you edit, the studio's own address bar carries the timeline too (`index.htm
 
 Long links carry the whole timeline, which is unwieldy in a text message. **Export → Short link** posts the same compressed payload to a small Cloudflare Worker (`worker/`, served at `https://tl.gaup.uk`) and copies back `https://tl.gaup.uk/<id>`. The id is a prefix of the payload's SHA-256, so the same timeline always gets the same link. `GET /<id>` serves the viewer with the timeline inlined (plus `og:title` for message previews), `GET /<id>.txt` returns the text, and the viewer's footer links back to the studio for editing. This is the one feature that sends the timeline off your device: the text sits in Workers KV with no expiry. Everything else stays in the browser, so keep using the long link or the HTML export for anything you'd rather not store. Deploy the Worker with `cd worker && npx wrangler deploy` (it needs a `wrangler login` with Workers KV access on the `gaup.uk` account; the KV namespace id is in `wrangler.jsonc`). For local work, run `npx wrangler dev --local` in `worker/` and set `localStorage.shortLinkApi = "http://localhost:8787/"` in the studio.
 
+
+### Named links that follow your edits
+
+Add `link: la-week` to the text (or use **Export → Custom link…**, which asks for a name and writes the line for you) and the studio publishes every edit to `https://tl.gaup.uk/la-week` about a second and a half after you stop typing; the address never changes, so people you already sent it to always see the latest version. The first publish claims the name and the Worker returns a secret key, kept in this browser's `localStorage` under `tl-link-keys`. Only a browser holding the key can update the name: on another device, or for anyone who opens your text in the studio, the name reads as taken and **Short link** falls back to a plain content link. Names are 3–32 lowercase letters, digits or hyphens. The Worker serves named links with `Cache-Control: no-store`; content links stay cacheable because they never change.
 ## Share image
 
 **Export → Image (PNG)** rasterizes the timeline (720px wide, 2x) with the vendored html2canvas and hands the PNG to the system share sheet, so on a phone it goes straight into Messages; where sharing files isn't available it downloads instead. Card gradients flatten to their base tint and offset shadows are dropped in the image, since html2canvas cannot draw them. Saved studio copies need `vendor/html2canvas.min.js` beside them for this button.
@@ -63,7 +67,7 @@ Long links carry the whole timeline, which is unwieldy in a text message. **Expo
 
 If the `date:` line is today (parsed from `2026-06-06`, `Jun 6, 2026`, `6 Jun 2026`, or `6/6/2026`), the rendered timeline goes live: past cards fade, a slowly blinking marker sits at the current minute on the axis, the next card shows "in 25 min", and the page opens scrolled to now. Refreshes every 30 seconds and whenever the tab becomes visible. On any other day nothing changes.
 
-Built-in icons: `home`, `plane`, `depart`, `land`, `coffee`, `ticket`, `pin`, `car`, `road`, `palm`. Colors: `sky`, `sand`, `sage`.
+Built-in icons: `home`, `plane`, `depart`, `land`, `coffee`, `meal`, `ticket`, `pin`, `car`, `road`, `palm`. Colors: `sky`, `sand`, `sage`.
 
 The optional range has whole-hour boundaries within one calendar day. Without it, the renderer fits the range to the events. Every hour occupies the same vertical distance. Dots mark exact times, while cards shift to avoid overlaps. Dense timelines grow vertically to keep every card visible.
 

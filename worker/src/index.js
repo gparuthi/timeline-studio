@@ -7,9 +7,17 @@
 //   POST /            body = the payload      -> { id, url }
 //   GET  /<id>        the viewer page with the payload inlined
 //   GET  /<id>.txt    the timeline text itself
+//   PUT  /<name>      body = the payload      -> { url, key? }   named link
+//   GET  /<name>      the viewer for whatever that name points to now
 //
 // Ids are content-addressed (a prefix of sha256(payload)), so sharing the
 // same timeline twice yields the same link and never a second KV write.
+//
+// A named link ("link: la-week" in the timeline text) is a mutable alias:
+// KV "alias:<name>" holds { id, key }. The first PUT claims the name and
+// returns a random key; later PUTs must send it as x-link-key. The key never
+// leaves the claiming browser's localStorage, so a recipient who opens the
+// text in the studio gets a plain short link instead of overwriting yours.
 // Nothing here is authenticated: anyone can create a link, which is the
 // point of a share service. Payloads are capped and validated so KV only
 // ever holds something the viewer can decode.
@@ -17,69 +25,124 @@
 const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt)?$/;
+const ALIAS = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt)?$/;
 const CORS = {
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "POST, GET, OPTIONS",
-  "access-control-allow-headers": "content-type",
+  "access-control-allow-methods": "POST, PUT, GET, OPTIONS",
+  "access-control-allow-headers": "content-type, x-link-key",
   "access-control-max-age": "86400",
 };
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+    if (request.method === "OPTIONS")
+      // The extra header lets a studio on a LAN/tailnet host talk to a local
+      // `wrangler dev` under Chrome's private-network-access rules.
+      return new Response(null, { status: 204, headers: { ...CORS, "access-control-allow-private-network": "true" } });
     if (url.pathname === "/") {
       if (request.method === "POST") return create(request, env);
       return Response.redirect(env.STUDIO_URL, 302);
     }
-    const match = url.pathname.match(ID);
+    const alias = url.pathname.match(ALIAS);
+    if (alias && request.method === "PUT") return claim(request, env, alias[1]);
+    const match = url.pathname.match(ID) || alias;
     if (!match || (request.method !== "GET" && request.method !== "HEAD"))
       return new Response("Not found", { status: 404 });
-    const payload = await env.LINKS.get(match[1]);
+    // A name resolves through its alias record; a content id is immutable
+    // and may be cached, a name must always show the latest edit.
+    let payload = null,
+      cache = "public, max-age=86400";
+    if (alias) {
+      const record = await env.LINKS.get("alias:" + alias[1], "json");
+      if (record) {
+        payload = await env.LINKS.get(record.id);
+        cache = "no-store";
+      }
+    }
+    if (!payload && url.pathname.match(ID)) payload = await env.LINKS.get(url.pathname.match(ID)[1]);
     if (!payload) return page(notFound(env), 404);
     if (match[2]) {
       const text = await decode(payload);
       return new Response(text, {
-        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=86400", ...CORS },
+        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": cache, ...CORS },
       });
     }
-    return page(await viewer(payload, match[1], env), 200, { "cache-control": "public, max-age=86400" });
+    return page(await viewer(payload, match[1], env), 200, { "cache-control": cache });
   },
 };
 
-async function create(request, env) {
-  if (Number(request.headers.get("content-length")) > MAX_PAYLOAD) return json({ error: "Timeline too large" }, 413);
+async function readPayload(request) {
+  if (Number(request.headers.get("content-length")) > MAX_PAYLOAD) throw new HttpError(413, "Timeline too large");
   const payload = (await request.text()).trim();
-  if (payload.length > MAX_PAYLOAD) return json({ error: "Timeline too large" }, 413);
-  if (!PAYLOAD.test(payload)) return json({ error: "Expected a timeline link payload (z=… or t=…)" }, 400);
+  if (payload.length > MAX_PAYLOAD) throw new HttpError(413, "Timeline too large");
+  if (!PAYLOAD.test(payload)) throw new HttpError(400, "Expected a timeline link payload (z=… or t=…)");
   let text;
   try {
     text = await decode(payload);
   } catch (error) {
-    return json({ error: "Payload does not decode" }, 400);
+    throw new HttpError(400, "Payload does not decode");
   }
-  if (!text.trim()) return json({ error: "Empty timeline" }, 400);
+  if (!text.trim()) throw new HttpError(400, "Empty timeline");
+  return { payload, text };
+}
+
+// Content-addressed store: the same timeline always gets the same id. On
+// the (astronomically unlikely) prefix collision, take a longer prefix.
+async function store(env, payload, text) {
   const digest = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload))));
-  // Content-addressed: the same timeline always gets the same id. On the
-  // (astronomically unlikely) prefix collision, take a longer prefix.
-  let id;
   for (const length of [7, 10, 14, 22]) {
     const candidate = digest.slice(0, length);
     const existing = await env.LINKS.get(candidate);
     if (existing === null) {
       await env.LINKS.put(candidate, payload, { metadata: { created: new Date().toISOString(), title: title(text) } });
-      id = candidate;
-      break;
+      return candidate;
     }
-    if (existing === payload) {
-      id = candidate;
-      break;
-    }
+    if (existing === payload) return candidate;
   }
-  if (!id) return json({ error: "Could not allocate an id" }, 500);
-  const link = new URL("/" + id, request.url);
-  if (link.hostname !== "localhost") link.protocol = "https:";
-  return json({ id, url: link.href });
+  throw new HttpError(500, "Could not allocate an id");
+}
+
+async function claim(request, env, name) {
+  try {
+    const { payload, text } = await readPayload(request);
+    const record = await env.LINKS.get("alias:" + name, "json");
+    const key = request.headers.get("x-link-key") || "";
+    if (record && record.key !== key) throw new HttpError(403, `“${name}” is already taken`);
+    if (!record && (await env.LINKS.get(name)) !== null) throw new HttpError(409, `“${name}” is not available`);
+    const id = await store(env, payload, text);
+    const now = new Date().toISOString();
+    const next = record
+      ? { ...record, id, updated: now }
+      : { id, key: b64url(crypto.getRandomValues(new Uint8Array(18))), created: now, updated: now };
+    await env.LINKS.put("alias:" + name, JSON.stringify(next), { metadata: { title: title(text), updated: now } });
+    const link = new URL("/" + name, request.url);
+    if (link.hostname !== "localhost") link.protocol = "https:";
+    return json(record ? { url: link.href, id } : { url: link.href, id, key: next.key, created: true });
+  } catch (error) {
+    if (error instanceof HttpError) return json({ error: error.message }, error.status);
+    throw error;
+  }
+}
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function create(request, env) {
+  try {
+    const { payload, text } = await readPayload(request);
+    const id = await store(env, payload, text);
+    const link = new URL("/" + id, request.url);
+    if (link.hostname !== "localhost") link.protocol = "https:";
+    return json({ id, url: link.href });
+  } catch (error) {
+    if (error instanceof HttpError) return json({ error: error.message }, error.status);
+    throw error;
+  }
 }
 
 async function viewer(payload, id, env) {
