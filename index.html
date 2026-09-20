@@ -71,39 +71,87 @@
       .primary:hover {
         background: #205671;
       }
+      /* One slim toolbar: brand, then icon tools (theme, share, help, done). */
       .topbar {
         display: flex;
-        justify-content: space-between;
         align-items: center;
-        padding: 20px 25px;
+        gap: 8px;
+        padding: 7px 8px 7px 14px;
         background: white;
         border-bottom: 1px solid #dce3e6;
-        gap: 20px;
-      }
-      .brand {
-        display: flex;
-        gap: 12px;
-        align-items: center;
       }
       .brand-mark {
-        font-family: Georgia, serif;
-        font-size: 33px;
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
         color: #407e94;
       }
-      .brand h1 {
-        font-size: 20px;
-        letter-spacing: -0.5px;
+      .brand-mark svg,
+      .tool svg {
+        width: 22px;
+        height: 22px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .topbar h1 {
+        flex: 1;
+        min-width: 0;
         margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: -0.2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
-      .brand p {
-        font-size: 12px;
-        color: #70818d;
-        margin: 5px 0 0;
-      }
-      .actions {
+      .tools {
         display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px;
+        flex: none;
+      }
+      .tool {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: #24465b;
+        cursor: pointer;
+      }
+      .tool:hover,
+      .tool:focus-visible,
+      .menu[open] summary.tool {
+        background: #e9f1f5;
+      }
+      .tool[aria-pressed="true"] {
+        background: #143e55;
+        color: #fff;
+      }
+      .tool.done {
+        margin-left: 6px;
+        background: #143e55;
+        color: #fff;
+      }
+      .tool.done:hover {
+        background: #1d5675;
+      }
+      /* The native picker sits invisibly over the palette icon. */
+      .theme-tool select {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        cursor: pointer;
       }
       .workspace {
         height: 100vh;
@@ -180,12 +228,18 @@
       .menu summary::-webkit-details-marker {
         display: none;
       }
+      .menu summary.tool {
+        border: 0;
+        padding: 0;
+        display: grid;
+        border-radius: 999px;
+      }
       .menu summary.primary {
         background: #143e55;
         color: white;
         border-color: #143e55;
       }
-      .menu[open] summary {
+      .menu[open] summary:not(.tool) {
         border-bottom-left-radius: 0;
         border-bottom-right-radius: 0;
       }
@@ -194,15 +248,15 @@
       }
       .menu-list {
         position: absolute;
-        top: 100%;
-        left: 0;
+        top: calc(100% + 4px);
+        right: 0;
         z-index: 5;
         min-width: 170px;
         display: flex;
         flex-direction: column;
         background: #fff;
         border: 1px solid #cdd8dd;
-        border-radius: 0 8px 8px 8px;
+        border-radius: 10px;
         box-shadow: 0 10px 30px #0003;
         overflow: hidden;
       }
@@ -227,19 +281,8 @@
           border-right: 1px solid #dce3e6;
         }
       }
-      .pane-close {
-        flex: none;
-        border-radius: 999px;
-        padding: 9px 14px;
-        font-size: 12px;
-        white-space: nowrap;
-      }
       .topbar {
         flex: none;
-      }
-      .pane > .actions {
-        flex: none;
-        padding: 12px 20px 0;
       }
       .editor-panel {
         background: #fff;
@@ -248,24 +291,6 @@
         flex: 1;
         min-height: 0;
         overflow: auto;
-      }
-      .panel-heading {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 19px 20px 12px;
-      }
-      .eyebrow {
-        text-transform: uppercase;
-        letter-spacing: 1.7px;
-        font-size: 10px;
-        font-weight: bold;
-        color: #65818e;
-      }
-      .filename {
-        font-family: monospace;
-        font-size: 11px;
-        color: #758793;
       }
       textarea {
         display: block;
@@ -310,19 +335,6 @@
       }
       .pane.help .editor-panel {
         display: none;
-      }
-      .help-toggle {
-        width: 38px;
-        padding-left: 0;
-        padding-right: 0;
-        text-align: center;
-        border-radius: 999px;
-        margin-left: auto;
-      }
-      .help-toggle[aria-pressed="true"] {
-        background: #143e55;
-        color: #fff;
-        border-color: #143e55;
       }
       .support details {
         border-bottom: 1px solid #e4ebee;
@@ -441,34 +453,11 @@
       }
       @media (max-width: 760px) {
         .topbar {
-          padding: 14px;
-          align-items: flex-start;
-        }
-        .brand h1 {
-          font-size: 18px;
-        }
-        .brand p {
-          max-width: 160px;
-          line-height: 1.4;
-        }
-        .brand-mark {
-          display: none;
-        }
-        .actions {
-          max-width: none;
-          justify-content: flex-start;
-        }
-        .actions button,
-        .actions .menu summary {
-          padding: 8px;
-          font-size: 10px;
+          padding: 5px 6px 5px 12px;
         }
         .menu-list button {
           padding: 11px 14px;
           font-size: 12px;
-        }
-        .pane > .actions {
-          padding: 10px 14px 0;
         }
       }
 
@@ -534,13 +523,26 @@
       .brand-mark {
         color: #8fc7dd;
       }
-      .brand p,
-      .filename,
+      .tool {
+        color: #cfe0e8;
+      }
+      .tool:hover,
+      .tool:focus-visible,
+      .menu[open] summary.tool {
+        background: #243039;
+      }
+      .tool[aria-pressed="true"],
+      .tool.done {
+        background: #8fc7dd;
+        color: #0f1a22;
+      }
+      .tool.done:hover {
+        background: #b2ddeb;
+      }
       .local-note,
       details p {
         color: #a3b4bf;
       }
-      .eyebrow,
       .scale-note,
       .asset-feedback {
         color: #a6c2cf;
@@ -585,20 +587,16 @@
     <div id="pane-backdrop" class="pane-backdrop"></div>
     <aside id="pane" class="pane" aria-label="Timeline editor" inert>
     <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">◷</span>
-        <div>
-          <h1>Timeline Studio</h1>
-          <p>A little text. A beautifully timed day.</p>
-        </div>
-      </div>
-      <button id="pane-close" class="pane-close primary" title="Changes are saved as you type; this just shows the timeline">✓ Done</button>
-    </header>
-      <div class="actions">
-        <label class="visually-hidden" for="theme">Theme</label
-        ><select id="theme" title="Theme"></select
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>
+      <h1>Timeline Studio</h1>
+      <div class="tools">
+        <span class="tool theme-tool" title="Theme">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0 0 18h.8a2 2 0 0 0 1.4-3.4 1.5 1.5 0 0 1 1-2.6H17a4 4 0 0 0 4-4 8.6 8.6 0 0 0-9-8z"/><circle cx="7.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="10" cy="7.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="14.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/></svg>
+          <label class="visually-hidden" for="theme">Theme</label>
+          <select id="theme" aria-label="Theme"></select>
+        </span
         ><details class="menu" id="export-menu">
-          <summary class="primary">Export ▾</summary>
+          <summary class="tool" title="Share and export" aria-label="Share and export"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></summary>
           <div class="menu-list" role="menu">
             <button id="copy-link" role="menuitem" title="Copy a link that carries the whole timeline">Copy link</button
             ><button id="short-link" role="menuitem" title="Copy a short link; the timeline text is stored on the link server">Short link</button
@@ -607,13 +605,12 @@
             ><button id="save-studio" role="menuitem" title="This editor with your timeline inside, editable later">Studio (HTML)</button>
           </div>
         </details
-        ><button id="help-toggle" class="help-toggle" title="How to write a timeline, images" aria-pressed="false" aria-controls="help">?</button>
+        ><button id="help-toggle" class="tool" title="How to write a timeline, add images" aria-label="Help" aria-pressed="false" aria-controls="help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.6 2.3c-.8.4-1.2 1-1.2 1.8"/><circle cx="12" cy="16.8" r=".9" fill="currentColor" stroke="none"/></svg></button
+        ><button id="pane-close" class="tool done" title="Changes are saved as you type; this shows the timeline" aria-label="Done"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></button>
       </div>
+    </header>
       <section class="editor-panel">
-        <div class="panel-heading">
-          <label class="eyebrow" for="source">Your timeline</label
-          ><span class="filename">trip.timeline.txt</span>
-        </div>
+        <label class="visually-hidden" for="source">Your timeline</label>
         <textarea
           id="source"
           spellcheck="false"
@@ -1371,7 +1368,7 @@ footer: See you there ♡</pre>
         helpToggle.setAttribute("aria-pressed", String(open));
       }
       helpToggle.addEventListener("click", () => setHelp(helpPanel.hidden));
-      document.querySelector(".pane > .actions").addEventListener("click", (event) => {
+      document.querySelector(".topbar .tools").addEventListener("click", (event) => {
         if (!event.target.closest("button") || event.target.closest("#help-toggle")) return;
         exportMenu.open = false;
         closePane();
