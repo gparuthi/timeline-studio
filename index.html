@@ -190,6 +190,40 @@
         opacity: 1;
         pointer-events: auto;
       }
+      /* Confirmations show on the page itself, since Copy link and the
+         exports close the pane before their result would be readable. */
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: calc(max(14px, env(safe-area-inset-bottom)) + 58px);
+        z-index: 40;
+        max-width: min(92vw, 520px);
+        padding: 10px 16px;
+        border-radius: 999px;
+        background: #143e55;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.3;
+        text-align: center;
+        overflow-wrap: anywhere;
+        box-shadow: 0 6px 24px #0005;
+        transform: translateX(-50%);
+        animation: toast-in 0.18s ease-out;
+        pointer-events: none;
+      }
+      .toast.error {
+        background: #8b2f22;
+      }
+      .toast[hidden] {
+        display: none;
+      }
+      @keyframes toast-in {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 8px);
+        }
+      }
       .edit-toggle {
         position: fixed;
         right: 14px;
@@ -638,8 +672,10 @@
               for a literal pipe.
             </p>
             <p>
-              Icons: home, plane, depart, land, coffee, meal, ticket, pin, car,
-              road, palm. Colors: sky, sand, sage. Add <code>link: my-week</code>
+              Icons: home, plane, depart, land, coffee, meal, tree, bed, shop,
+              ticket, pin, car, road, palm. Leave the icon empty and it is
+              guessed from the words (lunch → meal, park → tree, flight lands →
+              land). Colors: sky, sand, sage. Add <code>link: my-week</code>
               and the short link <code>tl.gaup.uk/my-week</code> always shows
               your latest edit (the name is yours on this device).
             </p>
@@ -704,6 +740,7 @@ footer: See you there ♡</pre>
         ></iframe>
       </section>
     </main>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <input
       type="file"
       id="image-file"
@@ -720,7 +757,7 @@ footer: See you there ♡</pre>
         const art = {
           css: "\n  :root { --navy:#071d42; --blue:#165481; --sky:#d8effa; --sand:#fbecd0; --sage:#dce9df; --paper:#fcfbf7; }\n  * { box-sizing:border-box; }\n  body { margin:0; background:#eaf0f1; color:var(--navy); font-family:Arial,Helvetica,sans-serif; }\n  .sheet { position:relative; max-width:1120px; margin:24px auto; padding:30px 34px 0; overflow:hidden; background:var(--paper); box-shadow:0 12px 60px #16394a12; }\n  .masthead { position:relative; height:180px; text-align:center; isolation:isolate; }\n  h1 { position:relative; z-index:1; margin:0; padding-top:3px; font-family:Georgia,'Times New Roman',serif; font-size:clamp(32px,5.3vw,62px); line-height:1.15; letter-spacing:-2px; }\n  .date { margin:10px 0 0; font-size:23px; letter-spacing:5px; font-weight:600; }\n  .tagline { margin:12px 0 0; font-family:'Snell Roundhand','Brush Script MT',Georgia,serif; font-style:italic; font-size:29px; color:var(--blue); }\n  .flight-art { position:absolute; left:-35px; top:-5px; width:198px; height:155px; z-index:-1; opacity:.9; }\n  .la-art { position:absolute; right:-38px; top:25px; width:234px; height:157px; z-index:-1; }\n  .timeline { position:relative; height:1120px; --axis:180px; --cards:370px; --hour-height:132px; }\n  .axis { position:absolute; top:0; left:var(--axis); height:1056px; width:4px; border-radius:3px; background:var(--blue); transform:translateX(-50%); }\n  .hour { position:absolute; top:calc(var(--i) * var(--hour-height)); left:0; right:0; height:0; }\n  .hour::after { content:''; position:absolute; top:0; left:160px; right:0; border-top:1px dashed #c4dbe7; }\n  .hour-label { position:absolute; width:151px; padding:10px 6px; border-radius:17px; text-align:center; transform:translateY(-50%); background:var(--sky); font-size:29px; font-weight:800; line-height:1.1; letter-spacing:-1px; }\n  .hour:nth-of-type(even) .hour-label { background:var(--sand); }\n  .hour:last-child .hour-label { background:var(--sage); }\n  .hour-dot { position:absolute; left:var(--axis); height:15px; width:15px; border-radius:50%; transform:translate(-50%,-50%); background:var(--blue); z-index:2; }\n  .connectors { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }\n  .connector { fill:none; stroke:#a5cde0; stroke-width:1.5; stroke-dasharray:4 4; }\n  .event-dot { fill:var(--blue); }\n  .events { margin:0; padding:0; list-style:none; }\n  .event { position:absolute; left:calc(var(--axis) + 48px); right:0; display:grid; grid-template-columns:126px 1fr; align-items:center; gap:0; transform:translateY(-50%); }\n  .event time { justify-self:stretch; padding:8px 4px; border-radius:22px; font-size:23px; line-height:1.1; letter-spacing:-.8px; font-weight:800; text-align:center; background:var(--tint); white-space:nowrap; }\n  .event.sky { --tint:#d8effa; --icon-bg:#bfe5f9; --border:#c4e9fa; --wash:#eff8fb; }\n  .event.sand { --tint:#fbecd0; --icon-bg:#ffe0a1; --border:#f7e7c8; --wash:#fcf5e8; }\n  .event.sage { --tint:#dce9df; --icon-bg:#b7d0bb; --border:#cfe2d9; --wash:#edf3ee; }\n  .event-body { position:relative; min-height:62px; padding:7px 14px 7px 76px; border:1px solid var(--border); border-radius:16px; background:linear-gradient(100deg,var(--wash),color-mix(in srgb,var(--tint) 36%,var(--paper))); }\n  .event-icon { position:absolute; left:-1px; top:50%; transform:translateY(-50%); display:grid; place-items:center; width:62px; height:62px; border-radius:50%; background:var(--icon-bg); }\n  .event-icon svg { width:34px; height:34px; fill:var(--navy); }\n  h2 { margin:0; font-size:25px; line-height:1.08; font-weight:750; letter-spacing:-.8px; }\n  .event p { margin:3px 0 0; font-size:18px; line-height:1.15; color:var(--blue); }\n  .notes { display:grid; grid-template-columns:34% 1fr 115px; align-items:center; min-height:137px; padding:21px 24px; border-radius:24px; background:#e3f1f3; gap:25px; }\n  .notes-heading { display:flex; align-items:center; gap:17px; height:100%; border-right:1px solid #91c6d8; }\n  .notes-heading svg { width:65px; height:76px; flex:none; color:var(--blue); transform:rotate(-8deg); }\n  .notes h2 { font-family:Georgia,serif; font-size:32px; letter-spacing:-1px; }\n  .notes ul { list-style:none; margin:0; padding:0; font-size:18px; line-height:1.4; }\n  .notes li { display:flex; gap:13px; align-items:center; margin:6px 0; }\n  .check { display:grid; place-items:center; flex:none; width:25px; height:25px; border-radius:50%; background:#47745f; color:white; font-size:19px; }\n  .good-travels { text-align:center; font-family:'Snell Roundhand','Brush Script MT',Georgia,serif; font-size:30px; line-height:1.1; font-style:italic; transform:rotate(-10deg); }\n  footer { position:relative; display:flex; align-items:center; justify-content:center; gap:20px; height:90px; color:var(--blue); font-size:12px; letter-spacing:3px; text-align:center; }\n  footer::before,footer::after { content:''; width:66px; height:1px; background:#719bb6; }\n  .footer-hills { position:absolute; left:-34px; bottom:0; width:280px; height:65px; opacity:.7; pointer-events:none; }\n  .symbols { position:absolute; width:0; height:0; overflow:hidden; }\n  @media(max-width:850px) { .sheet{margin:0;padding:25px 22px 0;} .masthead{height:175px;} h1{font-size:48px;} .date{font-size:18px;letter-spacing:3px;} .flight-art{width:140px;top:55px;} .la-art{width:165px;top:65px;} .timeline{--axis:130px;} .hour-label{width:108px;font-size:25px;} .hour::after{left:112px;} .event{left:calc(var(--axis) + 25px);grid-template-columns:105px 1fr;} .event time{font-size:19px;} h2{font-size:22px;} .event p{font-size:16px;} .event-body{padding-left:65px;} .event-icon{width:56px;height:56px;} .notes{grid-template-columns:29% 1fr;gap:18px;padding:20px;} .notes-heading{gap:9px;} .notes-heading svg{width:43px;} .notes h2{font-size:25px;} .notes ul{font-size:16px;} .good-travels{display:none;} }\n  @media(max-width:580px) { .sheet{padding:27px 14px 0;} .masthead{height:162px;} h1{max-width:350px;margin:auto;font-size:38px;letter-spacing:-1.6px;line-height:1;} .date{margin-top:13px;font-size:12px;letter-spacing:2.1px;} .tagline{font-size:21px;margin-top:10px;} .flight-art{width:93px;top:53px;left:-40px;opacity:.6;} .la-art{width:97px;top:62px;right:-32px;opacity:.75;} .timeline{--axis:61px;--hour-height:146px;height:1236px;} .axis{height:1168px;width:3px;} .hour-label{width:49px;font-size:16px;letter-spacing:-.7px;padding:9px 0;border-radius:11px;} .hour::after{left:51px;} .hour-dot{width:10px;height:10px;} .event{left:calc(var(--axis) + 17px);grid-template-columns:1fr;} .event time{position:absolute;z-index:1;left:42px;top:5px;padding:0;background:none;font-size:13px;letter-spacing:0;text-align:left;} .event-body{min-height:76px;padding:23px 7px 8px 42px;border-radius:13px;} .event-icon{left:4px;width:33px;height:40px;background:transparent;} .event-icon svg{width:26px;height:26px;} h2{font-size:18px;letter-spacing:-.55px;line-height:1.05;} .event p{font-size:13px;line-height:1.15;margin-top:3px;} .notes{display:block;padding:17px;border-radius:19px;} .notes-heading{border:0;gap:10px;margin-bottom:8px;} .notes-heading svg{width:27px;height:33px;} .notes h2{font-size:25px;} .notes ul{font-size:13px;} .notes li{gap:9px;margin:8px 0;} .check{width:20px;height:20px;font-size:14px;} footer{height:78px;font-size:9px;letter-spacing:1.4px;gap:9px;} footer::before,footer::after{width:19px;} .footer-hills{width:135px;height:36px;left:-14px;} }\n  @media print { @page{size:A4 portrait;margin:8mm;} body{background:white;} .sheet{margin:0;box-shadow:none;width:1052px;max-width:none;zoom:.68;padding-top:20px;} .masthead{height:165px;} .timeline{height:1100px;} footer{height:65px;} }\n",
           symbols:
-            '<svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>\n <symbol id="home" viewBox="0 0 40 40"><path d="M3 19 20 4l17 15-4 4-3-3v16H23V25h-7v11H9V20l-3 3z"/></symbol>\n <symbol id="plane" viewBox="0 0 40 40"><path d="m36 5-2-1-3 1-9 9-14-3-4 4 12 6-7 8-6-1-2 3 8 4 4 4 3-2-1-6 8-8 6 13 4-4-3-14 8-9z"/></symbol>\n <symbol id="depart" viewBox="0 0 40 40"><path d="M3 33h34v3H3zM4 23l3 6 29-14c5-3 1-7-3-5l-10 5-12-6-5 3 11 7-8 4-5-4-4 2z"/></symbol>\n <symbol id="land" viewBox="0 0 40 40"><path d="M3 33h34v3H3zM4 10l2 13 28 6c5 1 6-5 1-7l-10-3-7-15-6-1 4 14-7-2-2-6z"/></symbol>\n <symbol id="coffee" viewBox="0 0 40 40"><path d="M6 15h25v5h2a6 6 0 0 1 0 12h-5a11 11 0 0 1-21-5zm25 8v6h2a3 3 0 0 0 0-6z"/><path d="M12 11c-5-4 4-4 0-9m8 9c-5-4 4-4 0-9m8 9c-5-4 4-4 0-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>\n <symbol id="ticket" viewBox="0 0 40 40"><g transform="rotate(-20 20 20)"><path d="M3 8h34v10a4 4 0 0 0 0 8v7H3v-7a4 4 0 0 0 0-8z"/><path d="M26 9v23M8 15h13M8 21h10" stroke="#ffe0a1" stroke-width="2" stroke-dasharray="3 2"/></g></symbol>\n <symbol id="pin" viewBox="0 0 40 40"><path d="M20 1A14 14 0 0 0 6 15c0 10 14 24 14 24s14-14 14-24A14 14 0 0 0 20 1m0 8a6 6 0 1 1 0 12 6 6 0 0 1 0-12"/></symbol>\n <symbol id="car" viewBox="0 0 40 40"><path d="m9 6-5 13-3 4v11h4v4h6v-5h18v5h6v-4h4V23l-4-4-5-13zm2 4h17l4 11H7zm-3 15a3 3 0 1 1 0 6 3 3 0 0 1 0-6m24 0a3 3 0 1 1 0 6 3 3 0 0 1 0-6"/></symbol>\n <symbol id="road" viewBox="0 0 40 40"><path d="M13 2h14l12 36H1z"/><path d="M20 5v7m0 5v7m0 6v8" fill="none" stroke="#bfe5f9" stroke-width="4"/></symbol>\n <symbol id="meal" viewBox="0 0 40 40"><path d="M8 3h2.5v9h2V3H15v9h2V3h2.5v10a5 5 0 0 1-3.5 4.8V37h-3.5V17.8A5 5 0 0 1 8 13z"/><path d="M26 3c6 3 8 11 8 18 0 2-1 4-3 4h-2v12h-3z"/></symbol>\n <symbol id="palm" viewBox="0 0 40 40"><path d="M18 38h6l-2-24c7-1 10 4 12 10 2-8-2-13-10-14 6-4 11 0 15 3-2-8-10-10-16-6 1-6-4-8-8-7 3 2 4 5 4 8C13 3 5 4 1 10c7-2 11-1 15 1C7 12 3 18 5 25c3-6 6-10 13-11z"/></symbol>\n</defs></svg>',
+            '<svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>\n <symbol id="home" viewBox="0 0 40 40"><path d="M3 19 20 4l17 15-4 4-3-3v16H23V25h-7v11H9V20l-3 3z"/></symbol>\n <symbol id="plane" viewBox="0 0 40 40"><path d="m36 5-2-1-3 1-9 9-14-3-4 4 12 6-7 8-6-1-2 3 8 4 4 4 3-2-1-6 8-8 6 13 4-4-3-14 8-9z"/></symbol>\n <symbol id="depart" viewBox="0 0 40 40"><path d="M3 33h34v3H3zM4 23l3 6 29-14c5-3 1-7-3-5l-10 5-12-6-5 3 11 7-8 4-5-4-4 2z"/></symbol>\n <symbol id="land" viewBox="0 0 40 40"><path d="M3 33h34v3H3zM4 10l2 13 28 6c5 1 6-5 1-7l-10-3-7-15-6-1 4 14-7-2-2-6z"/></symbol>\n <symbol id="coffee" viewBox="0 0 40 40"><path d="M6 15h25v5h2a6 6 0 0 1 0 12h-5a11 11 0 0 1-21-5zm25 8v6h2a3 3 0 0 0 0-6z"/><path d="M12 11c-5-4 4-4 0-9m8 9c-5-4 4-4 0-9m8 9c-5-4 4-4 0-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>\n <symbol id="ticket" viewBox="0 0 40 40"><g transform="rotate(-20 20 20)"><path d="M3 8h34v10a4 4 0 0 0 0 8v7H3v-7a4 4 0 0 0 0-8z"/><path d="M26 9v23M8 15h13M8 21h10" stroke="#ffe0a1" stroke-width="2" stroke-dasharray="3 2"/></g></symbol>\n <symbol id="pin" viewBox="0 0 40 40"><path d="M20 1A14 14 0 0 0 6 15c0 10 14 24 14 24s14-14 14-24A14 14 0 0 0 20 1m0 8a6 6 0 1 1 0 12 6 6 0 0 1 0-12"/></symbol>\n <symbol id="car" viewBox="0 0 40 40"><path d="m9 6-5 13-3 4v11h4v4h6v-5h18v5h6v-4h4V23l-4-4-5-13zm2 4h17l4 11H7zm-3 15a3 3 0 1 1 0 6 3 3 0 0 1 0-6m24 0a3 3 0 1 1 0 6 3 3 0 0 1 0-6"/></symbol>\n <symbol id="road" viewBox="0 0 40 40"><path d="M13 2h14l12 36H1z"/><path d="M20 5v7m0 5v7m0 6v8" fill="none" stroke="#bfe5f9" stroke-width="4"/></symbol>\n <symbol id="meal" viewBox="0 0 40 40"><path d="M8 3h2.5v9h2V3H15v9h2V3h2.5v10a5 5 0 0 1-3.5 4.8V37h-3.5V17.8A5 5 0 0 1 8 13z"/><path d="M26 3c6 3 8 11 8 18 0 2-1 4-3 4h-2v12h-3z"/></symbol>\n <symbol id="tree" viewBox="0 0 40 40"><path d="M20 2 8 18h6L6 30h11v8h6v-8h11L26 18h6z"/></symbol>\n <symbol id="bed" viewBox="0 0 40 40"><path d="M3 31V11h4v11h13v-8h11a6 6 0 0 1 6 6v11h-4v-4H7v4z"/><circle cx="12" cy="17" r="3.5"/></symbol>\n <symbol id="shop" viewBox="0 0 40 40"><path d="M8 13h24l2 24H6zm8 0v-3a4 4 0 0 1 8 0v3h3v-3a7 7 0 0 0-14 0v3z"/></symbol>\n <symbol id="palm" viewBox="0 0 40 40"><path d="M18 38h6l-2-24c7-1 10 4 12 10 2-8-2-13-10-14 6-4 11 0 15 3-2-8-10-10-16-6 1-6-4-8-8-7 3 2 4 5 4 8C13 3 5 4 1 10c7-2 11-1 15 1C7 12 3 18 5 25c3-6 6-10 13-11z"/></symbol>\n</defs></svg>',
           flight:
             '<svg class="flight-art" viewBox="0 0 210 155" aria-hidden="true"><path d="M-9 109C41 145 93 119 137 68" fill="none" stroke="#175181" stroke-width="3" stroke-linecap="round" stroke-dasharray="7 10"/><path d="M29 78c-7-15 13-28 24-18 6-33 52-27 55 3 21-4 26 21 8 23H39zM113 143c-9-20 15-29 28-21 1-34 52-40 59-4 23-5 25 25 5 29z" fill="#e5f3f9"/><use href="#plane" x="132" y="5" width="68" height="68" fill="#113e62" transform="rotate(15 166 39)"/></svg>',
           city: '<svg class="la-art" viewBox="0 0 250 170" aria-hidden="true"><circle cx="92" cy="43" r="37" fill="#ffe0a4"/><path d="M7 153 32 137 49 144 60 125 75 137 86 115 104 135 124 124 141 142 155 136 172 150z" fill="#d4e8f0"/><path d="M68 149v-45h14v45m10 0V85h15v64m8 0V65h15v84m11 0V97h12v52m12 0V79h12v70m12 0v-41h13v41" fill="#8ebbd2"/><path d="M0 170q122-79 250-17v17z" fill="#fbedcf"/><g fill="#104567"><use href="#palm" x="196" y="14" width="52" height="137"/><use href="#palm" x="164" y="82" width="24" height="76"/><use href="#palm" x="17" y="65" width="28" height="96"/></g><text x="94" y="160" fill="#12375b" font-family="Georgia,serif" font-size="21" font-style="italic" transform="rotate(-7 94 160)">Los Angeles \u2661</text></svg>',
@@ -747,6 +784,9 @@ footer: See you there ♡</pre>
           "land",
           "coffee",
           "meal",
+          "tree",
+          "bed",
+          "shop",
           "ticket",
           "pin",
           "car",
@@ -831,6 +871,33 @@ footer: See you there ♡</pre>
             );
           return url;
         }
+        // When an event names no icon, guess one from its words. Explicit icons
+        // always win; the order here resolves overlaps ("coffee and pastries" is
+        // coffee, "flight lands" is land, "sunset drive" is car).
+        const iconRules = [
+          ["land", /\b(lands?|landing|arrives?|arrival)\b/],
+          ["depart", /\b(departs?|departure|take[- ]?off|boarding|boards?)\b/],
+          ["plane", /\b(flights?|fly|flying|airport|airline)\b/],
+          ["coffee", /\b(coffee|cafe|café|latte|espresso|cappuccino|tea|bakery|pastr(?:y|ies)|boba|matcha|donuts?)\b/],
+          ["meal", /\b(breakfast|brunch|lunch|dinner|supper|meal|food|eat|eating|restaurant|tacos?|pizza|burgers?|sushi|ramen|bbq|barbecue|snacks?|dessert|ice cream|brewery|drinks)\b/],
+          ["bed", /\b(hotel|motel|hostel|airbnb|check[- ]?in|check[- ]?out|sleep|nap|bed|bedtime)\b/],
+          ["home", /\b(home|house)\b/],
+          ["shop", /\b(shop|shopping|market|mall|store|grocer(?:y|ies)|costco|ikea|errands?)\b/],
+          ["ticket", /\b(museum|observatory|planetarium|galler(?:y|ies)|concert|show|movie|cinema|theat(?:er|re)|tour|exhibits?|exhibition|zoo|aquarium|game|match|tickets?)\b/],
+          ["tree", /\b(park|playground|gardens?|hike|hiking|trail|picnic|botanical|reservoir|lake|forest|woods|camp(?:ing|site)?)\b/],
+          ["palm", /\b(beach|boardwalk|pier|surf(?:ing)?|pool|swim(?:ming)?|ocean|coast)\b/],
+          ["road", /\b(road ?trip|highway|freeway|scenic|mulholland)\b/],
+          ["car", /\b(drive|driving|car|rental|uber|lyft|taxi|parking|gas|pick ?up|drop ?off)\b/],
+        ];
+        function guessIcon(title, detail) {
+          for (const text of [title, detail]) {
+            const words = String(text || "").toLowerCase();
+            if (!words) continue;
+            for (const [icon, pattern] of iconRules) if (pattern.test(words)) return icon;
+          }
+          return "pin";
+        }
+
         function parse(text) {
           const model = {
             title: "My Timeline",
@@ -866,7 +933,7 @@ footer: See you there ♡</pre>
                 throw new Error(
                   `Line ${line}: at most five fields; write \\| for a literal pipe.`,
                 );
-              const [clock, title, detail = "", icon = "pin", color = "sky"] = fields;
+              const [clock, title, detail = "", icon = "", color = "sky"] = fields;
               if (!title) throw new Error(`Line ${line}: add an event title.`);
               if (!["sky", "sand", "sage"].includes(color || "sky"))
                 throw new Error(`Line ${line}: color must be sky, sand, or sage.`);
@@ -876,7 +943,7 @@ footer: See you there ♡</pre>
                 end,
                 title,
                 detail,
-                icon: icon || "pin",
+                icon: icon || guessIcon(title, detail),
                 color: color || "sky",
                 line,
               });
@@ -1328,6 +1395,16 @@ footer: See you there ♡</pre>
       // share/export action closes the pane so the result is what you see.
       const pane = document.querySelector("#pane"),
         editToggle = document.querySelector("#edit-toggle");
+      const toastBox = document.querySelector("#toast");
+      function toast(message, kind = "") {
+        toastBox.textContent = message;
+        toastBox.className = "toast" + (kind ? " " + kind : "");
+        toastBox.hidden = false;
+        clearTimeout(toast.timer);
+        toast.timer = setTimeout(() => {
+          toastBox.hidden = true;
+        }, 2800);
+      }
       function openPane() {
         document.body.classList.add("pane-open");
         pane.inert = false;
@@ -1706,9 +1783,12 @@ footer: See you there ♡</pre>
         const label = fallback
           ? `✓ Long link copied (link server: ${fallback})`
           : `✓ Link copied · ${link}`;
-        if (copied) status.textContent = label;
-        else {
+        if (copied) {
+          status.textContent = label;
+          toast(fallback ? "Long link copied (link server unreachable)" : `Link copied · ${link.replace(/^https?:\/\//, "")}`);
+        } else {
           status.textContent = fallback ? "Could not copy; the long link is in the dialog." : `Link: ${link}`;
+          toast("Could not copy automatically", "error");
           window.prompt("Copy this link:", link);
         }
       });
@@ -1913,6 +1993,7 @@ footer: See you there ♡</pre>
             try {
               await navigator.share({ files: [file], title: latestTitle });
               status.textContent = "✓ Image shared";
+              toast("Image shared");
               return;
             } catch (error) {
               if (error.name === "AbortError") {
@@ -1923,6 +2004,7 @@ footer: See you there ♡</pre>
           }
           download(blob, file.name, "image/png");
           status.textContent = `✓ Image downloaded (${Math.round(blob.size / 1024)} KB)`;
+          toast(`Image saved · ${file.name}`);
         } catch (error) {
           status.className = "status error";
           status.textContent = error.message;
@@ -1935,6 +2017,7 @@ footer: See you there ♡</pre>
         if (!latestHTML) return;
         const html = latestHTML;
         download(await bakeLayout(html), filename() + ".html", "text/html");
+        toast(`Timeline saved · ${filename()}.html`);
       });
       document
         .querySelector("#add-image")

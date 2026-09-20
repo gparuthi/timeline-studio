@@ -66,7 +66,7 @@ Add `link: la-week` to the text (or use **Export → Custom link…**, which ask
 
 If the `date:` line is today (parsed from `2026-06-06`, `Jun 6, 2026`, `6 Jun 2026`, or `6/6/2026`), the rendered timeline goes live: past cards fade, a slowly blinking marker sits at the current minute on the axis, the next card shows "in 25 min", and the page opens scrolled to now. Refreshes every 30 seconds and whenever the tab becomes visible. On any other day nothing changes.
 
-Built-in icons: `home`, `plane`, `depart`, `land`, `coffee`, `meal`, `ticket`, `pin`, `car`, `road`, `palm`. Colors: `sky`, `sand`, `sage`.
+Built-in icons: `home`, `plane`, `depart`, `land`, `coffee`, `meal`, `tree`, `bed`, `shop`, `ticket`, `pin`, `car`, `road`, `palm`. Leave the icon field empty and one is guessed from the title or description (breakfast/lunch/dinner → `meal`, coffee/bakery → `coffee`, park/playground/hike → `tree`, hotel/check in → `bed`, market/shopping → `shop`, museum/observatory/show → `ticket`, beach/pier → `palm`, flight → `plane`, departs → `depart`, lands → `land`, drive/car → `car`, otherwise `pin`); an explicit icon always wins. Colors: `sky`, `sand`, `sage`.
 
 The optional range has whole-hour boundaries within one calendar day. Without it, the renderer fits the range to the events. Every hour occupies the same vertical distance. Dots mark exact times, while cards shift to avoid overlaps. Dense timelines grow vertically to keep every card visible.
 
