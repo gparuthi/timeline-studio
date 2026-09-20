@@ -125,7 +125,7 @@ html,body{margin:0;background:#0f1418;color:#dfebf2;font-family:system-ui,-apple
     window.addEventListener("hashchange", () => location.reload());
     document.body.insertAdjacentHTML(
       "beforeend",
-      '<p style="margin:0;padding:18px 0 28px;text-align:center;font:12px system-ui,sans-serif;letter-spacing:1px"><a href="' + studio + "#" + payload + '" style="color:inherit;opacity:.55;text-decoration:none">Edit this timeline</a></p>'
+      '<a href="' + studio + "#" + payload + '" style="position:fixed;right:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:28;padding:9px 14px;border-radius:999px;background:#143e55;color:#fff;font:600 13px system-ui,-apple-system,sans-serif;text-decoration:none;opacity:.85;box-shadow:0 4px 18px #0004">✎ Edit</a>'
     );
   } catch (error) {
     message.innerHTML = "";

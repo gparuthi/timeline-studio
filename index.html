@@ -298,11 +298,31 @@
         background: #fff0ed;
         color: #9b3824;
       }
+      /* Help lives behind the "?" button and takes the editor's place. */
       .support {
-        max-height: 36vh;
+        flex: 1;
+        min-height: 0;
         overflow: auto;
         padding: 0 20px 14px;
-        border-top: 1px solid #e4ebee;
+      }
+      .support[hidden] {
+        display: none;
+      }
+      .pane.help .editor-panel {
+        display: none;
+      }
+      .help-toggle {
+        width: 38px;
+        padding-left: 0;
+        padding-right: 0;
+        text-align: center;
+        border-radius: 999px;
+        margin-left: auto;
+      }
+      .help-toggle[aria-pressed="true"] {
+        background: #143e55;
+        color: #fff;
+        border-color: #143e55;
       }
       .support details {
         border-bottom: 1px solid #e4ebee;
@@ -430,8 +450,8 @@
           display: none;
         }
         .actions {
-          max-width: 200px;
-          justify-content: flex-end;
+          max-width: none;
+          justify-content: flex-start;
         }
         .actions button,
         .actions .menu summary {
@@ -581,7 +601,8 @@
             ><button id="export" role="menuitem" title="A standalone timeline page">Timeline (HTML)</button
             ><button id="save-studio" role="menuitem" title="This editor with your timeline inside, editable later">Studio (HTML)</button>
           </div>
-        </details>
+        </details
+        ><button id="help-toggle" class="help-toggle" title="How to write a timeline, images" aria-pressed="false" aria-controls="help">?</button>
       </div>
       <section class="editor-panel">
         <div class="panel-heading">
@@ -595,7 +616,8 @@
           aria-describedby="status"
         ></textarea>
         <div id="status" class="status" role="status" aria-live="polite"></div>
-        <div class="support">
+      </section>
+      <section class="support" id="help" aria-label="Help" hidden>
           <details>
             <summary>How to write a timeline</summary>
             <p>
@@ -667,7 +689,6 @@ footer: See you there ♡</pre>
             Save studio keeps the editor, your timeline, and uploaded images
             together in one HTML file.
           </p>
-        </div>
       </section>
     </aside>
     <main class="workspace">
@@ -1313,8 +1334,16 @@ footer: See you there ♡</pre>
         if (event.key === "Escape" && document.body.classList.contains("pane-open")) closePane();
       });
       const exportMenu = document.querySelector("#export-menu");
+      const helpToggle = document.querySelector("#help-toggle"),
+        helpPanel = document.querySelector("#help");
+      function setHelp(open) {
+        helpPanel.hidden = !open;
+        document.querySelector("#pane").classList.toggle("help", open);
+        helpToggle.setAttribute("aria-pressed", String(open));
+      }
+      helpToggle.addEventListener("click", () => setHelp(helpPanel.hidden));
       document.querySelector(".pane > .actions").addEventListener("click", (event) => {
-        if (!event.target.closest("button")) return;
+        if (!event.target.closest("button") || event.target.closest("#help-toggle")) return;
         exportMenu.open = false;
         closePane();
       });
@@ -1420,6 +1449,7 @@ footer: See you there ♡</pre>
       });
       // Open the editor on one source line (1-based), selected and in view.
       function editLine(line) {
+        setHelp(false);
         const rows = editor.value.split("\n");
         if (!line || line > rows.length) return;
         const start = rows.slice(0, line - 1).reduce((n, row) => n + row.length + 1, 0),
@@ -1462,6 +1492,9 @@ footer: See you there ♡</pre>
         copy.querySelector("body").classList.remove("pane-open");
         copy.querySelector("#pane").setAttribute("inert", "");
         copy.querySelector("#edit-toggle").setAttribute("aria-expanded", "false");
+        copy.querySelector("#help").setAttribute("hidden", "");
+        copy.querySelector("#help-toggle").setAttribute("aria-pressed", "false");
+        copy.querySelector("#pane").classList.remove("help");
         return "<!doctype html>\n" + copy.outerHTML;
       }
       function filename() {
