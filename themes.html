@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Timeline themes</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; background: #0f1418; color: #dfebf2; font-family: system-ui, -apple-system, sans-serif; }
+      header { padding: 28px 20px 8px; max-width: 1400px; margin: auto; }
+      h1 { margin: 0 0 6px; font-size: 22px; }
+      header p, .card p { margin: 0; color: #a3b4bf; font-size: 14px; line-height: 1.5; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; padding: 16px 20px 40px; max-width: 1400px; margin: auto; }
+      .card { background: #151b20; border: 1px solid #2b353d; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+      .card iframe { width: 100%; height: 520px; border: 0; background: #fff; }
+      .meta { padding: 14px 16px 16px; display: grid; gap: 8px; }
+      .meta h2 { margin: 0; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
+      .meta a { color: #8fc7dd; font-size: 13px; text-decoration: none; border: 1px solid #3b4b57; border-radius: 8px; padding: 6px 10px; }
+      .ideas { padding: 0 20px 48px; max-width: 1400px; margin: auto; }
+      .ideas li { color: #a3b4bf; font-size: 14px; line-height: 1.6; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Timeline themes</h1>
+      <p>The same sample day in every built-in theme, live. Set it with <code>theme:</code> in the text or the studio's picker; every export and share link carries it.</p>
+    </header>
+    <div class="grid" id="grid"></div>
+    <section class="ideas">
+      <h1>Not built yet</h1>
+      <ul>
+        <li><strong>Blueprint</strong>: cobalt paper, white hairlines, drafting-grid background, stencil title. Good for build days and move days.</li>
+        <li><strong>Newspaper</strong>: columns, small caps, a rule under the masthead, black-and-white with one red "now" mark.</li>
+        <li><strong>Candy</strong>: rounded everything, saturated pastels, big emoji-style icons. Kids' days, birthdays.</li>
+        <li><strong>Ticket</strong>: perforated card edges, barcode footer, boarding-pass typography. Trips, events, concerts.</li>
+      </ul>
+    </section>
+    <script src="timeline-renderer.js"></script>
+    <script>
+      const notes = {
+        travel: "The original: serif masthead, pastel sky/sand/sage, plane and skyline art. Warm and printable.",
+        minimal: "White paper, one ink, no color pills, hairline axis. The content does all the work; prints cleanly in black and white.",
+        retro: "Seventies travel poster: cream, burnt orange, mustard, chunky type, offset shadows and a sunburst behind the title.",
+        future: "Dark glass and neon: gradient axis with glow, monospace hour marks, cyan/magenta/mint cards. The now marker glows.",
+        code: "A terminal: monospace everywhere, `#` title with a blinking caret, `//` comments, `>` prompts, diff-style left borders in syntax colors.",
+      };
+      (async () => {
+        // The sample lives in the studio page (mdserver does not publish .txt).
+        const studio = await (await fetch("index.html")).text(),
+          text = JSON.parse(studio.match(/<script type="application\/json" id="studio-source">([\s\S]*?)<\/script>/)[1]).replace(
+            "{{today}}",
+            new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" }),
+          );
+        const grid = document.querySelector("#grid");
+        for (const theme of TimelineText.themes) {
+          const themed = text.replace(/^theme:.*$/m, `theme: ${theme}`);
+          const hash = await TimelineText.encodeLink(themed);
+          const card = document.createElement("article");
+          card.className = "card";
+          card.innerHTML = `<iframe sandbox="allow-scripts" title="${theme} theme"></iframe><div class="meta"><h2><span>${theme[0].toUpperCase() + theme.slice(1)}</span><a href="./#${hash}">Use in studio</a></h2><p></p></div>`;
+          card.querySelector("iframe").srcdoc = TimelineText.render(TimelineText.parse(themed));
+          card.querySelector("p").textContent = notes[theme];
+          grid.append(card);
+        }
+      })();
+    </script>
+  </body>
+</html>
