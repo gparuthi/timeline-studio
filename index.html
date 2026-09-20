@@ -598,8 +598,7 @@
         ><details class="menu" id="export-menu">
           <summary class="tool" title="Share and export" aria-label="Share and export"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></summary>
           <div class="menu-list" role="menu">
-            <button id="copy-link" role="menuitem" title="Copy a link that carries the whole timeline">Copy link</button
-            ><button id="short-link" role="menuitem" title="Copy a short link; the timeline text is stored on the link server">Short link</button
+            <button id="copy-link" role="menuitem" title="Copy a short link to this timeline (the long link is in the address bar)">Copy link</button
             ><button id="custom-link" role="menuitem" title="A link with a name you choose that always shows your latest edit">Custom link…</button
             ><button id="share-image" role="menuitem" title="Render a PNG to share in a message">Image (PNG)</button
             ><button id="export" role="menuitem" title="A standalone timeline page">Timeline (HTML)</button
@@ -1437,7 +1436,6 @@ footer: See you there ♡</pre>
         latestLink = hash ? new URL("view.html#" + hash, location.href).href : "";
         syncUrl(hash);
         document.querySelector("#copy-link").disabled = !latestLink;
-        document.querySelector("#short-link").disabled = !latestLink;
       }
       // Named links: "link: la-week" in the text makes tl.gaup.uk/la-week
       // follow every edit. The Worker hands out a key on the first claim; it
@@ -1650,22 +1648,6 @@ footer: See you there ♡</pre>
         scratch.remove();
         return ok;
       }
-      document.querySelector("#copy-link").addEventListener("click", async () => {
-        if (!latestLink) return;
-        // navigator.clipboard exists only on secure origins (https or
-        // localhost); on plain http (the tailnet host) fall back to the
-        // selection-based copy, which still works inside a click.
-        const copied = await (navigator.clipboard
-          ? navigator.clipboard.writeText(latestLink).then(() => true, () => false)
-          : Promise.resolve(copyViaSelection(latestLink)));
-        status.className = "status";
-        if (copied)
-          status.textContent = `✓ Link copied · ${latestLink.length.toLocaleString()} characters${latestLink.length > 30000 ? " · long links with embedded images may not open everywhere" : ""}`;
-        else {
-          status.textContent = "Could not copy automatically; the link is in the dialog.";
-          window.prompt("Copy this link:", latestLink);
-        }
-      });
       // Short links: the same compressed payload the long link carries, stored
       // under a short id by the Worker in worker/ (served at tl.gaup.uk).
       // Unlike the long link, this sends the timeline text off the device.
@@ -1676,11 +1658,15 @@ footer: See you there ♡</pre>
       } catch (error) {
         /* storage may be blocked */
       }
-      document.querySelector("#short-link").addEventListener("click", async () => {
+      // Copy link copies a short link: the named one when the text has a
+      // "link:" line, else a content link. If the link server cannot be
+      // reached the long fragment link is copied instead, so the button
+      // always yields something that opens.
+      document.querySelector("#copy-link").addEventListener("click", async () => {
         if (!latestLink) return;
         const payload = latestLink.slice(latestLink.indexOf("#") + 1);
         status.className = "status";
-        status.textContent = "Making short link…";
+        status.textContent = "Making link…";
         const plainLink = () =>
           fetch(SHORT_LINK_API, {
             method: "POST",
@@ -1693,7 +1679,11 @@ footer: See you there ♡</pre>
           });
         // A named link that cannot be published from here (name taken, no
         // key on this device) degrades to a plain content link.
-        const request = namedLink ? publishNamed().then((url) => url || plainLink()) : plainLink();
+        let fallback = "";
+        const request = (namedLink ? publishNamed().then((url) => url || plainLink()) : plainLink()).catch((error) => {
+          fallback = error.message;
+          return latestLink;
+        });
         let copied = false;
         // Safari only honours clipboard writes made during the click, so hand
         // it the pending request as a ClipboardItem instead of awaiting first.
@@ -1707,23 +1697,19 @@ footer: See you there ♡</pre>
             copied = false;
           }
         }
-        let short;
-        try {
-          short = await request;
-        } catch (error) {
-          status.className = "status error";
-          status.textContent = `Short link failed: ${error.message}`;
-          return;
-        }
+        const link = await request;
         if (!copied)
           copied = navigator.clipboard
-            ? await navigator.clipboard.writeText(short).then(() => true, () => false)
-            : copyViaSelection(short);
+            ? await navigator.clipboard.writeText(link).then(() => true, () => false)
+            : copyViaSelection(link);
         status.className = "status";
-        if (copied) status.textContent = `✓ Short link copied · ${short}`;
+        const label = fallback
+          ? `✓ Long link copied (link server: ${fallback})`
+          : `✓ Link copied · ${link}`;
+        if (copied) status.textContent = label;
         else {
-          status.textContent = `Short link: ${short}`;
-          window.prompt("Copy this link:", short);
+          status.textContent = fallback ? "Could not copy; the long link is in the dialog." : `Link: ${link}`;
+          window.prompt("Copy this link:", link);
         }
       });
       document.querySelector("#custom-link").addEventListener("click", () => {
@@ -1752,7 +1738,7 @@ footer: See you there ♡</pre>
         dirty = true;
         clearTimeout(pending);
         update();
-        document.querySelector("#short-link").click();
+        document.querySelector("#copy-link").click();
       });
       editor.addEventListener("input", () => {
         dirty = true;
