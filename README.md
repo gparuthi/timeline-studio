@@ -107,6 +107,8 @@ This is a small custom format inspired by Mermaid's text-to-diagram workflow; it
 
 The studio ships app-mode metadata (`manifest.webmanifest`, `apple-touch-icon.png`, `maximum-scale=1`, 16px controls on touch screens) so it can be added to the home screen and does not zoom when the editor is focused. The preview relays its scroll-to-now to the studio because iOS sizes iframes to their content.
 
+
+When the keyboard is up, the editor pane is sized to the visible part of the screen (`visualViewport`), so the text you are typing stays above the keys and the caret line is scrolled into view; Android gets the same via `interactive-widget=resizes-content`.
 ## Local preview
 
 Open `index.html` directly, or run `python3 -m http.server 8766` from this directory. The standalone studio requires no build or installation.

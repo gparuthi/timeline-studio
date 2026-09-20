@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -413,6 +413,11 @@
         }
         .pane {
           padding-top: env(safe-area-inset-top);
+        }
+        /* With the keyboard up the pane is sized to the visual viewport (see
+           fitPane); let the editor shrink to what is left above the keys. */
+        textarea {
+          min-height: 120px;
         }
         .edit-toggle {
           font-size: 14px;
@@ -1321,11 +1326,35 @@ footer: See you there ♡</pre>
         document.body.classList.add("pane-open");
         pane.inert = false;
         editToggle.setAttribute("aria-expanded", "true");
+        fitPane();
       }
       function closePane() {
         document.body.classList.remove("pane-open");
         pane.inert = true;
         editToggle.setAttribute("aria-expanded", "false");
+        fitPane();
+      }
+      // On iOS the software keyboard shrinks the visual viewport but not the
+      // layout viewport a fixed pane is sized against, so the bottom of the
+      // editor ends up behind the keys. While the pane is open, size it to
+      // the visual viewport instead; the editor (flex: 1) shrinks with it and
+      // scrolls its own caret into view. Chrome Android is handled by the
+      // interactive-widget=resizes-content viewport hint.
+      function fitPane(viewport = window.visualViewport) {
+        const open = document.body.classList.contains("pane-open");
+        const shrunk = viewport && open && window.innerHeight - viewport.height > 80;
+        pane.style.height = shrunk ? `${Math.round(viewport.height)}px` : "";
+        pane.style.top = shrunk ? `${Math.round(viewport.offsetTop)}px` : "";
+        // A textarea does not re-scroll its caret when it shrinks; do it here.
+        if (shrunk && document.activeElement === editor) {
+          const line = editor.value.slice(0, editor.selectionStart).split("\n").length,
+            lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 22;
+          editor.scrollTop = Math.max(0, (line - 1) * lineHeight - editor.clientHeight / 2);
+        }
+      }
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", () => fitPane());
+        window.visualViewport.addEventListener("scroll", () => fitPane());
       }
       editToggle.addEventListener("click", openPane);
       document.querySelector("#pane-close").addEventListener("click", closePane);
