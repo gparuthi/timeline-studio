@@ -161,6 +161,60 @@
       .pane-open .edit-toggle {
         display: none;
       }
+      .menu {
+        position: relative;
+      }
+      .menu summary {
+        list-style: none;
+        display: inline-block;
+        border: 1px solid #cdd8dd;
+        border-radius: 8px;
+        background: #fff;
+        color: #24465b;
+        padding: 10px 13px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 12px;
+        user-select: none;
+      }
+      .menu summary::-webkit-details-marker {
+        display: none;
+      }
+      .menu summary.primary {
+        background: #143e55;
+        color: white;
+        border-color: #143e55;
+      }
+      .menu[open] summary {
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+      }
+      .menu:not([open]) .menu-list {
+        display: none;
+      }
+      .menu-list {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        z-index: 5;
+        min-width: 170px;
+        display: flex;
+        flex-direction: column;
+        background: #fff;
+        border: 1px solid #cdd8dd;
+        border-radius: 0 8px 8px 8px;
+        box-shadow: 0 10px 30px #0003;
+        overflow: hidden;
+      }
+      .menu-list button {
+        border: 0;
+        border-radius: 0;
+        text-align: left;
+        padding: 11px 14px;
+      }
+      .menu-list button + button {
+        border-top: 1px solid #edf1f3;
+      }
       .pane-close {
         flex: none;
         width: 34px;
@@ -369,9 +423,14 @@
           max-width: 200px;
           justify-content: flex-end;
         }
-        .actions button {
+        .actions button,
+        .actions .menu summary {
           padding: 8px;
           font-size: 10px;
+        }
+        .menu-list button {
+          padding: 11px 14px;
+          font-size: 12px;
         }
         .pane > .actions {
           padding: 10px 14px 0;
@@ -395,6 +454,23 @@
       }
       .edit-toggle {
         background: #151b20cc;
+      }
+      .menu summary {
+        background: #202a32;
+        color: #dfebf2;
+        border-color: #3b4b57;
+      }
+      .menu summary.primary {
+        background: #8fc7dd;
+        border-color: #8fc7dd;
+        color: #10222c;
+      }
+      .menu-list {
+        background: #1b252c;
+        border-color: #3b4b57;
+      }
+      .menu-list button + button {
+        border-top-color: #2b353d;
       }
       button,
       select,
@@ -481,11 +557,15 @@
       <div class="actions">
         <label class="visually-hidden" for="theme">Theme</label
         ><select id="theme" title="Theme"></select
-        ><button id="open-link" title="Open the timeline at a URL that carries the whole text">Open link</button
-        ><button id="copy-link">Copy link</button
-        ><button id="share-image" title="Render a PNG of the timeline to share in a message">Share image</button
-        ><button id="export">Export timeline</button
-        ><button id="save-studio" class="primary">Save studio</button>
+        ><button id="copy-link" title="Copy a link that carries the whole timeline">Copy link</button
+        ><details class="menu" id="export-menu">
+          <summary class="primary">Export ▾</summary>
+          <div class="menu-list" role="menu">
+            <button id="share-image" role="menuitem" title="Render a PNG to share in a message">Image (PNG)</button
+            ><button id="export" role="menuitem" title="A standalone timeline page">Timeline (HTML)</button
+            ><button id="save-studio" role="menuitem" title="This editor with your timeline inside, editable later">Studio (HTML)</button>
+          </div>
+        </details>
       </div>
       <section class="editor-panel">
         <div class="panel-heading">
@@ -1152,8 +1232,14 @@ footer: See you there ♡</pre>
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && document.body.classList.contains("pane-open")) closePane();
       });
+      const exportMenu = document.querySelector("#export-menu");
       document.querySelector(".pane > .actions").addEventListener("click", (event) => {
-        if (event.target.closest("button")) closePane();
+        if (!event.target.closest("button")) return;
+        exportMenu.open = false;
+        closePane();
+      });
+      document.addEventListener("click", (event) => {
+        if (exportMenu.open && !event.target.closest("#export-menu")) exportMenu.open = false;
       });
       const themePicker = document.querySelector("#theme");
       TimelineText.themes.forEach((name) => {
@@ -1205,7 +1291,6 @@ footer: See you there ♡</pre>
         if (text !== editor.value) return;
         latestLink = hash ? new URL("view.html#" + hash, location.href).href : "";
         syncUrl(hash);
-        document.querySelector("#open-link").disabled = !latestLink;
         document.querySelector("#copy-link").disabled = !latestLink;
       }
       function update() {
@@ -1318,9 +1403,6 @@ footer: See you there ♡</pre>
         scratch.remove();
         return ok;
       }
-      document.querySelector("#open-link").addEventListener("click", () => {
-        if (latestLink) window.open(latestLink, "_blank");
-      });
       document.querySelector("#copy-link").addEventListener("click", async () => {
         if (!latestLink) return;
         // navigator.clipboard exists only on secure origins (https or
