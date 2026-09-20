@@ -2,7 +2,7 @@
 
 Public: https://gparuthi.github.io/timeline-studio/ (a mirror of this folder, pushed with `publish.sh`). Local: http://md-capture:1250/20260918_timeline-studio/
 
-Open `index.html` in a browser. The timeline is the page; the subtle **✎ Edit** button (bottom right) opens the editor pane with the text, a theme picker, and one **Export** menu (Copy link, Image PNG, Timeline HTML, Studio HTML). Every action closes the pane again so the timeline is what you see. Edit the text to update the preview, choose **Save studio** to keep the editor and your current timeline together in one HTML file, or export a standalone HTML timeline. Saved studio copies reopen with your edits and embedded images, and can be edited and saved again. Linked image URLs remain external. Copy and paste directly in the text editor to move timeline text. The studio includes its renderer and artwork and needs no installation or server.
+Open `index.html` in a browser. The timeline is the page; the subtle **✎ Edit** button (bottom right) opens the editor pane with the text, a theme picker, and one **Export** menu (Copy link, Image PNG, Timeline HTML, Studio HTML). Every action, and the **Done** button, closes the pane again so the timeline is what you see; changes are saved as you type, so there is nothing to cancel. Edit the text to update the preview, choose **Save studio** to keep the editor and your current timeline together in one HTML file, or export a standalone HTML timeline. Saved studio copies reopen with your edits and embedded images, and can be edited and saved again. Linked image URLs remain external. Copy and paste directly in the text editor to move timeline text. The studio includes its renderer and artwork and needs no installation or server.
 
 ```text
 title: A Day in Los Angeles
@@ -18,7 +18,7 @@ theme: travel
 note: Bring your ID
 ```
 
-Each event is `time | title | description | icon | color`. Only time and title are required. Use empty fields to skip optional values, and `\|` for a literal pipe. Use 24-hour times or explicit AM/PM. Events sort by time; equal-time events retain their source order.
+Each event is `time | title | description | icon | color`. Only time and title are required. The time can be a span: `15:00 - 17:00`, `3:00 - 5:00 PM` (the start borrows the end's AM/PM), or a start plus a duration such as `15:00 +2h`, `+90m`, `+1h30`. Spans draw a bar along the axis from start to end, the badge reads `3:00–5:00 PM`, and in today mode a spanned event only fades once it has ended. Use empty fields to skip optional values, and `\|` for a literal pipe. Use 24-hour times or explicit AM/PM. Events sort by time; equal-time events retain their source order.
 
 Supported settings: `title`, `date` (display text), `subtitle`, `range` (per day), `theme`, `footer`, repeatable `note`, repeatable `day`, and `header-art`. Whole-line comments start with `#`.
 

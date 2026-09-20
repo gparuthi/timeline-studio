@@ -217,12 +217,10 @@
       }
       .pane-close {
         flex: none;
-        width: 34px;
-        height: 34px;
-        padding: 0;
-        border-radius: 50%;
-        font-size: 14px;
-        line-height: 1;
+        border-radius: 999px;
+        padding: 9px 14px;
+        font-size: 12px;
+        white-space: nowrap;
       }
       .topbar {
         flex: none;
@@ -552,7 +550,7 @@
           <p>A little text. A beautifully timed day.</p>
         </div>
       </div>
-      <button id="pane-close" class="pane-close" aria-label="Close editor" title="Show the timeline">✕</button>
+      <button id="pane-close" class="pane-close primary" title="Changes are saved as you type; this just shows the timeline">✓ Done</button>
     </header>
       <div class="actions">
         <label class="visually-hidden" for="theme">Theme</label
@@ -584,12 +582,14 @@
             <summary>How to write a timeline</summary>
             <p>
               One event per line. Use 24-hour times or AM/PM. Only a time and
-              title are required.
+              title are required. A span is <code>15:00 - 17:00</code> or
+              <code>15:00 +2h</code>.
             </p>
             <pre>
 08:00 | Coffee and pastries
 09:30 | Observatory | Hike up | pin | sky
-1:00 PM | Museum | Gardens first | ticket | sand</pre>
+1:00 PM | Museum | Gardens first | ticket | sand
+3:00 - 5:00 PM | Playground | | palm | sage</pre>
             <p>
               Fields: <code>time | title | description | icon | color</code>.
               Leave an empty field to skip it. Write <code>\|</code> inside text
@@ -668,7 +668,7 @@ footer: See you there ♡</pre>
       hidden
     />
     <script type="application/json" id="studio-source">
-      "# A timeline is just text. Times set the scale; cards find their own space.\ntitle: A Day in Los Angeles\ndate: {{today}}\nsubtitle: Sunshine, tacos, and a sunset ♡\nrange: 08:00 - 20:00\ntheme: travel\nfooter: Bring sunscreen and a playlist ♡\n\n# time | title | description | icon | color\n08:00 | Coffee and pastries | Neighborhood bakery | coffee | sand\n09:30 | Griffith Observatory | Hike up, skip the parking | pin | sky\n11:30 | Farmers market | Tacos for lunch | palm | sage\n13:00 | Getty Center | Gardens first, then the galleries | ticket | sand\n15:30 | Venice Boardwalk | Rent bikes to Santa Monica | road | sky\n18:00 | Pier at sunset | Ferris wheel, funnel cake | palm | sand\n19:30 | Drive home | Sunset over the freeway | car | sage\n\nnote: Observatory parking fills by 10 AM\nnote: Getty entry is free, parking is not\nnote: Sunset is around 7 PM\n"
+      "# A timeline is just text. Times set the scale; cards find their own space.\ntitle: A Day in Los Angeles\ndate: {{today}}\nsubtitle: Sunshine, tacos, and a sunset ♡\nrange: 08:00 - 20:00\ntheme: travel\nfooter: Bring sunscreen and a playlist ♡\n\n# time | title | description | icon | color\n08:00 | Coffee and pastries | Neighborhood bakery | coffee | sand\n09:30 | Griffith Observatory | Hike up, skip the parking | pin | sky\n11:30 | Farmers market | Tacos for lunch | palm | sage\n13:00 | Getty Center | Gardens first, then the galleries | ticket | sand\n15:30 - 17:30 | Venice Boardwalk | Rent bikes to Santa Monica | road | sky\n18:00 | Pier at sunset | Ferris wheel, funnel cake | palm | sand\n19:30 | Drive home | Sunset over the freeway | car | sage\n\nnote: Observatory parking fills by 10 AM\nnote: Getty entry is free, parking is not\nnote: Sunset is around 7 PM\n"
     </script>
     <script>
       /* TimelineText: zero-dependency parser + standalone HTML renderer. */
@@ -732,6 +732,45 @@ footer: See you there ♡</pre>
           if (match[3]) hour = (hour % 12) + (/pm/i.test(match[3]) ? 12 : 0);
           return hour * 60 + minute;
         }
+        // "15:00", "15:00 - 17:00", "3:00 - 5:00 PM" (start borrows the end's
+        // meridiem), or "15:00 +2h" / "+90m" / "+1h30". `end` is undefined when
+        // the event is a moment rather than a span.
+        function timeSpan(value, line) {
+          const v = value.trim();
+          let m = v.match(/^(.+?)\s*\+\s*(.+)$/);
+          if (m) {
+            const start = time(m[1], line),
+              d = m[2].trim().match(/^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(\d+)\s*(?:m|min|mins|minutes))?$/i),
+              bare = m[2].trim().match(/^(\d+(?:\.\d+)?)$/);
+            const minutes = bare
+              ? Math.round(Number(bare[1]) * 60)
+              : d && (d[1] || d[2])
+                ? Math.round(Number(d[1] || 0) * 60) + Number(d[2] || 0)
+                : NaN;
+            if (!minutes || minutes < 0)
+              throw new Error(`Line ${line}: use a duration like +2h, +90m or +1h30.`);
+            if (start + minutes > 24 * 60)
+              throw new Error(`Line ${line}: the event runs past midnight.`);
+            return { start, end: start + minutes };
+          }
+          m = v.match(/^(.+?)\s*[-–]\s*(.+)$/);
+          if (m) {
+            const endText = m[2].trim(),
+              meridiem = endText.match(/(AM|PM)$/i),
+              startText = m[1].trim() + (meridiem && !/(AM|PM)$/i.test(m[1].trim()) ? " " + meridiem[1] : "");
+            const start = time(startText, line),
+              end = time(endText, line);
+            if (end <= start)
+              throw new Error(`Line ${line}: the end time must be after the start.`);
+            return { start, end };
+          }
+          return { start: time(v, line), end: undefined };
+        }
+        function spanLabel2(start, end) {
+          const a = label(start),
+            b = label(end);
+          return a.slice(-2) === b.slice(-2) ? `${a.slice(0, -3)}–${b}` : `${a}–${b}`;
+        }
         function label(minutes, short = false) {
           const h = Math.floor(minutes / 60) % 24,
             m = minutes % 60;
@@ -774,7 +813,7 @@ footer: See you there ♡</pre>
               s = raw.trim();
             if (!s || s.startsWith("#")) return;
             // Event lines begin with a clock time followed by a pipe.
-            if (/^\d{1,2}(?::\d{2})?\s*(?:AM|PM)?\s*\|/i.test(s)) {
+            if (/^\d{1,2}(?::\d{2})?\s*(?:AM|PM)?\s*(?:[-–]\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM)?|\+[^|]*)?\s*\|/i.test(s)) {
               const fields = s
                 .split(/(?<!\\)\|/)
                 .map((v) => v.trim().replace(/\\\|/g, "|"));
@@ -786,8 +825,10 @@ footer: See you there ♡</pre>
               if (!title) throw new Error(`Line ${line}: add an event title.`);
               if (!["sky", "sand", "sage"].includes(color || "sky"))
                 throw new Error(`Line ${line}: color must be sky, sand, or sage.`);
+              const { start, end } = timeSpan(clock, line);
               currentDay(line).events.push({
-                minutes: time(clock, line),
+                minutes: start,
+                end,
                 title,
                 detail,
                 icon: icon || "pin",
@@ -871,11 +912,13 @@ footer: See you there ♡</pre>
               );
             day.events.sort((a, b) => a.minutes - b.minutes);
             day.start = day.range?.[0] ?? Math.floor(day.events[0].minutes / 60) * 60;
-            day.end = day.range?.[1] ?? Math.ceil(day.events.at(-1).minutes / 60) * 60;
+            day.end =
+              day.range?.[1] ??
+              Math.ceil(Math.max(...day.events.map((e) => e.end ?? e.minutes)) / 60) * 60;
             if (day.end === day.start) day.end = day.start + 60;
             day.iso = isoDate(day.label || model.date);
             for (const event of day.events) {
-              if (event.minutes < day.start || event.minutes > day.end)
+              if (event.minutes < day.start || (event.end ?? event.minutes) > day.end)
                 throw new Error(
                   `Line ${event.line}: event is outside the timeline range.`,
                 );
@@ -949,14 +992,21 @@ footer: See you there ♡</pre>
             const axisLine = timeline.querySelector(".axis");
             axisLine.style.top = topPad + "px";
             axisLine.style.height = axisHeight + "px";
-            let connectors = "";
+            let spans = "",
+              connectors = "";
+            const barWidth = axis < 100 ? 8 : 12;
             cards.forEach((card, i) => {
               const y = centers[i] + topPad,
                 anchor = anchors[i] + topPad,
                 x = card.offsetLeft;
               card.style.top = y + "px";
-              connectors += `<path class="connector" d="M${axis},${anchor} C${axis + 12},${anchor} ${x - 12},${y} ${x},${y}"/><circle class="event-dot" cx="${axis}" cy="${anchor}" r="${axis < 100 ? 4 : 6}"/>`;
+              if (card.dataset.end) {
+                const endY = (Number(card.dataset.end) / 60) * unit + topPad;
+                spans += `<rect class="span ${[...card.classList].find((c) => ["sky", "sand", "sage"].includes(c)) || ""}" data-i="${i}" x="${axis - barWidth / 2}" y="${anchor}" width="${barWidth}" height="${endY - anchor}" rx="${barWidth / 2}"/>`;
+              }
+              connectors += `<path class="connector" data-i="${i}" d="M${axis},${anchor} C${axis + 12},${anchor} ${x - 12},${y} ${x},${y}"/><circle class="event-dot" data-i="${i}" cx="${axis}" cy="${anchor}" r="${axis < 100 ? 4 : 6}"/>`;
             });
+            connectors = spans + connectors;
             timeline.querySelector(".connectors").innerHTML = connectors;
             timeline.style.height =
               Math.max(
@@ -980,14 +1030,18 @@ footer: See you there ♡</pre>
               isOver = !!date && date < ymd,
               now = minutesNow - Number(timeline.dataset.start),
               duration = Number(timeline.dataset.duration),
-              shapes = timeline.querySelector(".connectors").children;
+              connectors = timeline.querySelector(".connectors");
             let next = -1;
             cards.forEach((card, i) => {
               const minute = Number(card.dataset.minute),
-                past = isOver || (isToday && minute < now);
+                finish = card.dataset.end ? Number(card.dataset.end) : minute,
+                past = isOver || (isToday && finish < now),
+                live = isToday && !past && minute <= now && card.dataset.end && now < finish;
               card.classList.toggle("past", past);
-              shapes[2 * i]?.classList.toggle("past", past);
-              shapes[2 * i + 1]?.classList.toggle("past", past);
+              card.classList.toggle("live", !!live);
+              connectors
+                .querySelectorAll(`[data-i="${i}"]`)
+                .forEach((shape) => shape.classList.toggle("past", past));
               if (isToday && next < 0 && minute >= now) next = i;
             });
             cards.forEach((card, i) => {
@@ -1135,7 +1189,7 @@ footer: See you there ♡</pre>
               const events = day.events
                 .map(
                   (e) =>
-                    `<li class="event ${e.color}" data-minute="${e.minutes - day.start}" style="--m:${e.minutes - day.start}"><time>${label(e.minutes)}</time><div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail ? `<p>${escape(e.detail)}</p>` : ""}</div></li>`,
+                    `<li class="event ${e.color}" data-minute="${e.minutes - day.start}"${e.end ? ` data-end="${e.end - day.start}"` : ""} style="--m:${e.minutes - day.start}"><time${e.end ? ' class="span"' : ""}>${e.end ? spanLabel2(e.minutes, e.end) : label(e.minutes)}</time><div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail ? `<p>${escape(e.detail)}</p>` : ""}</div></li>`,
                 )
                 .join("");
               const heading =
@@ -1152,7 +1206,7 @@ footer: See you there ♡</pre>
             : m.theme === "travel"
               ? art.flight + art.city
               : "";
-          const extraCss = `.event{z-index:1;} .now{position:absolute;left:var(--axis);right:0;height:0;border-top:2px solid #e2573f;z-index:0;pointer-events:none;animation:now-blink 2.6s ease-in-out infinite;} .now-dot{position:absolute;left:0;top:-1px;width:14px;height:14px;border-radius:50%;background:#e2573f;transform:translate(-50%,-50%);box-shadow:0 0 0 4px #e2573f33;} @keyframes now-blink{0%,100%{opacity:1}50%{opacity:.3}} .event.past{opacity:.42;} .connector.past,.event-dot.past{opacity:.35;} .until{position:absolute;right:10px;top:6px;font-size:12px;font-weight:600;letter-spacing:.3px;color:var(--blue);opacity:.75;white-space:nowrap;} @media(max-width:580px){.until{right:8px;top:5px;font-size:11px;}} @media print{.now{display:none;}.event.past,.connector.past,.event-dot.past{opacity:1;}} .event{top:calc(var(--m) / 60 * var(--hour-height));} .masthead{height:auto;min-height:180px;padding-bottom:38px;}h1{overflow-wrap:anywhere;} .event-icon img{width:100%;height:100%;object-fit:cover;border-radius:50%;} .custom-art{object-fit:contain;} .event-body{overflow-wrap:anywhere;} .notes{grid-template-columns:230px 1fr;} .notes-heading{font-family:Georgia,serif;font-size:30px;font-weight:bold;} .notes:empty{display:none;} footer{height:auto;min-height:85px;padding:20px 0;overflow-wrap:anywhere;} footer:empty{display:none;}@media(max-width:850px){.notes{grid-template-columns:165px 1fr;}.notes-heading{font-size:25px;}} @media(max-width:580px){.masthead{min-height:160px;padding-bottom:28px;}.notes{display:block;}} .day-heading{display:flex;align-items:center;gap:14px;margin:36px 0 0;font-size:14px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--blue);} .day-heading::after{content:'';flex:1;height:1px;background:currentColor;opacity:.35;} .day:first-of-type .day-heading{margin-top:8px;} @media(max-width:580px){.day-heading{font-size:12px;letter-spacing:2px;margin-top:26px;}}`;
+          const extraCss = `.event{z-index:1;} .span{opacity:.45;} .span.sky{fill:#8fd0f0;} .span.sand{fill:#f2c37a;} .span.sage{fill:#9ec9a8;} .span.past{opacity:.2;} .event time.span{font-size:.72em;line-height:1.15;letter-spacing:0;white-space:normal;} @media(max-width:580px){.event time.span{font-size:12px;white-space:nowrap;}} .event.live .event-body{box-shadow:0 0 0 2px #e2573f66;} .now{position:absolute;left:var(--axis);right:0;height:0;border-top:2px solid #e2573f;z-index:0;pointer-events:none;animation:now-blink 2.6s ease-in-out infinite;} .now-dot{position:absolute;left:0;top:-1px;width:14px;height:14px;border-radius:50%;background:#e2573f;transform:translate(-50%,-50%);box-shadow:0 0 0 4px #e2573f33;} @keyframes now-blink{0%,100%{opacity:1}50%{opacity:.3}} .event.past{opacity:.42;} .connector.past,.event-dot.past{opacity:.35;} .until{position:absolute;right:10px;top:6px;font-size:12px;font-weight:600;letter-spacing:.3px;color:var(--blue);opacity:.75;white-space:nowrap;} @media(max-width:580px){.until{right:8px;top:5px;font-size:11px;}} @media print{.now{display:none;}.event.past,.connector.past,.event-dot.past{opacity:1;}} .event{top:calc(var(--m) / 60 * var(--hour-height));} .masthead{height:auto;min-height:180px;padding-bottom:38px;}h1{overflow-wrap:anywhere;} .event-icon img{width:100%;height:100%;object-fit:cover;border-radius:50%;} .custom-art{object-fit:contain;} .event-body{overflow-wrap:anywhere;} .notes{grid-template-columns:230px 1fr;} .notes-heading{font-family:Georgia,serif;font-size:30px;font-weight:bold;} .notes:empty{display:none;} footer{height:auto;min-height:85px;padding:20px 0;overflow-wrap:anywhere;} footer:empty{display:none;}@media(max-width:850px){.notes{grid-template-columns:165px 1fr;}.notes-heading{font-size:25px;}} @media(max-width:580px){.masthead{min-height:160px;padding-bottom:28px;}.notes{display:block;}} .day-heading{display:flex;align-items:center;gap:14px;margin:36px 0 0;font-size:14px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--blue);} .day-heading::after{content:'';flex:1;height:1px;background:currentColor;opacity:.35;} .day:first-of-type .day-heading{margin-top:8px;} @media(max-width:580px){.day-heading{font-size:12px;letter-spacing:2px;margin-top:26px;}}`;
           return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(m.title)}</title><style>${art.css}
       ${extraCss}
       ${themes[m.theme]}</style></head><body class="theme-${m.theme}">${art.symbols}<main class="sheet"><header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main><script>${runtime}<\/script></body></html>`;
