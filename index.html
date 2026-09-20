@@ -1574,24 +1574,25 @@ footer: See you there ♡</pre>
               : `Named link failed: ${body.error || response.status}`;
           return "";
         }
-        if (body.key) {
-          linkKeys({ [name]: body.key });
-          // Write the edit id into the link line so the text itself is the
-          // proof of ownership: paste it into any device's studio and that
-          // device can update the name too. The link server strips it from
-          // what it stores, so shared short links never carry it.
+        if (body.key) linkKeys({ [name]: body.key });
+        // Write the edit id into the link line so the text itself is the
+        // proof of ownership: paste it into any device's studio and that
+        // device can update the name too. The link server strips it from
+        // what it stores, so shared short links never carry it. This also
+        // migrates names claimed before ids lived in the text.
+        const id = body.key || (!namedKey && key) || "";
+        if (id && editor.value === text) {
           const linePattern = new RegExp(`^([ \\t]*link[ \\t]*:[ \\t]*${name})[ \\t]*$`, "m"),
-            before = editor.value,
-            withKey = before.replace(linePattern, `$1 ${body.key}`);
-          if (withKey !== before && before === text) {
+            withKey = text.replace(linePattern, `$1 ${id}`);
+          if (withKey !== text) {
             const start = editor.selectionStart,
               end = editor.selectionEnd,
-              at = before.search(linePattern),
-              grew = withKey.length - before.length,
+              at = text.search(linePattern),
+              grew = withKey.length - text.length,
               shift = (pos) => (pos > at ? pos + grew : pos);
             editor.value = withKey;
             editor.setSelectionRange(shift(start), shift(end));
-            namedKey = body.key;
+            namedKey = id;
             publishedText = withKey;
             publishedUrl = body.url;
             update();
