@@ -73,7 +73,7 @@ URLs in a description or note are clickable in every output. A Google or Apple M
 
 ## Today
 
-If the `date:` line is today (parsed from `2026-06-06`, `Jun 6, 2026`, `6 Jun 2026`, or `6/6/2026`), the rendered timeline goes live: past cards fade, a slowly blinking marker sits at the current minute on the axis, the next card shows "in 25 min", and the page opens scrolled to now. Refreshes every 30 seconds and whenever the tab becomes visible. On any other day nothing changes.
+If the `date:` line is today (parsed from `2026-06-06`, `Jun 6, 2026`, `6 Jun 2026`, or `6/6/2026`), the rendered timeline goes live: past cards fade, a slowly blinking marker sits at the current minute on the axis, the next card shows "in 25 min", and the page opens scrolled to now. When the current minute is outside the day's hours, or today is not on the sheet, the page opens on the next scheduled event instead (later today, or the first event of the next day); when every dated day is already over, it opens at the bottom. Undated timelines open at the top. Refreshes every 30 seconds and whenever the tab becomes visible. On any other day nothing changes.
 
 Built-in icons: `home`, `plane`, `depart`, `land`, `coffee`, `meal`, `tree`, `bed`, `shop`, `ticket`, `pin`, `car`, `road`, `palm`. Leave the icon field empty and one is guessed from the title or description (breakfast/lunch/dinner → `meal`, coffee/bakery → `coffee`, park/playground/hike → `tree`, hotel/check in → `bed`, market/shopping → `shop`, museum/observatory/show → `ticket`, beach/pier → `palm`, flight → `plane`, departs → `depart`, lands → `land`, drive/car → `car`, otherwise `pin`); an explicit icon always wins. Colors: `sky`, `sand`, `sage`.
 

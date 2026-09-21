@@ -447,11 +447,34 @@
       }
       const unit = parseFloat(getComputedStyle(timeline).getPropertyValue("--hour-height"));
       marker.style.top = `${topPad + (now / 60) * unit}px`;
-      if (!window.__timelineScrolled) {
-        window.__timelineScrolled = true;
-        const y = marker.getBoundingClientRect().top + window.scrollY - window.innerHeight / 2;
-        if (y > 0) window.scrollTo(0, y);
+    }
+    // Where a dated timeline opens, once per page: on the "now" marker when
+    // today is on the sheet and the current minute is inside its hours;
+    // otherwise on the next scheduled event (later today, or the first of
+    // the next day); and when everything is already over, at the bottom.
+    // Undated timelines open at the top.
+    function settle(ymd, minutesNow) {
+      if (window.__timelineScrolled) return;
+      const dated = timelines.filter((t) => t.dataset.date).sort((a, b) => (a.dataset.date < b.dataset.date ? -1 : 1));
+      if (!dated.length) return;
+      window.__timelineScrolled = true;
+      let target = dated.map((t) => t.querySelector(".now")).find(Boolean),
+        offset = window.innerHeight / 2;
+      if (!target) {
+        offset = window.innerHeight / 3;
+        for (const timeline of dated) {
+          const date = timeline.dataset.date,
+            now = minutesNow - Number(timeline.dataset.start);
+          if (date < ymd) continue;
+          target = [...timeline.querySelectorAll(".event")].find(
+            (card) => date > ymd || Number(card.dataset.minute) >= now,
+          );
+          if (target) break;
+        }
       }
+      if (!target) return window.scrollTo(0, document.documentElement.scrollHeight);
+      const y = target.getBoundingClientRect().top + window.scrollY - offset;
+      if (y > 0) window.scrollTo(0, y);
     }
     function tick() {
       if (!active) return;
@@ -460,6 +483,7 @@
         ymd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
         minutesNow = today.getHours() * 60 + today.getMinutes();
       timelines.forEach((timeline) => tickOne(timeline, ymd, minutesNow));
+      settle(ymd, minutesNow);
     }
     const timer = setInterval(tick, 30000);
     document.addEventListener("visibilitychange", tick);
