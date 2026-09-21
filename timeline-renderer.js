@@ -154,6 +154,7 @@
       footer: "",
       link: "",
       linkKey: "",
+      timezone: "",
       notes: [],
       events: [],
       days: [],
@@ -222,6 +223,7 @@
           "day",
           "header-art",
           "link",
+          "timezone",
         ].includes(key)
       )
         throw new Error(`Line ${line}: unknown setting “${key}”.`);
@@ -237,6 +239,21 @@
         singleton.add(key);
         model.link = parts[1];
         model.linkKey = parts[2] || "";
+        return;
+      }
+      if (key === "timezone") {
+        // "timezone: America/Los_Angeles" or a short form such as "PT".
+        // Before any day it applies to the whole timeline; under a day it
+        // applies to that day, for trips that cross zones. Only the
+        // calendar feed uses it; the sheet shows the times as written.
+        const zone = timezone(value);
+        if (!zone)
+          throw new Error(
+            `Line ${line}: unknown time zone “${value}”. Use a name like America/Los_Angeles, or PT, ET, CET, IST.`,
+          );
+        const last = model.days.at(-1);
+        if (last && last.label) last.timezone = zone;
+        else model.timezone = zone;
         return;
       }
       if (key === "day") {
@@ -551,6 +568,28 @@
       // the top after every keystroke.
       scrollTo(0, top);
     });
+  }
+  // A time zone as written in the text -> IANA name, or "" if unknown.
+  const zoneAliases = {
+    pt: "America/Los_Angeles", pst: "America/Los_Angeles", pdt: "America/Los_Angeles", pacific: "America/Los_Angeles",
+    mt: "America/Denver", mst: "America/Denver", mdt: "America/Denver", mountain: "America/Denver",
+    ct: "America/Chicago", cst: "America/Chicago", cdt: "America/Chicago", central: "America/Chicago",
+    et: "America/New_York", est: "America/New_York", edt: "America/New_York", eastern: "America/New_York",
+    hst: "Pacific/Honolulu", akst: "America/Anchorage", akdt: "America/Anchorage",
+    utc: "UTC", gmt: "Europe/London", bst: "Europe/London", uk: "Europe/London",
+    cet: "Europe/Berlin", cest: "Europe/Berlin", eet: "Europe/Athens",
+    ist: "Asia/Kolkata", india: "Asia/Kolkata", sgt: "Asia/Singapore", hkt: "Asia/Hong_Kong",
+    jst: "Asia/Tokyo", kst: "Asia/Seoul", aest: "Australia/Sydney", aedt: "Australia/Sydney", nzst: "Pacific/Auckland",
+  };
+  function timezone(text) {
+    const value = String(text).trim();
+    if (!value) return "";
+    const zone = zoneAliases[value.toLowerCase()] || value;
+    try {
+      return new Intl.DateTimeFormat("en", { timeZone: zone }).resolvedOptions().timeZone;
+    } catch (error) {
+      return "";
+    }
   }
   // Best-effort calendar date from the free-text `date:` line, so the runtime
   // can tell whether the timeline is happening today. "" when unparseable.

@@ -294,23 +294,42 @@ async function command(request, env) {
 }
 
 // iCalendar feed of a timeline, for "subscribe from URL" in Google or iOS
-// Calendar. Times are floating (no time zone), so an itinerary shows at the
-// wall-clock times written, wherever the calendar is set. An event without
+// Calendar. Each event is emitted as a UTC instant, converted from the
+// written wall-clock time in the timeline's "timezone:" (a day's own
+// "timezone:" wins; Pacific when none is given): Google reads floating
+// times as UTC, so they have to be pinned to a zone. An event without
 // an end runs an hour, or until the next event if that comes sooner. UIDs
 // are built from the name, day, time and title, so an unchanged event keeps
 // its identity across edits. Undated days cannot be scheduled and are left
 // out.
+const DEFAULT_ZONE = "America/Los_Angeles";
+// UTC instant for a wall-clock time in an IANA zone, as an iCalendar
+// "YYYYMMDDTHHMMSSZ" string. Two passes settle the offset across a DST edge.
+function utcStamp(iso, minutes, zone) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const wall = Date.UTC(y, m - 1, d, 0, minutes);
+  const offsetAt = (ms) => {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: zone,
+        hourCycle: "h23",
+        year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+      })
+        .formatToParts(new Date(ms))
+        .map((p) => [p.type, p.value]),
+    );
+    return Date.UTC(+parts.year, parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second) - ms;
+  };
+  let utc = wall - offsetAt(wall);
+  utc = wall - offsetAt(utc);
+  return new Date(utc).toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+}
+
 function calendar(text, name, link) {
   const model = TimelineText.parse(text);
   const esc = (s) =>
     String(s).replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-  const at = (iso, minutes) => {
-    const [y, m, d] = iso.split("-").map(Number),
-      date = new Date(y, m - 1, d, 0, minutes),
-      pad = (n) => String(n).padStart(2, "0");
-    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
-  };
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -318,11 +337,13 @@ function calendar(text, name, link) {
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${esc(model.title || name)}`,
+    `X-WR-TIMEZONE:${model.timezone || DEFAULT_ZONE}`,
     "X-PUBLISHED-TTL:PT1H",
     "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
   ];
   for (const day of model.days) {
     if (!day.iso) continue;
+    const zone = day.timezone || model.timezone || DEFAULT_ZONE;
     day.events.forEach((event, i) => {
       const next = day.events[i + 1],
         end = event.end || Math.min(event.minutes + 60, next && next.minutes > event.minutes ? next.minutes : Infinity),
@@ -338,8 +359,8 @@ function calendar(text, name, link) {
         "BEGIN:VEVENT",
         `UID:${name}-${day.iso}-${String(event.minutes).padStart(4, "0")}-${slug}@tl.gaup.uk`,
         `DTSTAMP:${stamp}`,
-        `DTSTART:${at(day.iso, event.minutes)}`,
-        `DTEND:${at(day.iso, end)}`,
+        `DTSTART:${utcStamp(day.iso, event.minutes, zone)}`,
+        `DTEND:${utcStamp(day.iso, end, zone)}`,
         `SUMMARY:${esc(event.title)}`,
       );
       if (event.detail) lines.push(`DESCRIPTION:${esc(event.detail)}`);
