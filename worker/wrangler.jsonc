@@ -10,6 +10,12 @@
   "workers_dev": false,
   "routes": [{ "pattern": "tl.gaup.uk", "custom_domain": true }],
   "kv_namespaces": [{ "binding": "LINKS", "id": "8813242d0bbf41a89fbe4ab0da1170ca" }],
+  // POST /command edits a timeline from a plain-English instruction with
+  // Workers AI (10k neurons a day free; one command costs ~25). The rate
+  // limit keeps a stranger from burning that allowance: 20 commands a
+  // minute per client address.
+  "ai": { "binding": "AI", "remote": true },
+  "ratelimits": [{ "name": "COMMANDS", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }],
   "vars": {
     // Where the static studio lives; the viewer page loads the renderer from
     // here and the "Edit this timeline" link points back at it.

@@ -215,6 +215,20 @@
       .toast.error {
         background: #8b2f22;
       }
+      .toast.action {
+        pointer-events: auto;
+      }
+      .toast-action {
+        margin-left: 10px;
+        padding: 4px 11px;
+        border: 0;
+        border-radius: 999px;
+        background: #ffffff2e;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
       .toast[hidden] {
         display: none;
       }
@@ -356,6 +370,49 @@
       .status.error {
         background: #fff0ed;
         color: #9b3824;
+      }
+      /* "Change it": a plain-English instruction sent to the link server,
+         which asks Workers AI for the edited text (see README). */
+      .command {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 8px 10px 8px 14px;
+        border-top: 1px solid #edf1f3;
+      }
+      .command input {
+        flex: 1;
+        min-width: 0;
+        border: 1px solid #d5e0e6;
+        border-radius: 999px;
+        padding: 7px 14px;
+        font: inherit;
+        font-size: 13px;
+        color: #284557;
+        background: #fbfcfd;
+      }
+      .command input:focus {
+        outline: 2px solid #8fc7dd;
+        outline-offset: -1px;
+      }
+      .command input::placeholder {
+        color: #7f95a1;
+      }
+      .command .tool {
+        width: 34px;
+        height: 34px;
+        flex: none;
+      }
+      .command.busy input {
+        opacity: 0.6;
+      }
+      .command.busy .tool svg {
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
       }
       /* Help lives behind the "?" button and takes the editor's place. */
       .support {
@@ -595,6 +652,17 @@
         background: #442721;
         color: #ffc5b5;
       }
+      .command {
+        border-color: #29353e;
+      }
+      .command input {
+        background: #10161b;
+        color: #d2e5ee;
+        border-color: #3b4b57;
+      }
+      .command input::placeholder {
+        color: #7d92a0;
+      }
       .support,
       .support details {
         border-color: #2b353d;
@@ -644,6 +712,11 @@
       </div>
     </header>
       <section class="editor-panel">
+        <form class="command" id="command" autocomplete="off">
+          <label class="visually-hidden" for="command-text">Change the timeline in plain words</label>
+          <input id="command-text" type="text" enterkeyhint="send" maxlength="600" placeholder="Change it… move golf to 3 pm" />
+          <button class="tool" type="submit" title="Apply this change to the text" aria-label="Apply the change"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM5 17l.8 2.2L8 20l-2.2.8L5 23l-.8-2.2L2 20l2.2-.8zM19 2l.6 1.6L21.2 4.2l-1.6.6L19 6.4l-.6-1.6L16.8 4.2l1.6-.6z"/></svg></button>
+        </form>
         <label class="visually-hidden" for="source">Your timeline</label>
         <textarea
           id="source"
@@ -700,6 +773,20 @@ footer: See you there ♡</pre>
               belong to that day. Events sort by time, preserving the order of
               simultaneous events. Lines beginning with <code>#</code> are
               comments.
+            </p>
+          </details>
+          <details>
+            <summary>Change it in plain words</summary>
+            <p>
+              The box above the text takes an instruction: <em>move golf to
+              3 pm</em>, <em>add dinner with Sam on Friday at 7</em>,
+              <em>push everything on Monday back an hour</em>. The text and
+              the instruction go to the link server, which asks a model for
+              the edited text; it is applied only if it still reads as a
+              timeline, the cursor lands on the first changed line, and the
+              toast offers Undo. Times without AM/PM follow the event
+              (dinner at 7:30 is 19:30). This sends the timeline off your
+              device like a short link does.
             </p>
           </details>
           <details>
@@ -1435,14 +1522,27 @@ footer: See you there ♡</pre>
       const pane = document.querySelector("#pane"),
         editToggle = document.querySelector("#edit-toggle");
       const toastBox = document.querySelector("#toast");
-      function toast(message, kind = "") {
+      // An optional action ({ label, run }) adds a button, e.g. Undo, and
+      // keeps the toast up long enough to reach it.
+      function toast(message, kind = "", action) {
         toastBox.textContent = message;
-        toastBox.className = "toast" + (kind ? " " + kind : "");
+        if (action) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "toast-action";
+          button.textContent = action.label;
+          button.addEventListener("click", () => {
+            toastBox.hidden = true;
+            action.run();
+          });
+          toastBox.append(button);
+        }
+        toastBox.className = "toast" + (kind ? " " + kind : "") + (action ? " action" : "");
         toastBox.hidden = false;
         clearTimeout(toast.timer);
         toast.timer = setTimeout(() => {
           toastBox.hidden = true;
-        }, 2800);
+        }, action ? 9000 : 2800);
       }
       function openPane() {
         document.body.classList.add("pane-open");
@@ -1974,6 +2074,96 @@ footer: See you there ♡</pre>
         dirty = true;
         clearTimeout(pending);
         pending = setTimeout(update, 250);
+      });
+      // "Change it": the text and a plain-English instruction go to the link
+      // server, which asks Workers AI for the whole edited text. It is
+      // applied only if it parses as a timeline, the cursor lands on the
+      // first changed line, and the toast offers Undo. The instruction is
+      // the user's edit, so the result publishes like typed text.
+      const commandForm = document.querySelector("#command"),
+        commandInput = document.querySelector("#command-text");
+      function replaceText(next) {
+        // Through execCommand where it works, so the browser's own undo
+        // (Cmd+Z, shake on iOS) also knows about the change.
+        editor.focus({ preventScroll: true });
+        editor.select();
+        let inserted = false;
+        try {
+          inserted = document.execCommand("insertText", false, next);
+        } catch (error) {}
+        if (!inserted || editor.value !== next) editor.value = next;
+        dirty = true;
+        clearTimeout(pending);
+        update();
+      }
+      function lineDiff(before, after) {
+        const a = before.split("\n"),
+          b = after.split("\n");
+        let first = 0;
+        for (let i = 0; i < Math.max(a.length, b.length); i++)
+          if (a[i] !== b[i]) {
+            first = i + 1;
+            break;
+          }
+        const counts = new Map();
+        a.forEach((row) => counts.set(row, (counts.get(row) || 0) + 1));
+        let added = 0;
+        b.forEach((row) => {
+          if (counts.get(row)) counts.set(row, counts.get(row) - 1);
+          else added++;
+        });
+        const removed = [...counts.values()].reduce((n, c) => n + c, 0);
+        return { first, changed: Math.max(added, removed) };
+      }
+      commandForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const instruction = commandInput.value.trim();
+        if (!instruction || commandForm.classList.contains("busy")) return;
+        const before = editor.value;
+        commandForm.classList.add("busy");
+        commandInput.readOnly = true;
+        status.className = "status";
+        status.textContent = "Changing the timeline…";
+        try {
+          const response = await fetch(SHORT_LINK_API + "command", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              text: before,
+              command: instruction,
+              today: new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" }),
+            }),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error || `Command failed (${response.status})`);
+          const next = String(body.text || "");
+          TimelineText.parse(next);
+          if (next.trim() === before.trim()) {
+            toast(body.note || "Nothing to change");
+            update();
+            return;
+          }
+          if (editor.value !== before) throw new Error("The text changed while the command ran. Try again.");
+          const { first, changed } = lineDiff(before, next);
+          replaceText(next);
+          commandInput.value = "";
+          if (body.note) status.textContent += " · " + body.note;
+          if (first) editLine(first);
+          toast(`${changed} line${changed === 1 ? "" : "s"} changed`, "", {
+            label: "Undo",
+            run: () => {
+              replaceText(before);
+              toast("Undone");
+            },
+          });
+        } catch (error) {
+          status.className = "status error";
+          status.textContent = error.message;
+          toast(error.message, "error");
+        } finally {
+          commandForm.classList.remove("busy");
+          commandInput.readOnly = false;
+        }
       });
       document.querySelector("#save-studio").addEventListener("click", () => {
         update();
