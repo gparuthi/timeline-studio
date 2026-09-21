@@ -342,6 +342,40 @@
     let lastWidth = -1;
     let active = true;
     const topPad = 26;
+    // Days already over collapse behind one button so the sheet opens at
+    // today; "Show earlier days" brings them back and lays them out again
+    // (a hidden timeline measures as empty). Nothing collapses when every
+    // day is over, or when the days carry no dates. The choice sticks for
+    // the page, including across the studio's re-renders.
+    function collapsePast(ymd) {
+      const days = timelines
+        .map((t) => ({ section: t.closest(".day"), date: t.dataset.date }))
+        .filter((d) => d.section && d.date);
+      const past = days.filter((d) => d.date < ymd),
+        future = days.some((d) => d.date >= ymd);
+      let button = document.querySelector(".show-past");
+      if (!past.length || !future) {
+        days.forEach((d) => d.section.classList.remove("past-day"));
+        document.body.classList.remove("hide-past");
+        button?.remove();
+        return;
+      }
+      days.forEach((d) => d.section.classList.toggle("past-day", d.date < ymd));
+      const hide = window.__showPast !== true;
+      document.body.classList.toggle("hide-past", hide);
+      if (!button) {
+        button = document.createElement("button");
+        button.type = "button";
+        button.className = "show-past";
+        button.addEventListener("click", () => {
+          window.__showPast = !window.__showPast;
+          document.body.classList.toggle("hide-past", !window.__showPast);
+          layout();
+        });
+        days[0].section.before(button);
+      }
+      button.textContent = hide ? `Show ${past.length} earlier day${past.length === 1 ? "" : "s"}` : "Hide earlier days";
+    }
     function layoutOne(timeline) {
       const cards = [...timeline.querySelectorAll(".event")],
         hours = [...timeline.querySelectorAll(".hour")],
@@ -470,11 +504,14 @@
     // otherwise on the next scheduled event (later today, or the first of
     // the next day); and when everything is already over, at the bottom.
     // Undated timelines open at the top.
+    // Until the page has fully loaded, every layout settles again: fonts and
+    // images shift the cards, and a position taken from the first layout is
+    // wrong on a reload.
     function settle(ymd, minutesNow) {
       if (window.__timelineScrolled) return;
       const dated = timelines.filter((t) => t.dataset.date).sort((a, b) => (a.dataset.date < b.dataset.date ? -1 : 1));
       if (!dated.length) return;
-      window.__timelineScrolled = true;
+      if (document.readyState === "complete") window.__timelineScrolled = true;
       let target = dated.map((t) => t.querySelector(".now")).find(Boolean),
         offset = window.innerHeight / 2;
       if (!target) {
@@ -499,6 +536,7 @@
         pad = (n) => String(n).padStart(2, "0"),
         ymd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
         minutesNow = today.getHours() * 60 + today.getMinutes();
+      collapsePast(ymd);
       timelines.forEach((timeline) => tickOne(timeline, ymd, minutesNow));
       settle(ymd, minutesNow);
     }
@@ -512,9 +550,13 @@
         layout();
       }
     });
-    if (timelines[0]) observer.observe(timelines[0]);
+    // Watch the sheet, not the first timeline: that one may be a collapsed
+    // day, and a hidden element reports no width.
+    const sheet = timelines[0]?.closest(".sheet") || document.body;
+    if (timelines[0]) observer.observe(sheet);
     window.addEventListener("beforeprint", layout);
     window.addEventListener("afterprint", layout);
+    window.addEventListener("load", layout);
     document.fonts?.ready.then(layout);
     layout();
     return () => {
@@ -524,6 +566,7 @@
       document.removeEventListener("visibilitychange", tick);
       window.removeEventListener("beforeprint", layout);
       window.removeEventListener("afterprint", layout);
+      window.removeEventListener("load", layout);
     };
   }
   function previewRuntime(layout) {
@@ -680,7 +723,7 @@
       : m.theme === "travel"
         ? art.flight + art.city
         : "";
-    const extraCss = `html,body{touch-action:manipulation;} .event p a,.notes a{color:inherit;text-decoration:underline;text-decoration-color:#8fb4c8;text-underline-offset:2px;} .map-link{display:inline-flex;align-items:center;gap:4px;vertical-align:middle;margin:0 2px;padding:2px 9px 2px 6px;border-radius:999px;background:var(--blue);color:#fff!important;font-size:.72em;font-weight:700;letter-spacing:.3px;text-decoration:none!important;line-height:1.5;} .map-link svg{width:.95em;height:.95em;fill:currentColor;} .event{z-index:1;} .span{opacity:.45;} .span.sky{fill:#8fd0f0;} .span.sand{fill:#f2c37a;} .span.sage{fill:#9ec9a8;} .span.past{opacity:.2;} .event time.span{font-size:.72em;line-height:1.15;letter-spacing:0;white-space:normal;} @media(max-width:580px){.event time.span{font-size:12px;white-space:nowrap;}} .event.live .event-body{box-shadow:0 0 0 2px #e2573f66;} body.live .event,body.live .day-heading{cursor:pointer;} body.live .event:hover .event-body{outline:2px solid #8fc7dd88;outline-offset:2px;} .now{position:absolute;left:var(--axis);right:0;height:0;border-top:2px solid #e2573f;z-index:0;pointer-events:none;animation:now-blink 2.6s ease-in-out infinite;} .now-dot{position:absolute;left:0;top:-1px;width:14px;height:14px;border-radius:50%;background:#e2573f;transform:translate(-50%,-50%);box-shadow:0 0 0 4px #e2573f33;} @keyframes now-blink{0%,100%{opacity:1}50%{opacity:.3}} .event.past{opacity:.42;} .connector.past,.event-dot.past{opacity:.35;} .until{position:absolute;right:10px;top:6px;font-size:12px;font-weight:600;letter-spacing:.3px;color:var(--blue);opacity:.75;white-space:nowrap;} @media(max-width:580px){.until{right:8px;top:5px;font-size:11px;}} @media print{.now{display:none;}.event.past,.connector.past,.event-dot.past{opacity:1;}} .event{top:calc(var(--m) / 60 * var(--hour-height));} .masthead{height:auto;min-height:180px;padding-bottom:38px;}h1{overflow-wrap:anywhere;} .event-icon img{width:100%;height:100%;object-fit:cover;border-radius:50%;} .custom-art{object-fit:contain;} .event-body{overflow-wrap:anywhere;} .notes{grid-template-columns:230px 1fr;} .notes-heading{font-family:Georgia,serif;font-size:30px;font-weight:bold;} .notes:empty{display:none;} footer{height:auto;min-height:85px;padding:20px 0;overflow-wrap:anywhere;} footer:empty{display:none;}@media(max-width:850px){.notes{grid-template-columns:165px 1fr;}.notes-heading{font-size:25px;}} @media(max-width:580px){.masthead{min-height:160px;padding-bottom:28px;}.notes{display:block;}} .day-heading{display:flex;align-items:center;gap:14px;margin:36px 0 0;font-size:14px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--blue);} .day-heading::after{content:'';flex:1;height:1px;background:currentColor;opacity:.35;} .day:first-of-type .day-heading{margin-top:8px;} @media(max-width:580px){.day-heading{font-size:12px;letter-spacing:2px;margin-top:26px;}}`;
+    const extraCss = `html,body{touch-action:manipulation;} body.hide-past .day.past-day{display:none;} .show-past{display:block;margin:6px auto 4px;padding:8px 18px;border:1px solid var(--blue);border-radius:999px;background:transparent;color:var(--blue);font:inherit;font-size:13px;font-weight:700;letter-spacing:.3px;cursor:pointer;} @media print{.show-past{display:none;} body.hide-past .day.past-day{display:block;}} .event p a,.notes a{color:inherit;text-decoration:underline;text-decoration-color:#8fb4c8;text-underline-offset:2px;} .map-link{display:inline-flex;align-items:center;gap:4px;vertical-align:middle;margin:0 2px;padding:2px 9px 2px 6px;border-radius:999px;background:var(--blue);color:#fff!important;font-size:.72em;font-weight:700;letter-spacing:.3px;text-decoration:none!important;line-height:1.5;} .map-link svg{width:.95em;height:.95em;fill:currentColor;} .event{z-index:1;} .span{opacity:.45;} .span.sky{fill:#8fd0f0;} .span.sand{fill:#f2c37a;} .span.sage{fill:#9ec9a8;} .span.past{opacity:.2;} .event time.span{font-size:.72em;line-height:1.15;letter-spacing:0;white-space:normal;} @media(max-width:580px){.event time.span{font-size:12px;white-space:nowrap;}} .event.live .event-body{box-shadow:0 0 0 2px #e2573f66;} body.live .event,body.live .day-heading{cursor:pointer;} body.live .event:hover .event-body{outline:2px solid #8fc7dd88;outline-offset:2px;} .now{position:absolute;left:var(--axis);right:0;height:0;border-top:2px solid #e2573f;z-index:0;pointer-events:none;animation:now-blink 2.6s ease-in-out infinite;} .now-dot{position:absolute;left:0;top:-1px;width:14px;height:14px;border-radius:50%;background:#e2573f;transform:translate(-50%,-50%);box-shadow:0 0 0 4px #e2573f33;} @keyframes now-blink{0%,100%{opacity:1}50%{opacity:.3}} .event.past{opacity:.42;} .connector.past,.event-dot.past{opacity:.35;} .until{position:absolute;right:10px;top:6px;font-size:12px;font-weight:600;letter-spacing:.3px;color:var(--blue);opacity:.75;white-space:nowrap;} @media(max-width:580px){.until{right:8px;top:5px;font-size:11px;}} @media print{.now{display:none;}.event.past,.connector.past,.event-dot.past{opacity:1;}} .event{top:calc(var(--m) / 60 * var(--hour-height));} .masthead{height:auto;min-height:180px;padding-bottom:38px;}h1{overflow-wrap:anywhere;} .event-icon img{width:100%;height:100%;object-fit:cover;border-radius:50%;} .custom-art{object-fit:contain;} .event-body{overflow-wrap:anywhere;} .notes{grid-template-columns:230px 1fr;} .notes-heading{font-family:Georgia,serif;font-size:30px;font-weight:bold;} .notes:empty{display:none;} footer{height:auto;min-height:85px;padding:20px 0;overflow-wrap:anywhere;} footer:empty{display:none;}@media(max-width:850px){.notes{grid-template-columns:165px 1fr;}.notes-heading{font-size:25px;}} @media(max-width:580px){.masthead{min-height:160px;padding-bottom:28px;}.notes{display:block;}} .day-heading{display:flex;align-items:center;gap:14px;margin:36px 0 0;font-size:14px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--blue);} .day-heading::after{content:'';flex:1;height:1px;background:currentColor;opacity:.35;} .day:first-of-type .day-heading{margin-top:8px;} @media(max-width:580px){.day-heading{font-size:12px;letter-spacing:2px;margin-top:26px;}}`;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(m.title)}</title><style>${art.css}
 ${extraCss}
 ${themes[m.theme]}</style></head><body class="theme-${m.theme}${live ? " live" : ""}">${art.symbols}<main class="sheet"><header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main><script>${runtime}<\/script></body></html>`;
