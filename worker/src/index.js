@@ -7,6 +7,7 @@
 //   POST /            body = the payload      -> { id, url }
 //   GET  /<id>        the viewer page with the payload inlined
 //   GET  /<id>.txt    the timeline text itself
+//   GET  /<id>.ics    the same as a calendar feed (also /<name>.ics)
 //   PUT  /<name>      body = the payload      -> { url, key? }   named link
 //   GET  /<name>      the viewer for whatever that name points to now
 //   GET  /resolve?u=  follows a Google/Apple Maps link -> { url, name, address }
@@ -26,11 +27,15 @@
 // point of a share service. Payloads are capped and validated so KV only
 // ever holds something the viewer can decode.
 
+// The renderer's parser, shared with the studio (the file is a
+// dependency-free IIFE; bundled here as CommonJS).
+import TimelineText from "../../timeline-renderer.js";
+
 const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
 const LINK_LINE = /^([ \t]*link[ \t]*:[ \t]*[a-z0-9][a-z0-9-]{1,30}[a-z0-9])[ \t]+([A-Za-z0-9_-]{16,40})[ \t]*$/m;
-const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt)?$/;
-const ALIAS = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt)?$/;
+const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
+const ALIAS = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics)?$/;
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, PUT, GET, OPTIONS",
@@ -71,6 +76,10 @@ export default {
     if (!payload) return page(notFound(env), 404);
     if (match[2]) {
       const text = await decode(payload);
+      if (match[2] === ".ics")
+        return new Response(calendar(text, match[1], `${url.origin}/${match[1]}`), {
+          headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": cache, ...CORS },
+        });
       return new Response(text, {
         headers: { "content-type": "text/plain; charset=utf-8", "cache-control": cache, ...CORS },
       });
@@ -282,6 +291,82 @@ async function command(request, env) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
     return json({ error: "Command failed: " + (error.message || error) }, 502);
   }
+}
+
+// iCalendar feed of a timeline, for "subscribe from URL" in Google or iOS
+// Calendar. Times are floating (no time zone), so an itinerary shows at the
+// wall-clock times written, wherever the calendar is set. An event without
+// an end runs an hour, or until the next event if that comes sooner. UIDs
+// are built from the name, day, time and title, so an unchanged event keeps
+// its identity across edits. Undated days cannot be scheduled and are left
+// out.
+function calendar(text, name, link) {
+  const model = TimelineText.parse(text);
+  const esc = (s) =>
+    String(s).replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const at = (iso, minutes) => {
+    const [y, m, d] = iso.split("-").map(Number),
+      date = new Date(y, m - 1, d, 0, minutes),
+      pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
+  };
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Timeline Studio//tl.gaup.uk//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${esc(model.title || name)}`,
+    "X-PUBLISHED-TTL:PT1H",
+    "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
+  ];
+  for (const day of model.days) {
+    if (!day.iso) continue;
+    day.events.forEach((event, i) => {
+      const next = day.events[i + 1],
+        end = event.end || Math.min(event.minutes + 60, next && next.minutes > event.minutes ? next.minutes : Infinity),
+        slug = event.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40),
+        url = (event.detail.match(/https?:\/\/\S+/) || [])[0] || "",
+        // The text before a map link is the place: "REI · 1900 Empire Ave …"
+        // as the studio writes it, or the user's own "Pick up the hat ·
+        // 1900 Empire Ave". Keep the address-looking parts (with a digit),
+        // or everything when nothing looks like an address.
+        parts = url ? event.detail.slice(0, event.detail.indexOf(url)).split(/\s+[·|]\s+/).map((p) => p.trim()).filter(Boolean) : [],
+        place = (parts.filter((p) => /\d/.test(p)).length ? parts.filter((p) => /\d/.test(p)) : parts).join(", ");
+      lines.push(
+        "BEGIN:VEVENT",
+        `UID:${name}-${day.iso}-${String(event.minutes).padStart(4, "0")}-${slug}@tl.gaup.uk`,
+        `DTSTAMP:${stamp}`,
+        `DTSTART:${at(day.iso, event.minutes)}`,
+        `DTEND:${at(day.iso, end)}`,
+        `SUMMARY:${esc(event.title)}`,
+      );
+      if (event.detail) lines.push(`DESCRIPTION:${esc(event.detail)}`);
+      if (place) lines.push(`LOCATION:${esc(place)}`);
+      lines.push(`URL:${url || link}`, "END:VEVENT");
+    });
+  }
+  lines.push("END:VCALENDAR");
+  // Content lines fold at 75 octets (RFC 5545), continued with one space.
+  const encoder = new TextEncoder();
+  return (
+    lines
+      .map((line) => {
+        const out = [];
+        let chunk = "";
+        for (const char of line) {
+          if (encoder.encode(chunk + char).length > (out.length ? 74 : 75)) {
+            out.push(chunk);
+            chunk = "";
+          }
+          chunk += char;
+        }
+        out.push(chunk);
+        return out.join("\r\n ");
+      })
+      .join("\r\n") + "\r\n"
+  );
 }
 
 class HttpError extends Error {

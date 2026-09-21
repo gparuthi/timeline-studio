@@ -545,7 +545,11 @@
       document.head.replaceChildren(...next.head.childNodes);
       document.body.replaceChildren(...next.body.childNodes);
       cleanup = layout();
-      window.scrollTo(0, top);
+      // Restore this frame's own position only. On iOS the frame is sized
+      // to its content and never scrolls, so top is 0 there; relaying it
+      // through the patched scrollTo would send the studio's panel back to
+      // the top after every keystroke.
+      scrollTo(0, top);
     });
   }
   // Best-effort calendar date from the free-text `date:` line, so the runtime

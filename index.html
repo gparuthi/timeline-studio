@@ -726,6 +726,7 @@
           <div class="menu-list" role="menu">
             <button id="copy-link" role="menuitem" title="Copy a short link to this timeline (the long link is in the address bar)">Copy link</button
             ><button id="custom-link" role="menuitem" title="A link with a name you choose that always shows your latest edit">Custom link…</button
+            ><button id="calendar-link" role="menuitem" title="A calendar feed of this timeline; subscribe to it in Google or iOS Calendar and it follows your edits">Calendar feed</button
             ><button id="share-image" role="menuitem" title="Render a PNG to share in a message">Image (PNG)</button
             ><button id="export" role="menuitem" title="A standalone timeline page">Timeline (HTML)</button
             ><button id="save-studio" role="menuitem" title="This editor with your timeline inside, editable later">Studio (HTML)</button>
@@ -1416,7 +1417,11 @@ footer: See you there ♡</pre>
             document.head.replaceChildren(...next.head.childNodes);
             document.body.replaceChildren(...next.body.childNodes);
             cleanup = layout();
-            window.scrollTo(0, top);
+            // Restore this frame's own position only. On iOS the frame is sized
+            // to its content and never scrolls, so top is 0 there; relaying it
+            // through the patched scrollTo would send the studio's panel back to
+            // the top after every keystroke.
+            scrollTo(0, top);
           });
         }
         // Best-effort calendar date from the free-text `date:` line, so the runtime
@@ -2055,11 +2060,14 @@ footer: See you there ♡</pre>
       // "link:" line, else a content link. If the link server cannot be
       // reached the long fragment link is copied instead, so the button
       // always yields something that opens.
-      document.querySelector("#copy-link").addEventListener("click", async () => {
+      // Copy link and Calendar feed share one path: the named link when the
+      // text has one, else a content link, else (for the link only) the long
+      // fragment link. The feed is the same address with ".ics" appended.
+      async function copyLink(suffix = "") {
         if (!latestLink) return;
         const payload = latestLink.slice(latestLink.indexOf("#") + 1);
         status.className = "status";
-        status.textContent = "Making link…";
+        status.textContent = suffix ? "Making calendar feed…" : "Making link…";
         const plainLink = () =>
           fetch(SHORT_LINK_API, {
             method: "POST",
@@ -2073,10 +2081,13 @@ footer: See you there ♡</pre>
         // A named link that cannot be published from here (name taken, no
         // key on this device) degrades to a plain content link.
         let fallback = "";
-        const request = (namedLink ? publishNamed().then((url) => url || plainLink()) : plainLink()).catch((error) => {
-          fallback = error.message;
-          return latestLink;
-        });
+        const request = (namedLink ? publishNamed().then((url) => url || plainLink()) : plainLink())
+          .then((url) => url + suffix)
+          .catch((error) => {
+            if (suffix) throw error;
+            fallback = error.message;
+            return latestLink;
+          });
         let copied = false;
         // Safari only honours clipboard writes made during the click, so hand
         // it the pending request as a ClipboardItem instead of awaiting first.
@@ -2090,7 +2101,15 @@ footer: See you there ♡</pre>
             copied = false;
           }
         }
-        const link = await request;
+        let link;
+        try {
+          link = await request;
+        } catch (error) {
+          status.className = "status error";
+          status.textContent = `Calendar feed needs the link server: ${error.message}`;
+          toast("Calendar feed unavailable: " + error.message, "error");
+          return;
+        }
         if (!copied)
           copied = navigator.clipboard
             ? await navigator.clipboard.writeText(link).then(() => true, () => false)
@@ -2098,20 +2117,24 @@ footer: See you there ♡</pre>
         status.className = "status";
         const label = fallback
           ? `✓ Long link copied (link server: ${fallback})`
-          : `✓ Link copied · ${link}`;
+          : `✓ ${suffix ? "Calendar feed" : "Link"} copied · ${link}`;
         if (copied) {
           status.textContent = label;
           toast(
             fallback
               ? `Long link copied (link server unreachable)${namedKey ? " · it carries your edit id" : ""}`
-              : `Link copied · ${link.replace(/^https?:\/\//, "")}`,
+              : suffix
+                ? "Calendar feed copied · in Google Calendar: Other calendars → From URL"
+                : `Link copied · ${link.replace(/^https?:\/\//, "")}`,
           );
         } else {
           status.textContent = fallback ? "Could not copy; the long link is in the dialog." : `Link: ${link}`;
           toast("Could not copy automatically", "error");
           window.prompt("Copy this link:", link);
         }
-      });
+      }
+      document.querySelector("#copy-link").addEventListener("click", () => copyLink());
+      document.querySelector("#calendar-link").addEventListener("click", () => copyLink(".ics"));
       document.querySelector("#custom-link").addEventListener("click", () => {
         const suggested =
           namedLink ||
