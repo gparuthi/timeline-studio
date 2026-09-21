@@ -371,6 +371,26 @@
         background: #fff0ed;
         color: #9b3824;
       }
+      /* The line the cursor is on, visible even when the caret is not:
+         iOS draws no caret (and opens no keyboard) for a focus that did not
+         come from a tap on the text box itself, which is every tap-to-edit
+         from the preview or a shared view. Tap the highlighted line to type. */
+      .editor-wrap {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+      }
+      .caret-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        display: none;
+        pointer-events: none;
+        background: #8fc7dd2e;
+        border-left: 3px solid #4d9fc4;
+      }
       /* "Change it": a plain-English instruction sent to the link server,
          which asks Workers AI for the edited text (see README). */
       .command {
@@ -655,6 +675,10 @@
       .command {
         border-color: #29353e;
       }
+      .caret-line {
+        background: #8fc7dd1f;
+        border-left-color: #8fc7dd;
+      }
       .command input {
         background: #10161b;
         color: #d2e5ee;
@@ -718,12 +742,15 @@
           <button class="tool" type="submit" title="Apply this change to the text" aria-label="Apply the change"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM5 17l.8 2.2L8 20l-2.2.8L5 23l-.8-2.2L2 20l2.2-.8zM19 2l.6 1.6L21.2 4.2l-1.6.6L19 6.4l-.6-1.6L16.8 4.2l1.6-.6z"/></svg></button>
         </form>
         <label class="visually-hidden" for="source">Your timeline</label>
-        <textarea
-          id="source"
-          spellcheck="false"
-          autocomplete="off"
-          aria-describedby="status"
-        ></textarea>
+        <div class="editor-wrap">
+          <textarea
+            id="source"
+            spellcheck="false"
+            autocomplete="off"
+            aria-describedby="status"
+          ></textarea>
+          <div class="caret-line" id="caret-line" aria-hidden="true"></div>
+        </div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </section>
       <section class="support" id="help" aria-label="Help" hidden>
@@ -1884,6 +1911,24 @@ footer: See you there ♡</pre>
           if (panel.scrollHeight > panel.clientHeight + 1) panel.scrollTo(0, Number(event.data.y) || 0);
         } else if (event.data?.type === "timeline:edit") editLine(Number(event.data.line));
       });
+      // Keep the current-line highlight on the line the caret is on.
+      const caretLine = document.querySelector("#caret-line");
+      function placeCaretLine() {
+        const style = getComputedStyle(editor),
+          lineHeight = parseFloat(style.lineHeight) || 22,
+          line = editor.value.slice(0, editor.selectionStart).split("\n").length,
+          top = editor.clientTop + parseFloat(style.paddingTop) + (line - 1) * lineHeight - editor.scrollTop,
+          inside = top + lineHeight > editor.clientTop && top < editor.clientTop + editor.clientHeight;
+        caretLine.style.display = inside ? "block" : "none";
+        caretLine.style.top = `${top}px`;
+        caretLine.style.height = `${lineHeight}px`;
+      }
+      ["input", "click", "keyup", "select", "scroll", "focus"].forEach((type) =>
+        editor.addEventListener(type, placeCaretLine),
+      );
+      document.addEventListener("selectionchange", () => {
+        if (document.activeElement === editor) placeCaretLine();
+      });
       // Open the editor on one source line (1-based), selected and in view.
       function editLine(line) {
         setHelp(false);
@@ -1899,6 +1944,7 @@ footer: See you there ♡</pre>
           // Cursor at the end of the line, ready to type; a selection would
           // be replaced by the first keystroke.
           editor.setSelectionRange(end, end);
+          placeCaretLine();
         };
         focusLine();
         // Again once the pane has finished sliding in (focus can be refused
