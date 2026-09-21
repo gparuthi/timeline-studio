@@ -1384,22 +1384,34 @@ footer: See you there ♡</pre>
             const dated = timelines.filter((t) => t.dataset.date).sort((a, b) => (a.dataset.date < b.dataset.date ? -1 : 1));
             if (!dated.length) return;
             if (document.readyState === "complete") window.__timelineScrolled = true;
-            let target = dated.map((t) => t.querySelector(".now")).find(Boolean),
-              offset = window.innerHeight / 2;
-            if (!target) {
-              offset = window.innerHeight / 3;
-              for (const timeline of dated) {
-                const date = timeline.dataset.date,
-                  now = minutesNow - Number(timeline.dataset.start);
-                if (date < ymd) continue;
-                target = [...timeline.querySelectorAll(".event")].find(
-                  (card) => date > ymd || Number(card.dataset.minute) >= now,
-                );
-                if (target) break;
+            // The marker (or the next card) sits one hour of the scale below the
+            // top of the screen, so the last hour stays in view as context.
+            let target = null,
+              timeline = null;
+            for (const t of dated) {
+              const marker = t.querySelector(".now");
+              if (marker) {
+                target = marker;
+                timeline = t;
+                break;
               }
             }
+            if (!target)
+              for (const t of dated) {
+                const date = t.dataset.date,
+                  now = minutesNow - Number(t.dataset.start);
+                if (date < ymd) continue;
+                target = [...t.querySelectorAll(".event")].find(
+                  (card) => date > ymd || Number(card.dataset.minute) >= now,
+                );
+                if (target) {
+                  timeline = t;
+                  break;
+                }
+              }
             if (!target) return window.scrollTo(0, document.documentElement.scrollHeight);
-            const y = target.getBoundingClientRect().top + window.scrollY - offset;
+            const hour = parseFloat(getComputedStyle(timeline).getPropertyValue("--hour-height")) || 120;
+            const y = target.getBoundingClientRect().top + window.scrollY - hour - 12;
             if (y > 0) window.scrollTo(0, y);
           }
           function tick() {
