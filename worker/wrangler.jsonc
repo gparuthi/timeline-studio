@@ -14,9 +14,11 @@
   // is served from the same Worker as static assets, so one deploy ships
   // the app and its API together on one origin. A request that matches a
   // file is answered from the assets; everything else (short ids, names,
-  // /command, /resolve) reaches the code. ../.assetsignore keeps the
-  // worker source and repo files out of the upload.
-  "assets": { "directory": "../", "binding": "ASSETS", "html_handling": "auto-trailing-slash", "not_found_handling": "none" },
+  // /command, /resolve) reaches the code; "/" is answered by the code with
+  // index.html, and files are served under their exact names (no .html
+  // redirects). ../.assetsignore keeps the worker source and repo files
+  // out of the upload.
+  "assets": { "directory": "../", "binding": "ASSETS", "html_handling": "none", "not_found_handling": "none" },
   // POST /command edits a timeline from a plain-English instruction with
   // Workers AI (10k neurons a day free; one command costs ~25). The rate
   // limit keeps a stranger from burning that allowance: 20 commands a

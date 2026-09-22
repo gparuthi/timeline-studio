@@ -54,6 +54,8 @@ export default {
       return new Response(null, { status: 204, headers: { ...CORS, "access-control-allow-private-network": "true" } });
     if (url.pathname === "/") {
       if (request.method === "POST") return create(request, env);
+      // The studio itself, from this Worker's static assets.
+      if (env.ASSETS) return env.ASSETS.fetch(new Request(new URL("/index.html", url), request));
       return Response.redirect(env.STUDIO_URL, 302);
     }
     if (url.pathname === "/resolve" && request.method === "GET") return resolveMap(url.searchParams.get("u") || "");

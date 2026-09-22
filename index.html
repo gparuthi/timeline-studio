@@ -2084,10 +2084,38 @@ footer: See you there ♡</pre>
         update();
         toast(`Map link → ${place.name}`);
       }
+      // Before any edit, say up front whether this device can publish to
+      // the name: a page opened from a shared view carries no edit id, and
+      // finding that out after typing is what lost edits before.
+      const nameStatus = new Map();
+      async function idleSync() {
+        const name = namedLink;
+        if (!name) return;
+        const key = namedKey || linkKeys()[name];
+        if (key) return setSync("ok", `✓ Linked to ${name} · edits publish as you type`);
+        if (!nameStatus.has(name)) {
+          nameStatus.set(name, "pending");
+          try {
+            const response = await fetch(`${SHORT_LINK_API}${name}.txt`, { method: "HEAD", cache: "no-store" });
+            nameStatus.set(name, response.status === 404 ? "free" : "taken");
+          } catch (error) {
+            nameStatus.set(name, "unknown");
+          }
+          if (namedLink !== name || dirty) return;
+        }
+        const state = nameStatus.get(name);
+        if (state === "free") setSync("ok", `✓ ${name} is free · claimed on your first edit`);
+        else if (state === "taken")
+          setSync("error", `⚠ This device has no edit id for ${name} — edits will not reach the link. Tap to paste the id`, () => pasteEditId(name));
+        else setSync("busy", `Linked to ${name}`);
+      }
       function queueNamedPublish() {
         clearTimeout(namedTimer);
         if (!namedLink) return setSync("", "");
-        if (!dirty || editor.value === publishedText) return;
+        if (!dirty || editor.value === publishedText) {
+          if (!dirty) idleSync();
+          return;
+        }
         setSync("busy", `Unsaved edits · saving to ${namedLink} in a moment…`);
         namedTimer = setTimeout(() => publishNamed().catch(() => {}), 1500);
       }
