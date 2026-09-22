@@ -277,6 +277,7 @@
           "link",
           "timezone",
           "city",
+          "places",
         ].includes(key)
       )
         throw new Error(`Line ${line}: unknown setting “${key}”.`);

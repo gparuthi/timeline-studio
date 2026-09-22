@@ -1197,6 +1197,7 @@ footer: See you there ♡</pre>
                 "link",
                 "timezone",
                 "city",
+                "places",
               ].includes(key)
             )
               throw new Error(`Line ${line}: unknown setting “${key}”.`);
@@ -1811,6 +1812,8 @@ footer: See you there ♡</pre>
         fitPane();
       }
       function closePane() {
+        clearTimeout(placesTimer);
+        addPlaces();
         document.body.classList.remove("pane-open");
         pane.inert = true;
         editToggle.setAttribute("aria-expanded", "false");
@@ -2061,6 +2064,103 @@ footer: See you there ♡</pre>
       // is rewritten once, so a description you edit afterwards is yours.
       const resolvedMaps = new Map();
       const MAP_SHORT = /^https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|g\.co)\/\S+$/i;
+      // Places, filled in for you. A few seconds after you stop typing (and
+      // once on opening a saved timeline), the events that name a venue but
+      // carry no "@ place" go to the link server, which asks Workers AI to
+      // add one. The server accepts only " @ place" appended to such a
+      // line, and only a place made of that line's own words, so the worst
+      // case is a missing place. The result is applied only if the text has
+      // not changed meanwhile, and the toast offers Undo. Lines already
+      // looked at are remembered per timeline, so "Drive home" is not asked
+      // about again. "places: off" in the text turns it off.
+      const placesSeen = new Set();
+      let placesTimer, placesBusy = false, placesLast = 0, placesKey = "";
+      function loadPlacesSeen() {
+        const key = "places:" + (docName || "local");
+        if (key === placesKey) return;
+        placesKey = key;
+        placesSeen.clear();
+        try {
+          JSON.parse(localStorage.getItem(key) || "[]").forEach((s) => placesSeen.add(s));
+        } catch (error) {}
+      }
+      function rememberPlacesSeen() {
+        try {
+          localStorage.setItem(placesKey, JSON.stringify([...placesSeen].slice(-400)));
+        } catch (error) {}
+      }
+      function placeCandidates(model) {
+        if (model.places === "off") return [];
+        loadPlacesSeen();
+        return model.events
+          .filter((e) => !e.place && !/https?:\/\//.test(e.detail))
+          .map((e) => e.title + " | " + e.detail)
+          .filter((s) => !placesSeen.has(s));
+      }
+      function schedulePlaces(delay = 4000) {
+        clearTimeout(placesTimer);
+        placesTimer = setTimeout(addPlaces, delay);
+      }
+      async function addPlaces() {
+        // Never on an untouched example: that would create a document.
+        if (placesBusy || (!docName && !dirty)) return;
+        const wait = 15000 - (Date.now() - placesLast);
+        if (wait > 0) return schedulePlaces(wait);
+        const before = editor.value;
+        let model;
+        try {
+          model = TimelineText.parse(before);
+        } catch (error) {
+          return;
+        }
+        const candidates = placeCandidates(model);
+        if (!candidates.length) return;
+        placesBusy = true;
+        placesLast = Date.now();
+        try {
+          const response = await fetch(SHORT_LINK_API + "places", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ text: before }),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) return;
+          candidates.forEach((s) => placesSeen.add(s));
+          rememberPlacesSeen();
+          const added = body.added || [];
+          const next = String(body.text || "");
+          if (!added.length || editor.value !== before) return;
+          TimelineText.parse(next);
+          setTextQuietly(next);
+          const names = added.map((a) => a.place);
+          toast(`Added ${names.length === 1 ? "a place" : names.length + " places"}: ${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""}`, "", {
+            label: "Undo",
+            run: () => {
+              setTextQuietly(before);
+              toast("Undone");
+            },
+          });
+        } catch (error) {
+          /* offline or busy: the next edit tries again */
+        } finally {
+          placesBusy = false;
+        }
+      }
+      // Replace the text without focusing the editor (the pane may be
+      // closed), keeping the caret where it was when it is focused.
+      function setTextQuietly(next) {
+        const focused = document.activeElement === editor,
+          start = editor.selectionStart,
+          end = editor.selectionEnd;
+        editor.value = next;
+        dirty = true;
+        clearTimeout(pending);
+        update();
+        if (focused) {
+          editor.setSelectionRange(Math.min(start, next.length), Math.min(end, next.length));
+          placeCaretLine();
+        }
+      }
       async function resolveMapLinks(model) {
         for (const event of model.events) {
           const url = event.detail.trim();
@@ -2194,6 +2294,7 @@ footer: See you there ♡</pre>
           refreshLink();
           queueSave();
           resolveMapLinks(model);
+          schedulePlaces();
         } catch (error) {
           latestHTML = "";
           status.className = "status error";
