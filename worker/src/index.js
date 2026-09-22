@@ -315,7 +315,7 @@ Format, one item per line:
 - "range: HH:MM - HH:MM" under a day sets its visible hours. "note: ..." adds a note.
 - Events: "HH:MM | title | description | icon | color". Only the time and title are required; leave the other fields empty rather than inventing them. Time can be a span "HH:MM - HH:MM". Use 24-hour times.
 - Icons: home, plane, depart, land, coffee, meal, tree, bed, shop, ticket, pin, car, road, palm. Colors: sky, sand, sage. Leave the icon empty to let it be guessed.
-- A place goes at the end of the description after " @ ": "Gear run @ REI Baldwin Hills", or just "@ Wi Spa" when there is nothing else to say. It becomes a map link by itself, so never write addresses or URLs. When the instruction names a place for an event, add it this way.
+- A place goes at the end of the description after " @ ": "Gear run @ REI Baldwin Hills", or just "@ Wi Spa" when there is nothing else to say; a bare "@" as the description means the title is the place ("Manhattan Beach | @"). It becomes a map link by itself, so never write addresses or URLs. When the instruction names a place for an event, add it this way.
 - Lines starting with # are comments.
 
 Rules:

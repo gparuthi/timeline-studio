@@ -151,7 +151,11 @@
   // pin chip that searches the map for it, and the calendar feed makes it
   // the event's location. A URL after the place stays a plain link. An
   // email address ("a@b.com") has no space before the @ and is left alone.
-  function splitPlace(detail) {
+  // A bare "@" at the end ("Manhattan Beach | @") means the title is the
+  // place.
+  function splitPlace(detail, title) {
+    const bare = detail.match(/(?:^|\s)@\s*$/);
+    if (bare && title) return { detail: detail.slice(0, bare.index).trim(), place: title.trim() };
     const m = detail.match(/(?:^|\s)@\s*(\S.*)$/);
     if (!m) return { detail, place: "" };
     const rest = m[1],
@@ -233,7 +237,7 @@
             `Line ${line}: at most five fields; write \\| for a literal pipe.`,
           );
         const [clock, title, written = "", icon = "", color = "sky"] = fields;
-        const { detail, place } = splitPlace(written);
+        const { detail, place } = splitPlace(written, title);
         if (!title) throw new Error(`Line ${line}: add an event title.`);
         if (!["sky", "sand", "sage"].includes(color || "sky"))
           throw new Error(`Line ${line}: color must be sky, sand, or sage.`);
