@@ -36,6 +36,8 @@ const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
 const LINK_LINE = /^([ \t]*link[ \t]*:[ \t]*[a-z0-9][a-z0-9-]{1,30}[a-z0-9])[ \t]+([A-Za-z0-9_-]{16,40})[ \t]*$/m;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
 const ALIAS = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics)?$/;
+// Names that would shadow a studio file or an endpoint on this origin.
+const RESERVED = new Set(["index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api"]);
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, PUT, GET, OPTIONS",
@@ -136,6 +138,7 @@ async function claim(request, env, name) {
     const { payload, text, textKey } = await readPayload(request);
     const record = await env.LINKS.get("alias:" + name, "json");
     const key = request.headers.get("x-link-key") || textKey || "";
+    if (RESERVED.has(name)) throw new HttpError(409, `“${name}” is reserved`);
     if (record && record.key !== key) throw new HttpError(403, `“${name}” is already taken`);
     if (!record && (await env.LINKS.get(name)) !== null) throw new HttpError(409, `“${name}” is not available`);
     const id = await store(env, payload, text);
@@ -283,7 +286,15 @@ async function command(request, env) {
     const block = raw.match(/```(?:timeline|text)?[ \t]*\n([\s\S]*?)\n?```/);
     if (!block) throw new HttpError(502, "The model did not return a timeline" + (raw.trim() ? ": " + raw.trim().slice(0, 240) : ""));
     let edited = block[1].replace(/[ \t]+$/gm, "").trim();
-    if (keyed) edited = /^[ \t]*link[ \t]*:/m.test(edited) ? edited.replace(/^[ \t]*link[ \t]*:.*$/m, keyed[0].trim()) : keyed[0].trim() + "\n" + edited;
+    // The link line comes back exactly as it went in (id included), whether
+    // the model kept it, changed it or dropped it: losing it would silently
+    // stop the studio from publishing to the named link.
+    const linkLine = (text.match(/^[ \t]*link[ \t]*:.*$/m) || [])[0];
+    if (linkLine)
+      edited = /^[ \t]*link[ \t]*:/m.test(edited)
+        ? edited.replace(/^[ \t]*link[ \t]*:.*$/m, linkLine.trim())
+        : edited.replace(/^([ \t]*title[ \t]*:.*)$/m, `$1\n${linkLine.trim()}`) || linkLine.trim() + "\n" + edited;
+    if (linkLine && !edited.includes(linkLine.trim())) edited = linkLine.trim() + "\n" + edited;
     if (assets.length) edited += "\n\n" + assets.join("\n");
     const note = (raw.slice(raw.indexOf(block[0]) + block[0].length).match(/^\s*note:\s*(.+)$/im) || [])[1] || "";
     return json({ text: edited + "\n", note: note.trim().slice(0, 300), model: COMMAND_MODEL });

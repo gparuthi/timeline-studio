@@ -1,6 +1,6 @@
 # Timeline Studio
 
-Public: https://gparuthi.github.io/timeline-studio/ (a mirror of this folder, pushed with `publish.sh`). Local: http://md-capture:1250/20260918_timeline-studio/
+Public: https://tl.gaup.uk/ (served by the link Worker as static assets, so the app and its API ship in one deploy on one origin). Source mirror with a GitHub Pages copy: https://gparuthi.github.io/timeline-studio/ (pushed with `publish.sh`). Local: http://md-capture:1250/20260918_timeline-studio/
 
 Open `index.html` in a browser. The timeline is the page; the subtle **✎ Edit** button (bottom right) opens the editor pane with the text, a theme picker, and one **Export** menu (Copy link, Custom link, Image PNG, Timeline HTML, Studio HTML). Tapping a card or a day heading in the preview opens the editor with the cursor at the end of that line; the line is highlighted, because iOS draws no caret (and opens no keyboard) for a focus that did not come from a tap on the text box itself, so tap the highlighted line to start typing. Every action, and the **Done** button, closes the pane again so the timeline is what you see; changes are saved as you type, so there is nothing to cancel. Edit the text to update the preview, choose **Save studio** to keep the editor and your current timeline together in one HTML file, or export a standalone HTML timeline. Saved studio copies reopen with your edits and embedded images, and can be edited and saved again. Linked image URLs remain external. Copy and paste directly in the text editor to move timeline text. The studio includes its renderer and artwork and needs no installation or server.
 
@@ -131,6 +131,6 @@ Open `index.html` directly, or run `python3 -m http.server 8766` from this direc
 
 ## Publishing
 
-The public copy lives in the separate public repo `gparuthi/timeline-studio` (GitHub Pages from `main`). This folder is the source; `publish.sh` copies the web files and `worker/` over and pushes. The public repo carries the same sample data as here, so keep the sample free of anything private.
+The app is served at https://tl.gaup.uk/ by the Worker in `worker/`: `wrangler.jsonc` declares this folder as its static assets (`.assetsignore` keeps `worker/`, the README and the publish script out), so `cd worker && npx -y wrangler@latest deploy` ships the studio, the viewer, the renderer and the API together. Link names that would shadow a file or an endpoint (`view`, `themes`, `command`, …) are refused. The separate public repo `gparuthi/timeline-studio` (GitHub Pages from `main`) is a source mirror: `publish.sh` copies the web files and `worker/` over and pushes. It carries the same sample data as here, so keep the sample free of anything private.
 
 The editor uses the playground dark theme; rendered timelines retain their paper palette. Save studio downloads a new editable `.studio.html` copy.

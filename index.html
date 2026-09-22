@@ -391,6 +391,38 @@
         background: #8fc7dd2e;
         border-left: 3px solid #4d9fc4;
       }
+      /* Named-link state, always visible above the editor (the status line
+         at the bottom sits under the phone keyboard). Red means the edits
+         are not on the link; tapping it offers the fix. */
+      .sync {
+        display: block;
+        width: 100%;
+        margin: 0;
+        padding: 7px 14px;
+        border: 0;
+        border-radius: 0;
+        border-bottom: 1px solid #e4ebee;
+        background: #f0f7f3;
+        color: #397051;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.35;
+        text-align: left;
+        cursor: default;
+      }
+      .sync.busy {
+        background: #f3f6f8;
+        color: #5b7280;
+      }
+      .sync.error {
+        background: #fff0ed;
+        color: #9b3824;
+        cursor: pointer;
+      }
+      .sync[hidden] {
+        display: none;
+      }
       /* "Change it": a plain-English instruction sent to the link server,
          which asks Workers AI for the edited text (see README). */
       .command {
@@ -679,6 +711,19 @@
         background: #8fc7dd1f;
         border-left-color: #8fc7dd;
       }
+      .sync {
+        background: #173429;
+        color: #b7e0c6;
+        border-color: #2b473a;
+      }
+      .sync.busy {
+        background: #1a232a;
+        color: #9fb3bf;
+      }
+      .sync.error {
+        background: #442721;
+        color: #ffc5b5;
+      }
       .command input {
         background: #10161b;
         color: #d2e5ee;
@@ -736,6 +781,7 @@
         ><button id="pane-close" class="tool done" title="Changes are saved as you type; this shows the timeline" aria-label="Done"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg></button>
       </div>
     </header>
+      <button id="sync" class="sync" type="button" hidden></button>
       <section class="editor-panel">
         <form class="command" id="command" autocomplete="off">
           <label class="visually-hidden" for="command-text">Change the timeline in plain words</label>
@@ -1705,6 +1751,7 @@ footer: See you there ♡</pre>
         pane.inert = true;
         editToggle.setAttribute("aria-expanded", "false");
         fitPane();
+        flushNamed();
       }
       // On iOS the software keyboard shrinks the visual viewport but not the
       // layout viewport a fixed pane is sized against, so the bottom of the
@@ -1820,8 +1867,24 @@ footer: See you there ♡</pre>
       // Before overwriting a name, make sure the server still holds the
       // version this tab started from. A tab left open on a phone must not
       // clobber an edit made elsewhere; it gets told to reload instead.
+      // The conflict stays on screen until the user decides: publish this
+      // version over the other one, or reload to see the other one.
+      function showConflict(name) {
+        const overwrite = () => {
+          namedConflict = "";
+          namedBaseline = namedServerText;
+          publishNamed().catch(() => {});
+        };
+        status.className = "status error";
+        status.textContent = `${name} was changed somewhere else since this page loaded. Your edits here are not on the link.`;
+        setSync("error", `⚠ ${name} was changed elsewhere — your edits are NOT on the link. Tap to publish yours anyway`, overwrite);
+        toast(`${name} changed elsewhere · not published`, "error", { label: "Publish mine", run: overwrite });
+      }
       async function namedUpToDate(name, text) {
-        if (namedConflict === name) return false;
+        if (namedConflict === name) {
+          showConflict(name);
+          return false;
+        }
         let serverText = null;
         try {
           const response = await fetch(`${SHORT_LINK_API}${name}.txt`, { cache: "no-store" });
@@ -1834,12 +1897,45 @@ footer: See you there ♡</pre>
         const server = withoutId(serverText);
         if (server === withoutId(text) || server === withoutId(namedBaseline) || server === withoutId(publishedText)) return true;
         namedConflict = name;
-        status.className = "status error";
-        status.textContent = `${name} was changed somewhere else. Reload to get the latest before editing; your version here was not published.`;
-        toast(`${name} changed elsewhere · reload first`, "error");
+        namedServerText = serverText;
+        showConflict(name);
         return false;
       }
       const namedFailed = new Set();
+      // What the pane says about the named link, and what a tap does about it.
+      const syncBox = document.querySelector("#sync");
+      let syncFix = null,
+        namedServerText = "";
+      function setSync(kind, text, fix) {
+        syncFix = fix || null;
+        syncBox.hidden = !namedLink || !text;
+        syncBox.className = "sync" + (kind ? " " + kind : "");
+        syncBox.textContent = text || "";
+      }
+      syncBox.addEventListener("click", () => {
+        if (syncFix) syncFix();
+      });
+      // The edit id lives on the device that created the link (in its text:
+      // "link: name <id>"); paste it here and this device can publish too.
+      function pasteEditId(name) {
+        const answer = window.prompt(
+          `Paste the edit id for ${name}. On the device that made the link, the text reads:\nlink: ${name} <id>`,
+        );
+        if (answer === null) return;
+        const id = answer.trim().replace(/^link\s*:\s*\S+\s+/, "");
+        if (!/^[A-Za-z0-9_-]{16,40}$/.test(id)) {
+          toast("That does not look like an edit id", "error");
+          return;
+        }
+        const linePattern = new RegExp(`^([ \\t]*link[ \\t]*:[ \\t]*${name})(?:[ \\t]+\\S+)?[ \\t]*$`, "m");
+        editor.value = editor.value.replace(linePattern, `$1 ${id}`);
+        namedKey = id;
+        linkKeys({ [name]: id });
+        namedFailed.delete(name);
+        dirty = true;
+        update();
+        publishNamed().catch(() => {});
+      }
       function linkKeys(update) {
         let keys = {};
         try {
@@ -1855,30 +1951,61 @@ footer: See you there ♡</pre>
         return { ...linkKeys.memory, ...keys };
       }
       linkKeys.memory = {};
-      async function publishNamed() {
+      // One publish at a time: a second call while the first is in flight
+      // (Done right after an edit, two close paths) would PUT without the
+      // key the first one is about to receive and fail with 403.
+      let namedInFlight = null;
+      function publishNamed() {
+        const run = namedInFlight ? namedInFlight.catch(() => {}).then(publishNamedNow) : publishNamedNow();
+        namedInFlight = run.finally(() => {
+          if (namedInFlight === chain) namedInFlight = null;
+        });
+        const chain = namedInFlight;
+        return run;
+      }
+      async function publishNamedNow() {
         const name = namedLink,
           text = editor.value;
         if (!name || !latestHTML) return "";
         const key = namedKey || linkKeys()[name];
         if (text === publishedText) return publishedUrl;
-        if (!key && namedFailed.has(name)) return "";
+        if (!key && namedFailed.has(name)) {
+          setSync("error", `⚠ Not on ${name}: this device has no edit id for it. Tap to paste the id`, () => pasteEditId(name));
+          return "";
+        }
+        setSync("busy", `Saving to ${name}…`);
         if (!(await namedUpToDate(name, text))) return "";
         const payload = await TimelineText.encodeLink(text);
-        const response = await fetch(SHORT_LINK_API + name, {
-          method: "PUT",
-          headers: key ? { "content-type": "text/plain", "x-link-key": key } : { "content-type": "text/plain" },
-          body: payload,
-        });
+        let response;
+        try {
+          response = await fetch(SHORT_LINK_API + name, {
+            method: "PUT",
+            headers: key ? { "content-type": "text/plain", "x-link-key": key } : { "content-type": "text/plain" },
+            body: payload,
+          });
+        } catch (error) {
+          setSync("error", `⚠ Not on ${name}: ${error.message}. Tap to retry`, () => publishNamed().catch(() => {}));
+          throw error;
+        }
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
           if (response.status === 403 || response.status === 409) namedFailed.add(name);
           status.className = "status error";
           status.textContent =
             response.status === 403 || response.status === 409
-              ? `${body.error || "That name is taken"} on the link server; pick another “link:” name.`
+              ? `${body.error || "That name is taken"} on the link server.`
               : `Named link failed: ${body.error || response.status}`;
+          if (response.status === 403 && !key)
+            setSync("error", `⚠ Not on ${name}: this device has no edit id for it. Tap to paste the id`, () => pasteEditId(name));
+          else if (response.status === 403)
+            setSync("error", `⚠ Not on ${name}: the edit id here is wrong. Tap to paste the right one`, () => pasteEditId(name));
+          else if (response.status === 409)
+            setSync("error", `⚠ “${name}” is not available. Tap to choose another name`, () => document.querySelector("#custom-link").click());
+          else setSync("error", `⚠ Not on ${name}: ${body.error || response.status}. Tap to retry`, () => publishNamed().catch(() => {}));
+          toast(`Edits are NOT on ${name}`, "error");
           return "";
         }
+        setSync("ok", `✓ On ${name} · ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
         if (body.key) linkKeys({ [name]: body.key });
         namedBaseline = text;
         // Write the edit id into the link line so the text itself is the
@@ -1959,8 +2086,22 @@ footer: See you there ♡</pre>
       }
       function queueNamedPublish() {
         clearTimeout(namedTimer);
-        if (!namedLink || !dirty || editor.value === publishedText) return;
+        if (!namedLink) return setSync("", "");
+        if (!dirty || editor.value === publishedText) return;
+        setSync("busy", `Unsaved edits · saving to ${namedLink} in a moment…`);
         namedTimer = setTimeout(() => publishNamed().catch(() => {}), 1500);
+      }
+      // Done publishes at once and says whether the link has the edits;
+      // waiting for the debounce would hide a failure behind a closed pane.
+      function flushNamed() {
+        if (!namedLink || !dirty || editor.value === publishedText) return;
+        clearTimeout(namedTimer);
+        publishNamed()
+          .then((url) => {
+            if (url) toast(`Saved to ${namedLink}`);
+            else toast(syncBox.textContent || `Edits are NOT on ${namedLink}`, "error", syncFix ? { label: "Fix", run: syncFix } : undefined);
+          })
+          .catch((error) => toast(`Edits are NOT on ${namedLink}: ${error.message}`, "error"));
       }
       function update() {
         try {
