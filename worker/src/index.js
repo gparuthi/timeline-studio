@@ -27,7 +27,7 @@ import { isDavRequest, handleDav } from "./caldav.js";
 const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
 const LINK_LINES = /^[ \t]*link[ \t]*:.*(?:\r?\n|$)/gm;
-const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics|\.mobileconfig)?$/;
+const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics|\.mobileconfig|\.webmanifest)?$/;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
 const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api"]);
@@ -59,6 +59,31 @@ export default {
     if (request.method !== "GET" && request.method !== "HEAD") return new Response("Not found", { status: 404, headers: CORS });
     if (named) {
       const doc = await loadDoc(env, named[1]);
+      // Each timeline's own manifest, so "Add to Home Screen" opens this
+      // timeline rather than the studio's front page with the example.
+      if (named[2] === ".webmanifest") {
+        if (!doc) return new Response("No such timeline", { status: 404, headers: CORS });
+        const label = (doc.text && title(doc.text)) || named[1];
+        return new Response(
+          JSON.stringify({
+            name: label,
+            short_name: label.length > 14 ? label.slice(0, 14).trim() : label,
+            description: "A timeline in Timeline Studio",
+            id: "/" + named[1],
+            start_url: "/" + named[1],
+            scope: "/",
+            display: "standalone",
+            background_color: "#101418",
+            theme_color: "#101418",
+            icons: [
+              { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+              { src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+              { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+            ],
+          }),
+          { headers: { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "no-store", ...CORS } },
+        );
+      }
       if (named[2] === ".txt") {
         if (!doc) return new Response("No such timeline", { status: 404, headers: CORS });
         // Pollers send the version they have; unchanged costs no body.
@@ -237,6 +262,16 @@ async function studio(env, url, doc) {
   if (doc) {
     const inline = JSON.stringify(doc).replace(/<\//g, "<\\/").replace(/<!--/g, "<\\!--");
     html = html.replace('<script type="application/json" id="doc">null</script>', `<script type="application/json" id="doc">${inline}</script>`);
+    if (doc.name) {
+      html = html.replace(
+        '<link rel="manifest" href="manifest.webmanifest" />',
+        `<link rel="manifest" href="/${doc.name}.webmanifest" />`,
+      );
+      html = html.replace(
+        /<meta name="apple-mobile-web-app-title" content="[^"]*" \/>/,
+        `<meta name="apple-mobile-web-app-title" content="${escape((doc.text && title(doc.text)) || doc.name)}" />`,
+      );
+    }
     if (doc.text) {
       const name = title(doc.text) || "Timeline";
       html = html.replace(
