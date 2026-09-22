@@ -30,7 +30,7 @@ const LINK_LINES = /^[ \t]*link[ \t]*:.*(?:\r?\n|$)/gm;
 const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics|\.mobileconfig|\.webmanifest)?$/;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
-const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api"]);
+const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version"]);
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, PUT, GET, OPTIONS",
@@ -51,6 +51,8 @@ export default {
       // `wrangler dev` under Chrome's private-network-access rules.
       return new Response(null, { status: 204, headers: { ...CORS, "access-control-allow-private-network": "true" } });
     if (url.pathname === "/") return studio(env, url, null);
+    if (url.pathname === "/version" && request.method === "GET")
+      return json({ version: await appVersion(env, url) }, 200, { "cache-control": "no-store" });
     if (url.pathname === "/resolve" && request.method === "GET") return resolveMap(url.searchParams.get("u") || "");
     if (url.pathname === "/command" && request.method === "POST") return command(request, env);
     if (url.pathname === "/places" && request.method === "POST") return places(request, env);
@@ -256,9 +258,23 @@ async function profile(doc, name, host) {
 
 // The studio page with the document inlined: no second request, no flash
 // of the sample, and og: tags so a pasted link previews as the timeline.
+// The app's version is a hash of the studio page as deployed (the renderer
+// is inlined in it), so every deploy that changes what a phone runs changes
+// it. An open page compares its own stamp with /version on resume and
+// offers a reload, which is how a home-screen app learns it is stale.
+let cachedVersion = "";
+async function appVersion(env, url) {
+  if (cachedVersion) return cachedVersion;
+  const html = await (await env.ASSETS.fetch(new Request(new URL("/index.html", url)))).text();
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(html)));
+  cachedVersion = b64url(digest).slice(0, 10);
+  return cachedVersion;
+}
+
 async function studio(env, url, doc) {
   const asset = await env.ASSETS.fetch(new Request(new URL("/index.html", url)));
   let html = await asset.text();
+  html = html.replace('<meta name="app-version" content="" />', `<meta name="app-version" content="${await appVersion(env, url)}" />`);
   if (doc) {
     const inline = JSON.stringify(doc).replace(/<\//g, "<\\/").replace(/<!--/g, "<\\!--");
     html = html.replace('<script type="application/json" id="doc">null</script>', `<script type="application/json" id="doc">${inline}</script>`);

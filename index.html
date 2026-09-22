@@ -11,6 +11,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Timeline" />
     <meta name="theme-color" content="#101418" />
+    <meta name="app-version" content="" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
@@ -895,6 +896,7 @@ footer: See you there ♡</pre>
             Save studio keeps the editor, your timeline, and uploaded images
             together in one HTML file.
           </p>
+          <p class="local-note" id="app-version">App version: checking…</p>
       </section>
     </aside>
     <main class="workspace">
@@ -2266,6 +2268,58 @@ footer: See you there ♡</pre>
       });
       window.addEventListener("focus", () => pollDoc(true));
       window.addEventListener("pageshow", () => pollDoc(true));
+      // Is this app stale? The page carries the version it was served with
+      // (a hash of this file, so any edit here changes it);
+      // /version says what is deployed now. Checked on start, on resume and
+      // every few minutes while visible. A newer version reloads by itself
+      // when there is nothing unsaved and the editor is closed; otherwise the
+      // toast offers Reload. The help panel shows both stamps.
+      const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || "";
+      let appLatest = APP_VERSION,
+        appChecked = 0,
+        appTold = "";
+      function showAppVersion() {
+        const box = document.querySelector("#app-version");
+        if (!box) return;
+        if (!HOSTED || !APP_VERSION) {
+          box.textContent = "App version: standalone copy (not checked for updates)";
+          return;
+        }
+        const when = appChecked ? new Date(appChecked).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "not yet";
+        box.textContent =
+          appLatest === APP_VERSION
+            ? `App version ${APP_VERSION} · up to date (checked ${when})`
+            : `App version ${APP_VERSION} · newer ${appLatest} available, reload to update`;
+      }
+      async function checkApp(force) {
+        if (!HOSTED || !APP_VERSION || (document.hidden && !force)) return;
+        if (!force && Date.now() - appChecked < 5 * 60 * 1000) return;
+        try {
+          const response = await fetch(SHORT_LINK_API + "version", { cache: "no-store" });
+          if (!response.ok) return;
+          appLatest = (await response.json()).version || appLatest;
+          appChecked = Date.now();
+        } catch (error) {
+          return;
+        }
+        showAppVersion();
+        if (appLatest === APP_VERSION || appTold === appLatest) return;
+        const unsaved = dirty && editor.value !== savedText;
+        if (!unsaved && !document.body.classList.contains("pane-open")) {
+          location.reload();
+          return;
+        }
+        appTold = appLatest;
+        toast("A newer version of the app is available", "", { label: "Reload", run: () => (flushSave(), setTimeout(() => location.reload(), 800)) });
+      }
+      showAppVersion();
+      checkApp(true);
+      setInterval(() => checkApp(false), 60000);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) checkApp(true);
+      });
+      window.addEventListener("focus", () => checkApp(true));
+      window.addEventListener("pageshow", () => checkApp(true));
       // Done saves at once and says whether it worked; waiting for the
       // debounce would hide a failure behind a closed pane.
       function flushSave() {
