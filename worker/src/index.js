@@ -309,11 +309,12 @@ const ASSET_LINE = /^[ \t]*asset[ \t]+[^:\n]+:[ \t]*data:.*$/gm;
 const COMMAND_PROMPT = `You edit a text timeline. The user gives the current timeline and one instruction; you return the complete updated timeline.
 
 Format, one item per line:
-- Header lines: "title:", "subtitle:", "date:", "theme:", "link:", "footer:", "header-art:". Keep them exactly as they are.
+- Header lines: "title:", "subtitle:", "date:", "theme:", "timezone:", "city:", "footer:", "header-art:". Keep them exactly as they are.
 - "day: Weekday, Mon D, YYYY" starts a day. The lines after it belong to that day until the next "day:". Keep days in chronological order; add a "day:" line when the instruction needs a day that is not there yet.
 - "range: HH:MM - HH:MM" under a day sets its visible hours. "note: ..." adds a note.
 - Events: "HH:MM | title | description | icon | color". Only the time and title are required; leave the other fields empty rather than inventing them. Time can be a span "HH:MM - HH:MM". Use 24-hour times.
 - Icons: home, plane, depart, land, coffee, meal, tree, bed, shop, ticket, pin, car, road, palm. Colors: sky, sand, sage. Leave the icon empty to let it be guessed.
+- A place goes at the end of the description after " @ ": "Gear run @ REI Baldwin Hills", or just "@ Wi Spa" when there is nothing else to say. It becomes a map link by itself, so never write addresses or URLs. When the instruction names a place for an event, add it this way.
 - Lines starting with # are comments.
 
 Rules:
@@ -440,13 +441,7 @@ function calendar(text, name, link) {
       const next = day.events[i + 1],
         end = event.end || Math.min(event.minutes + 60, next && next.minutes > event.minutes ? next.minutes : Infinity),
         slug = event.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40),
-        url = (event.detail.match(/https?:\/\/\S+/) || [])[0] || "",
-        // The text before a map link is the place: "REI · 1900 Empire Ave …"
-        // as the studio writes it, or the user's own "Pick up the hat ·
-        // 1900 Empire Ave". Keep the address-looking parts (with a digit),
-        // or everything when nothing looks like an address.
-        parts = url ? event.detail.slice(0, event.detail.indexOf(url)).split(/\s+[·|]\s+/).map((p) => p.trim()).filter(Boolean) : [],
-        place = (parts.filter((p) => /\d/.test(p)).length ? parts.filter((p) => /\d/.test(p)) : parts).join(", ");
+        { place, url } = TimelineText.location(event, day, model);
       lines.push(
         "BEGIN:VEVENT",
         `UID:${name}-${day.iso}-${String(event.minutes).padStart(4, "0")}-${slug}@tl.gaup.uk`,

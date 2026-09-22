@@ -1056,6 +1056,45 @@ footer: See you there ♡</pre>
           ["road", /\b(road ?trip|highway|freeway|scenic|mulholland)\b/],
           ["car", /\b(drive|driving|car|rental|uber|lyft|taxi|parking|gas|pick ?up|drop ?off)\b/],
         ];
+        // "Gear run @ REI Baldwin Hills": what follows " @ " in a description (or
+        // a description that starts with "@") is a place. The sheet shows it as a
+        // pin chip that searches the map for it, and the calendar feed makes it
+        // the event's location. A URL after the place stays a plain link. An
+        // email address ("a@b.com") has no space before the @ and is left alone.
+        function splitPlace(detail) {
+          const m = detail.match(/(?:^|\s)@\s*(\S.*)$/);
+          if (!m) return { detail, place: "" };
+          const rest = m[1],
+            at = rest.search(/https?:\/\//),
+            place = (at < 0 ? rest : rest.slice(0, at)).trim(),
+            tail = at < 0 ? "" : rest.slice(at);
+          if (!place) return { detail, place: "" };
+          return { detail: [detail.slice(0, m.index).trim(), tail].filter(Boolean).join(" "), place };
+        }
+        // A map search link needs no API key: Google resolves the text when the
+        // link is opened, so "REI Baldwin Hills, Los Angeles" lands on the store.
+        function mapSearchUrl(place, city) {
+          const query = city && !place.toLowerCase().includes(city.toLowerCase()) ? `${place}, ${city}` : place;
+          return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+        }
+        // Where an event is, for calendars: an explicit link in the description
+        // wins, and the address-looking text before it is the place (the studio
+        // writes "REI · 1900 Empire Ave · https://maps.app.goo.gl/…"); otherwise
+        // an "@ place" is the place and its map search is the link.
+        function location(event, day, model) {
+          const url = (event.detail.match(/https?:\/\/\S+/) || [])[0] || "";
+          let place = event.place || "";
+          if (!place && url) {
+            const parts = event.detail
+                .slice(0, event.detail.indexOf(url))
+                .split(/\s+[·|]\s+/)
+                .map((p) => p.trim())
+                .filter(Boolean),
+              addressed = parts.filter((p) => /\d/.test(p));
+            place = (addressed.length ? addressed : parts).join(", ");
+          }
+          return { place, url: url || (place ? mapSearchUrl(place, (day && day.city) || model.city) : "") };
+        }
         function guessIcon(title, detail) {
           for (const text of [title, detail]) {
             const words = String(text || "").toLowerCase();
@@ -1075,6 +1114,7 @@ footer: See you there ♡</pre>
             link: "",
             linkKey: "",
             timezone: "",
+            city: "",
             notes: [],
             events: [],
             days: [],
@@ -1102,7 +1142,8 @@ footer: See you there ♡</pre>
                 throw new Error(
                   `Line ${line}: at most five fields; write \\| for a literal pipe.`,
                 );
-              const [clock, title, detail = "", icon = "", color = "sky"] = fields;
+              const [clock, title, written = "", icon = "", color = "sky"] = fields;
+              const { detail, place } = splitPlace(written);
               if (!title) throw new Error(`Line ${line}: add an event title.`);
               if (!["sky", "sand", "sage"].includes(color || "sky"))
                 throw new Error(`Line ${line}: color must be sky, sand, or sage.`);
@@ -1112,7 +1153,8 @@ footer: See you there ♡</pre>
                 end,
                 title,
                 detail,
-                icon: icon || guessIcon(title, detail),
+                place,
+                icon: icon || guessIcon(title, written),
                 color: color || "sky",
                 line,
               });
@@ -1144,6 +1186,7 @@ footer: See you there ♡</pre>
                 "header-art",
                 "link",
                 "timezone",
+                "city",
               ].includes(key)
             )
               throw new Error(`Line ${line}: unknown setting “${key}”.`);
@@ -1174,6 +1217,15 @@ footer: See you there ♡</pre>
               const last = model.days.at(-1);
               if (last && last.label) last.timezone = zone;
               else model.timezone = zone;
+              return;
+            }
+            if (key === "city") {
+              // "city: Los Angeles" is added to place searches, so "@ REI Baldwin
+              // Hills" looks up "REI Baldwin Hills, Los Angeles". Before any day
+              // it covers the whole timeline; under a day, that day.
+              const last = model.days.at(-1);
+              if (last && last.label) last.city = value;
+              else model.city = value;
               return;
             }
             if (key === "day") {
@@ -1638,7 +1690,7 @@ footer: See you there ♡</pre>
               const events = day.events
                 .map(
                   (e) =>
-                    `<li class="event ${e.color}" data-line="${e.line}" data-minute="${e.minutes - day.start}"${e.end ? ` data-end="${e.end - day.start}"` : ""} style="--m:${e.minutes - day.start}"><time${e.end ? ' class="span"' : ""}>${e.end ? spanLabel2(e.minutes, e.end) : label(e.minutes)}</time><div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail ? `<p>${linkify(e.detail)}</p>` : ""}</div></li>`,
+                    `<li class="event ${e.color}" data-line="${e.line}" data-minute="${e.minutes - day.start}"${e.end ? ` data-end="${e.end - day.start}"` : ""} style="--m:${e.minutes - day.start}"><time${e.end ? ' class="span"' : ""}>${e.end ? spanLabel2(e.minutes, e.end) : label(e.minutes)}</time><div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail || e.place ? `<p>${[e.detail ? linkify(e.detail) : "", e.place ? `<a class="map-link" href="${escape(mapSearchUrl(e.place, day.city || m.city))}" target="_blank" rel="noopener"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg>${escape(e.place)}</a>` : ""].filter(Boolean).join(" ")}</p>` : ""}</div></li>`,
                 )
                 .join("");
               const heading =
@@ -1692,7 +1744,7 @@ footer: See you there ♡</pre>
           return new TextDecoder().decode(await pipe(bytes, DecompressionStream));
         }
 
-        const api = { parse, render, icons, themes: themeNames, encodeLink, decodeLink };
+        const api = { parse, render, icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl };
         if (typeof module !== "undefined" && module.exports) module.exports = api;
         else root.TimelineText = api;
       })(typeof globalThis !== "undefined" ? globalThis : this);

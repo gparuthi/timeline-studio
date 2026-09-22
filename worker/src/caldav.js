@@ -170,9 +170,7 @@ export function eventObjects(model, name, calendarHref, hrefMap = {}) {
       const ownUid = `${name}-${slug}${n ? "-" + n : ""}`,
         uid = byOwn.get(ownUid) || ownUid,
         end = event.end || event.minutes + DEFAULT_MINUTES,
-        url = (event.detail.match(/https?:\/\/\S+/) || [])[0] || "",
-        parts = url ? event.detail.slice(0, event.detail.indexOf(url)).split(/\s+[·|]\s+/).map((p) => p.trim()).filter(Boolean) : [],
-        place = (parts.filter((p) => /\d/.test(p)).length ? parts.filter((p) => /\d/.test(p)) : parts).join(", ");
+        { place, url } = TimelineText.location(event, day, model);
       const lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -213,7 +211,8 @@ export function applyEvent(text, model, existing, incoming) {
     fields = splitFields(lines[existing.line - 1]);
     if (incoming.summary && incoming.summary !== existing.event.title) fields[1] = incoming.summary;
   } else {
-    fields = [null, incoming.summary || "Event", incoming.description || incoming.location || ""];
+    // A new event's location becomes an "@ place" so the sheet shows the pin.
+    fields = [null, incoming.summary || "Event", [incoming.description, incoming.location && `@ ${incoming.location}`].filter(Boolean).join(" ")];
   }
   fields[0] = time;
   while (fields.length > 2 && !fields.at(-1)) fields.pop();
