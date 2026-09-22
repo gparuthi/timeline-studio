@@ -45,7 +45,7 @@ Each day gets its own heading, hour scale and notes on the same sheet. Without a
 
 ## Themes
 
-`theme:` picks a look: `travel` (default, with the header art), `minimal`, `retro`, `future`, or `code`. The studio's toolbar picker writes that line for you. See them side by side at `themes.html`; each card there has a "Use in studio" link. Themes are plain CSS blocks in `timeline-renderer.js` (`themes`), layered over the base sheet, so adding one is adding a string.
+`theme:` picks a look: `travel` (default, with the header art), `minimal`, `retro`, `future`, or `code`. The studio's toolbar picker writes that line for you. `travel` and `minimal` follow the system appearance: the same text is a light sheet by day and a dark one when the phone switches to dark mode at night (screen only; printing stays light, and a shared image takes whichever the device shows at the time). `future` and `code` are always dark, `retro` keeps its sun. See them side by side at `themes.html`; each card there has a "Use in studio" link. Themes are plain CSS blocks in `timeline-renderer.js` (`themes`), layered over the base sheet, so adding one is adding a string.
 
 ## Links
 
