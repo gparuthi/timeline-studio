@@ -772,6 +772,7 @@
             <button id="copy-link" role="menuitem" title="Copy a short link to this timeline (the long link is in the address bar)">Copy link</button
             ><button id="custom-link" role="menuitem" title="A link with a name you choose that always shows your latest edit">Custom link…</button
             ><button id="calendar-link" role="menuitem" title="A calendar feed of this timeline; subscribe to it in Google or iOS Calendar and it follows your edits">Calendar feed</button
+            ><button id="calendar-app" role="menuitem" title="Add this timeline to the iPhone or Mac Calendar app as an editable calendar (a configuration profile)">Add to Calendar app</button
             ><button id="share-image" role="menuitem" title="Render a PNG to share in a message">Image (PNG)</button
             ><button id="export" role="menuitem" title="A standalone timeline page">Timeline (HTML)</button
             ><button id="save-studio" role="menuitem" title="This editor with your timeline inside, editable later">Studio (HTML)</button>
@@ -2255,7 +2256,8 @@ footer: See you there ♡</pre>
       // Unlike the long link, this sends the timeline text off the device.
       async function copyLink(suffix = "") {
         status.className = "status";
-        status.textContent = suffix ? "Making calendar feed…" : "Making link…";
+        const what = suffix === ".ics" ? "Calendar feed" : suffix === ".mobileconfig" ? "Calendar account link" : "Link";
+        status.textContent = `Making ${what.toLowerCase()}…`;
         // Hosted: the address itself (saved first). Standalone: the long
         // fragment link, which needs no server.
         const request = HOSTED
@@ -2293,13 +2295,15 @@ footer: See you there ♡</pre>
             : copyViaSelection(link);
         status.className = "status";
         if (copied) {
-          status.textContent = `✓ ${suffix ? "Calendar feed" : "Link"} copied · ${link}`;
+          status.textContent = `✓ ${what} copied · ${link}`;
           toast(
-            suffix
+            suffix === ".ics"
               ? "Calendar feed copied · in Google Calendar: Other calendars → From URL"
-              : HOSTED
-                ? `Link copied · ${link.replace(/^https?:\/\//, "")}`
-                : "Long link copied · it carries the whole timeline",
+              : suffix === ".mobileconfig"
+                ? "Calendar account link copied · open it on an iPhone or Mac"
+                : HOSTED
+                  ? `Link copied · ${link.replace(/^https?:\/\//, "")}`
+                  : "Long link copied · it carries the whole timeline",
           );
         } else {
           status.textContent = `Link: ${link}`;
@@ -2345,6 +2349,21 @@ footer: See you there ♡</pre>
       });
       document.querySelector("#custom-link").hidden = !HOSTED;
       document.querySelector("#calendar-link").hidden = !HOSTED;
+      document.querySelector("#calendar-app").hidden = !HOSTED;
+      // A configuration profile: on an iPhone or Mac, opening it offers to
+      // add the CalDAV account with everything filled in.
+      document.querySelector("#calendar-app").addEventListener("click", async () => {
+        status.className = "status";
+        status.textContent = "Preparing the calendar account…";
+        const url = await saveDoc().catch(() => "");
+        if (!url) {
+          toast(syncBox.textContent || "Not saved yet", "error");
+          return;
+        }
+        toast("Install the profile: Settings → Profile Downloaded", "", { label: "Copy link", run: () => copyLink(".mobileconfig") });
+        status.textContent = `Calendar account profile: ${url}.mobileconfig`;
+        location.assign(url + ".mobileconfig");
+      });
       editor.addEventListener("input", () => {
         dirty = true;
         clearTimeout(pending);

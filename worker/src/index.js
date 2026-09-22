@@ -7,6 +7,8 @@
 //                         under the name. "If-None-Match: *" makes it a
 //                         create that fails with 412 when the name exists.
 //   GET  /<name>.txt      the text          GET /<name>.ics   calendar feed
+//   GET  /<name>.mobileconfig  an Apple configuration profile that adds the
+//                         CalDAV account (tap it on an iPhone or Mac)
 //   /dav/<name>/          CalDAV: calendar apps edit the events (caldav.js)
 //   GET  /resolve?u=      follows a Google/Apple Maps link -> { url, name, address }
 //   POST /command         { text, command, today } -> { text, note }   edit by instruction
@@ -25,7 +27,7 @@ import { isDavRequest, handleDav } from "./caldav.js";
 const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
 const LINK_LINES = /^[ \t]*link[ \t]*:.*(?:\r?\n|$)/gm;
-const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics)?$/;
+const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics|\.mobileconfig)?$/;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
 const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api"]);
@@ -61,6 +63,17 @@ export default {
         return doc
           ? new Response(calendar(doc.text, named[1], `${url.origin}/${named[1]}`), {
               headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "no-store", ...CORS },
+            })
+          : new Response("No such timeline", { status: 404, headers: CORS });
+      if (named[2] === ".mobileconfig")
+        return doc
+          ? new Response(await profile(doc, named[1], url.hostname), {
+              headers: {
+                "content-type": "application/x-apple-aspen-config; charset=utf-8",
+                "content-disposition": `attachment; filename="${named[1]}.mobileconfig"`,
+                "cache-control": "no-store",
+                ...CORS,
+              },
             })
           : new Response("No such timeline", { status: 404, headers: CORS });
       // A name nobody has used yet opens as a fresh timeline bound to it.
@@ -140,6 +153,71 @@ async function put(request, env, name) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
     return json({ error: error.message || String(error) }, 400);
   }
+}
+
+// An Apple configuration profile (unsigned) carrying the CalDAV account:
+// opened on an iPhone or Mac it offers to install, and the calendar app
+// then has the timeline with nothing to type. UUIDs derive from the name
+// so installing again updates the same profile instead of adding one.
+async function profile(doc, name, host) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("caldav:" + name)));
+  const hex = [...digest].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  const uuid = (offset) => `${hex.slice(offset, offset + 8)}-${hex.slice(offset + 8, offset + 12)}-${hex.slice(offset + 12, offset + 16)}-${hex.slice(offset + 16, offset + 20)}-${hex.slice(offset + 20, offset + 32)}`;
+  const label = title(doc.text) || name;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>CalDAVAccountDescription</key>
+      <string>${escape(label)}</string>
+      <key>CalDAVHostName</key>
+      <string>${escape(host)}</string>
+      <key>CalDAVPort</key>
+      <integer>443</integer>
+      <key>CalDAVUseSSL</key>
+      <true/>
+      <key>CalDAVPrincipalURL</key>
+      <string>/dav/${escape(name)}/</string>
+      <key>CalDAVUsername</key>
+      <string>${escape(name)}</string>
+      <key>CalDAVPassword</key>
+      <string>timeline</string>
+      <key>PayloadDescription</key>
+      <string>Adds the “${escape(label)}” timeline as an editable calendar.</string>
+      <key>PayloadDisplayName</key>
+      <string>${escape(label)} (Timeline Studio)</string>
+      <key>PayloadIdentifier</key>
+      <string>uk.gaup.tl.caldav.${escape(name)}</string>
+      <key>PayloadType</key>
+      <string>com.apple.caldav.account</string>
+      <key>PayloadUUID</key>
+      <string>${uuid(0)}</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+    </dict>
+  </array>
+  <key>PayloadDescription</key>
+  <string>Timeline Studio calendar account for ${escape(host)}/${escape(name)}. Edits made in the calendar app change the timeline.</string>
+  <key>PayloadDisplayName</key>
+  <string>${escape(label)} (Timeline Studio)</string>
+  <key>PayloadIdentifier</key>
+  <string>uk.gaup.tl.${escape(name)}</string>
+  <key>PayloadOrganization</key>
+  <string>Timeline Studio</string>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>${uuid(32)}</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>
+`;
 }
 
 // The studio page with the document inlined: no second request, no flash
