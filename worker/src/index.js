@@ -12,6 +12,7 @@
 //   GET  /<name>      the viewer for whatever that name points to now
 //   GET  /resolve?u=  follows a Google/Apple Maps link -> { url, name, address }
 //   POST /command     { text, command, today } -> { text, note }   edit by instruction
+//   GET  /claim/<tok> one-time hand-off of a name's edit id to another device
 //
 // Ids are content-addressed (a prefix of sha256(payload)), so sharing the
 // same timeline twice yields the same link and never a second KV write.
@@ -35,6 +36,7 @@ const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
 const LINK_LINE = /^([ \t]*link[ \t]*:[ \t]*[a-z0-9][a-z0-9-]{1,30}[a-z0-9])[ \t]+([A-Za-z0-9_-]{16,40})[ \t]*$/m;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
+const CLAIM = /^\/claim\/([A-Za-z0-9_-]{16,64})$/;
 const ALIAS = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
 const RESERVED = new Set(["index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api"]);
@@ -60,6 +62,8 @@ export default {
     }
     if (url.pathname === "/resolve" && request.method === "GET") return resolveMap(url.searchParams.get("u") || "");
     if (url.pathname === "/command" && request.method === "POST") return command(request, env);
+    const claimToken = url.pathname.match(CLAIM);
+    if (claimToken && request.method === "GET") return claimHandoff(claimToken[1], env);
     const alias = url.pathname.match(ALIAS);
     if (alias && request.method === "PUT") return claim(request, env, alias[1]);
     const match = url.pathname.match(ID) || alias;
@@ -401,6 +405,29 @@ function calendar(text, name, link) {
       })
       .join("\r\n") + "\r\n"
   );
+}
+
+// A one-time token ("claim:<token>" -> { name } in KV, written by the
+// owner's tooling) opens the studio with the name's current text and its
+// edit id on the link line, so a device that never had the id gets it
+// without the id ever appearing anywhere readable. The token is deleted
+// on first use; the id travels only in the fragment.
+async function claimHandoff(token, env) {
+  const claim = await env.LINKS.get("claim:" + token, "json");
+  if (!claim) return page(notFound(env), 404);
+  await env.LINKS.delete("claim:" + token);
+  const record = await env.LINKS.get("alias:" + claim.name, "json");
+  const payload = record && (await env.LINKS.get(record.id));
+  if (!record || !payload) return page(notFound(env), 404);
+  const text = await decode(payload);
+  const linePattern = new RegExp(`^([ \\t]*link[ \\t]*:[ \\t]*${claim.name})(?:[ \\t]+\\S+)?[ \\t]*$`, "m");
+  const withId = linePattern.test(text)
+    ? text.replace(linePattern, `$1 ${record.key}`)
+    : `link: ${claim.name} ${record.key}\n` + text;
+  return new Response(null, {
+    status: 302,
+    headers: { location: `${env.STUDIO_URL}#${await encode(withId)}`, "cache-control": "no-store" },
+  });
 }
 
 class HttpError extends Error {
