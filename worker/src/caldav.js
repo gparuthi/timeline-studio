@@ -137,7 +137,7 @@ export async function handleDav(request, env, deps) {
     const existing = events.find((e) => e.uid === uid);
     if (!existing) return new Response("Not found", { status: 404 });
     const lines = text.split("\n");
-    lines.splice(existing.line - 1, 1);
+    removeEvent(lines, existing);
     await deps.saveDoc(env, name, tidy(lines).join("\n"));
     if (hrefMap[uid]) {
       delete hrefMap[uid];
@@ -223,20 +223,34 @@ export function applyEvent(text, model, existing, incoming) {
     return lines.join("\n");
   }
   // Another day (or a new event): take the line out, drop it into the day.
-  if (existing) lines.splice(existing.line - 1, 1);
-  const after = insertionPoint(lines, model, existing, start.iso, minutes);
+  const cut = existing ? removeEvent(lines, existing) : null;
+  const after = insertionPoint(lines, model, cut, start.iso, minutes);
   lines.splice(after, 0, ...(typeof after === "number" ? [line] : []));
   return tidy(lines).join("\n");
+}
+
+// Take an event's line out; when it was the day's last event, the day's
+// own line goes too (a day: with nothing under it does not parse), along
+// with a range: written just under it. Returns where the cut starts and
+// how many lines it took, for the index shifts that follow.
+function removeEvent(lines, removed) {
+  lines.splice(removed.line - 1, 1);
+  const day = removed.day;
+  if (!day.line || day.events.length > 1 || day.notes.length) return { line: removed.line, count: 1 };
+  let count = 1;
+  while (day.line - 1 + count < lines.length && /^\s*range\s*:/.test(lines[day.line - 1 + count])) count++;
+  lines.splice(day.line - 1, count);
+  return { line: day.line, count: count + 1 };
 }
 
 // Index in `lines` before which the new line goes. Appends a `day:` block
 // when the day is not on the sheet yet.
 function insertionPoint(lines, model, removed, iso, minutes) {
-  const shift = (n) => (removed && n > removed.line ? n - 1 : n);
+  const shift = (n) => (removed && n > removed.line ? n - removed.count : n);
   const days = model.days.filter((d) => d.iso);
   const day = days.find((d) => d.iso === iso);
   if (day) {
-    const events = day.events.filter((e) => !removed || e.line !== removed.line);
+    const events = day.events.filter((e) => !removed || e.line < removed.line || e.line >= removed.line + removed.count);
     const before = events.filter((e) => e.minutes <= minutes).at(-1);
     if (before) return shift(before.line); // after that event's line (1-based line == 0-based index + 1)
     const first = events[0];
