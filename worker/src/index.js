@@ -333,29 +333,30 @@ Answer with the full timeline inside one fenced block:
 After the block, optionally one line starting with "Note:" for anything the user should know. No other text.`;
 
 // Places, filled in: the events that name a venue but carry no "@ place"
-// get one. The model sees the whole text and returns the whole text, but
-// only one shape of change is accepted per line, " @ place" appended to
-// the description of an event that had neither a place nor a link, so a
-// wrong answer can at worst add a place, never rewrite the day.
-const PLACES_PROMPT = `You add map places to a text timeline. Events are lines "HH:MM | title | description | icon | color" (the time may be a span "HH:MM - HH:MM"). Other lines are settings, day headings, notes and comments.
+// get one. The model gets the day's events as numbered lines and answers
+// with a list of {line, place}; nothing else of its answer is used. Only
+// one shape of change is then applied per line, " @ place" appended to
+// the description of an event that had neither a place nor a link, and
+// only a place made of that line's own words (or, for a generic word such
+// as "airport", of its day's), so a wrong answer can at worst add a
+// place, never rewrite the day.
+const PLACES_PROMPT = `You pick map places for the events of a text timeline. You get the trip's city and each day's events as numbered lines "L<n>: time | title | description". Lines marked with * have no place yet; decide for each of those whether its title or description names a specific place someone could search on a map: a business, restaurant, cafe, bar, shop, spa, park, beach, trail, museum, venue, stadium, station, airport, a hotel by name, a landmark, a named road or viewpoint.
 
-For each event, decide whether its title or description names a specific place someone could search on a map: a business, restaurant, cafe, bar, shop, park, beach, trail, museum, venue, stadium, station, airport, a hotel by name, a landmark, a named neighborhood spot. If it does, and the line has no "@" and no URL yet, append " @ " and the place to the description field:
-"09:30 | Griffith Observatory | Hike up, skip the parking | pin | sky" becomes
-"09:30 | Griffith Observatory | Hike up, skip the parking @ Griffith Observatory | pin | sky"
-A line with an empty or missing description gets the place as its description: "11:00 | Wi Spa" becomes "11:00 | Wi Spa | @ Wi Spa", and "12:00 | Getty Center | | ticket" becomes "12:00 | Getty Center | @ Getty Center | ticket". Never write a placeholder such as "@ Place" or "@ TBD": either a real place name from that line, or no change.
-Write the place the way a map lists it: proper capitalisation, its common name, a misspelling corrected ("wii spa" -> "Wi Spa"), plus the neighborhood or town when the text gives one ("REI in Baldwin Hills" -> "REI Baldwin Hills", "the Getty" -> "Getty Center"). Do not add the city; a "city:" line covers that. Named beaches, parks, scenic roads and viewpoints count ("Manhattan Beach", "Mulholland Drive", "Griffith Park"). When the title and the description name different places, use the description's, it is the more specific one. Airports count ("LAX").
+Answer with a JSON array only, one entry per marked line that names a place: [{"line": 7, "place": "Silver Lake Park"}, {"line": 21, "place": "Manhattan Beach"}]. Leave out the lines with no place. Answer [] when none.
 
-Leave alone: events with no specific place ("Drive home", "Coffee and pastries", "Lunch", "Pack", "Leave for the airport", "Hotel check-in" without a hotel name, "Beach" without which beach), destinations that are a person's home or a town rather than a venue ("start for Rajan's", "head to Culver City", "Culver's"), and every line that already has an "@" or a link. Use only the words of that line: never take a place from another line, and never guess a venue that is not named. When in doubt, leave the line alone.
-
-Change nothing else: every other character of every line stays exactly the same, the same lines in the same order, no lines added or removed. Answer with the full timeline inside one fenced block and nothing else:
-\`\`\`timeline
-...
-\`\`\``;
+Rules:
+- Write the place as a map lists it: proper capitalisation, its common name, a misspelling corrected ("wii spa" -> "Wi Spa", "the Getty" -> "Getty Center"), with the neighborhood or town when the line gives one ("REI in Baldwin Hills" -> "REI Baldwin Hills"). Do not add the city.
+- Named beaches, parks, playgrounds, golf courses, scenic roads, trails, viewpoints and airports count: "Manhattan Beach" -> "Manhattan Beach", "Mulholland Drive" -> "Mulholland Drive", "Flight departs | LAX -> SFO" -> "LAX", "Flight lands | SFO" -> "SFO".
+- When the title and the description name different places, take the description's.
+- A generic word alone is not a place ("airport", "hotel", "the beach", "spa"), unless another line of the same day names it: "reach airport" on the day of "Flight departs | LAX -> SFO" -> "LAX"; "back to the hotel" on a day with "check in | Hotel Figueroa" -> "Hotel Figueroa".
+- Leave out lines with no specific place ("Drive home", "breakfast", "Lunch | TBD", "Pack", "Chill", "Return the car"), a person's home or a town rather than a venue ("start for Rajan's", "head to Culver City", "Culver's"), and an unnamed kind of place ("Indian restaurant, Culver City").
+- Never invent a venue that is not named in the line or, for a generic word, on its day.`;
 
 const FIELD_SPLIT = /(?<!\\)\|/;
 // Keep only the allowed edits: for a candidate line (an event without a
 // place or a link), the same fields with " @ place" appended to the
-// description. Returns the accepted text and the places added.
+// description. `candidates` maps line numbers to extra grounding context
+// (a Set means none). Returns the accepted text and the places added.
 export function acceptPlaces(original, edited, candidates) {
   const before = original.split("\n"),
     after = edited.split("\n");
@@ -375,7 +376,8 @@ export function acceptPlaces(original, edited, candidates) {
     const detail = a[2] || "",
       place = b[2].startsWith(detail) ? b[2].slice(detail.length).replace(/^\s*@\s*/, "").trim() : "";
     if (!place || place.length > 80 || /https?:\/\/|[@|]/.test(place)) return old;
-    if (!grounded(place, `${a[1]} ${detail}`)) return old;
+    const context = candidates instanceof Map ? candidates.get(i + 1) || "" : "";
+    if (!grounded(place, `${a[1]} ${detail}`, context)) return old;
     if (b[2] !== (detail ? `${detail} @ ${place}` : `@ ${place}`)) return old;
     added.push({ line: i + 1, title: a[1], place });
     // Rebuild from the original line so spacing outside the field is kept.
@@ -391,18 +393,23 @@ export function acceptPlaces(original, edited, candidates) {
 }
 
 // A place is accepted only when it comes from the line's own words: each
-// word of it (3+ letters) appears in the title or description, or is one
-// edit away from a word there ("wii spa" -> "Wi Spa"). Placeholders and
-// invented venues fail this.
+// word of it appears in the title or description, or is one edit away
+// from a word there ("wii spa" -> "Wi Spa"). Generic words ("Center",
+// "Beach") may fill out a name but cannot carry one, and when the line
+// itself is only a generic word ("reach airport") the place may come from
+// the day's other lines instead (the context). Placeholders and invented
+// venues fail this.
 const PLACEHOLDER = /^(place|places|venue|location|here|there|tbd|unknown|n\/a)$/i;
-// Words that name a kind of place, not a place: they may fill out a name
-// ("the Getty" -> "Getty Center") but cannot carry one ("@ Airport").
+// "Culver's", "Rajan's", "mom's": a lone possessive is someone's place or
+// a town's, not a venue; the model was told so and still slips.
+const POSSESSIVE = /^[\p{L}]+['’]s$/u;
 const GENERIC = new Set("airport hotel home house beach park parks restaurant cafe coffee bar pub office station gym school store shop mall market spa pool museum church temple library downtown city town center centre apartment airbnb pier plaza square garden gardens trail road drive street avenue boulevard club course golf lake river bay point hill hills canyon valley village".split(" "));
-function grounded(place, line) {
-  if (PLACEHOLDER.test(place.trim())) return false;
+export function hasGenericWord(text) {
+  return String(text).toLowerCase().split(/[^a-z]+/).some((w) => GENERIC.has(w));
+}
+function grounded(place, line, context = "") {
+  if (PLACEHOLDER.test(place.trim()) || POSSESSIVE.test(place.trim())) return false;
   const words = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, " ").split(/\s+/).filter((w) => w.length >= 2);
-  const have = words(line),
-    lower = line.toLowerCase();
   const near = (a, b) => {
     if (Math.abs(a.length - b.length) > 1) return false;
     let i = 0, j = 0, edits = 0;
@@ -417,14 +424,19 @@ function grounded(place, line) {
   };
   const placeWords = words(place);
   if (!placeWords.length) return false;
-  const matched = (w) => lower.includes(w) || have.some((h) => near(h, w) || (h.length >= 4 && w.startsWith(h.slice(0, 4))));
-  let distinctive = false;
-  for (const w of placeWords) {
-    if (matched(w)) {
-      if (!GENERIC.has(w)) distinctive = true;
-    } else if (!GENERIC.has(w)) return false;
-  }
-  return distinctive;
+  const check = (source) => {
+    const have = words(source),
+      lower = source.toLowerCase();
+    const matched = (w) => lower.includes(w) || have.some((h) => near(h, w) || (h.length >= 4 && w.startsWith(h.slice(0, 4))));
+    let distinctive = false;
+    for (const w of placeWords) {
+      if (matched(w)) {
+        if (!GENERIC.has(w)) distinctive = true;
+      } else if (!GENERIC.has(w)) return false;
+    }
+    return distinctive;
+  };
+  return check(line) || (!!context && hasGenericWord(line) && check(context));
 }
 
 async function places(request, env) {
@@ -447,26 +459,73 @@ async function places(request, env) {
     const trimmed = text.replace(ASSET_LINE, "").replace(LINK_LINES, "").replace(/\n{3,}/g, "\n\n").trim();
     if (!trimmed) throw new HttpError(400, "Empty timeline");
     const model = TimelineText.parse(trimmed);
-    const candidates = new Set(
-      model.places === "off" ? [] : model.events.filter((e) => !e.place && !/https?:\/\//.test(e.detail)).map((e) => e.line),
-    );
+    const lines = trimmed.split("\n");
     const finish = (edited, added, note) => json({ text: edited + (assets.length ? "\n\n" + assets.join("\n") : "") + "\n", added, note, model: COMMAND_MODEL });
+    if (model.places === "off") return finish(trimmed, [], "");
+    // The day's events, numbered by source line, with the candidates marked.
+    const candidates = new Map();
+    const listing = [];
+    for (const day of model.days) {
+      const dayText = day.events.map((e) => `${e.title} ${e.detail}`).join(" ");
+      listing.push(`day: ${day.label || model.date || "(only day)"}${day.city ? ` (city: ${day.city})` : ""}`);
+      for (const e of day.events) {
+        const open = !e.place && !/https?:\/\//.test(e.detail);
+        if (open) candidates.set(e.line, hasGenericWord(`${e.title} ${e.detail}`) ? dayText : "");
+        const fields = lines[e.line - 1].split(FIELD_SPLIT).map((f) => f.trim());
+        listing.push(`${open ? "*" : " "} L${e.line}: ${fields.slice(0, 3).join(" | ")}`);
+      }
+    }
     if (!candidates.size) return finish(trimmed, [], "");
     const answer = await env.AI.run(COMMAND_MODEL, {
       messages: [
         { role: "system", content: PLACES_PROMPT },
-        { role: "user", content: `Timeline:\n\`\`\`timeline\n${trimmed}\n\`\`\`` },
+        { role: "user", content: `City: ${model.city || "not given"}\n\n${listing.join("\n")}` },
       ],
       temperature: 0.1,
-      max_tokens: Math.min(8000, Math.ceil(trimmed.length / 2) + 2500),
+      // Qwen3 reasons first; a week of events takes a few thousand tokens
+      // of it before the short list.
+      max_tokens: 8000,
     });
-    const raw = String(answer?.response ?? answer?.result?.response ?? "").replace(/<think>[\s\S]*?<\/think>/g, "");
-    const block = raw.match(/\`\`\`(?:timeline|text)?[ \t]*\n([\s\S]*?)\n?\`\`\`/);
-    if (!block) throw new HttpError(502, "The model did not return a timeline");
-    const edited = block[1].replace(/[ \t]+$/gm, "").trim();
-    const { text: accepted, added, rejected } = acceptPlaces(trimmed, edited, candidates);
+    // Workers AI may hand the answer back already parsed when the model
+    // returns clean JSON; otherwise it is text, possibly with reasoning
+    // and a code fence around the list.
+    const response = answer?.response ?? answer?.result?.response ?? "";
+    let picks = [];
+    if (Array.isArray(response)) picks = response;
+    else if (response && typeof response === "object") picks = response.places || response.items || [];
+    else {
+      const raw = String(response).replace(/<think>[\s\S]*?<\/think>/g, ""),
+        open = raw.indexOf("["),
+        close = raw.lastIndexOf("]");
+      if (open < 0 || close < open) throw new HttpError(502, "The model did not return a list: " + (raw.trim().slice(0, 200) || "(empty answer)"));
+      try {
+        picks = JSON.parse(raw.slice(open, close + 1));
+      } catch (error) {
+        throw new HttpError(502, "The model did not return a list: " + raw.trim().slice(0, 200));
+      }
+    }
+    if (!Array.isArray(picks)) picks = [];
+    // Build the edited text ourselves from the picks; acceptPlaces then
+    // applies the same guard as if the model had rewritten the lines.
+    const edited = lines.slice();
+    for (const pick of picks) {
+      const n = Number(pick && pick.line),
+        place = String((pick && pick.place) || "").trim();
+      if (!candidates.has(n) || !place) continue;
+      const raw = lines[n - 1].split(FIELD_SPLIT),
+        fields = raw.map((f) => f.trim()),
+        detail = fields[2] || "";
+      const next = raw.slice();
+      if (next.length > 2) next[2] = detail ? raw[2].replace(/\s*$/, "") + ` @ ${place}` + (raw.length > 3 ? " " : "") : ` @ ${place}` + (raw.length > 3 ? " " : "");
+      else {
+        next[next.length - 1] = next[next.length - 1].replace(/\s*$/, " ");
+        next.push(` @ ${place}`);
+      }
+      edited[n - 1] = next.join("|");
+    }
+    const { text: accepted, added } = acceptPlaces(trimmed, edited.join("\n"), candidates);
     TimelineText.parse(accepted);
-    return finish(accepted, added, rejected ? `Answer rejected: ${rejected}` : "");
+    return finish(accepted, added, "");
   } catch (error) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
     return json({ error: "Places failed: " + (error.message || error) }, 502);

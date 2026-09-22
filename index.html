@@ -2076,7 +2076,8 @@ footer: See you there ♡</pre>
       const placesSeen = new Set();
       let placesTimer, placesBusy = false, placesLast = 0, placesKey = "";
       function loadPlacesSeen() {
-        const key = "places:" + (docName || "local");
+        // v2: the pass now judges each line in its day; earlier verdicts are stale.
+        const key = "places:v2:" + (docName || "local");
         if (key === placesKey) return;
         placesKey = key;
         placesSeen.clear();
