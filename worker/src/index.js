@@ -58,7 +58,13 @@ export default {
     if (request.method !== "GET" && request.method !== "HEAD") return new Response("Not found", { status: 404, headers: CORS });
     if (named) {
       const doc = await loadDoc(env, named[1]);
-      if (named[2] === ".txt") return doc ? plain(doc.text) : new Response("No such timeline", { status: 404, headers: CORS });
+      if (named[2] === ".txt") {
+        if (!doc) return new Response("No such timeline", { status: 404, headers: CORS });
+        // Pollers send the version they have; unchanged costs no body.
+        if (request.headers.get("if-none-match") === `"${doc.version}"`)
+          return new Response(null, { status: 304, headers: { etag: `"${doc.version}"`, "cache-control": "no-store", ...CORS } });
+        return plain(doc.text, "no-store", doc.version);
+      }
       if (named[2] === ".ics")
         return doc
           ? new Response(calendar(doc.text, named[1], `${url.origin}/${named[1]}`), {
@@ -95,8 +101,10 @@ export default {
   },
 };
 
-function plain(text, cache = "no-store") {
-  return new Response(text, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": cache, ...CORS } });
+function plain(text, cache = "no-store", version = "") {
+  return new Response(text, {
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": cache, ...(version ? { etag: `"${version}"` } : {}), ...CORS },
+  });
 }
 
 // ---- documents ------------------------------------------------------------

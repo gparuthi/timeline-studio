@@ -1876,6 +1876,7 @@ footer: See you there ♡</pre>
       const HOSTED = !!DOC || location.hostname === "tl.gaup.uk" || !!SHORT_LINK_OVERRIDE;
       const NAME_RE = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
       let docName = (DOC && DOC.name) || "",
+        docVersion = (DOC && DOC.version) || "",
         savedText = "",
         docBaseline = "",
         docConflict = false,
@@ -1985,6 +1986,7 @@ footer: See you there ♡</pre>
         }
         savedText = text;
         docBaseline = text;
+        docVersion = body.version || docVersion;
         // The address becomes the document's, once, and then never moves.
         if (location.origin + "/" === SHORT_LINK_API && location.pathname !== "/" + docName)
           history.replaceState(null, "", "/" + docName);
@@ -2052,6 +2054,51 @@ footer: See you there ♡</pre>
         setSync("busy", "Unsaved edits · saving in a moment…");
         saveTimer = setTimeout(() => saveDoc().catch(() => {}), 1500);
       }
+      // Other devices and the calendar app change the document too: every
+      // 15 s while visible, and on coming back to the tab, ask the server
+      // for its version (an ETag round trip when nothing changed) and take
+      // it when this page has no unsaved edits. With unsaved edits the save
+      // path reports the conflict instead.
+      async function pollDoc(force) {
+        if (!HOSTED || !docName || saveInFlight || (document.hidden && !force)) return;
+        let response;
+        try {
+          response = await fetch(`${SHORT_LINK_API}${docName}.txt`, {
+            cache: "no-store",
+            headers: docVersion ? { "if-none-match": `"${docVersion}"` } : {},
+          });
+        } catch (error) {
+          return;
+        }
+        if (response.status === 304 || !response.ok) return;
+        const serverText = await response.text(),
+          version = (response.headers.get("etag") || "").replace(/"/g, "");
+        if (withoutLink(serverText) === withoutLink(editor.value)) {
+          docVersion = version || docVersion;
+          savedText = docBaseline = editor.value;
+          return;
+        }
+        if (dirty && editor.value !== savedText) return;
+        const start = editor.selectionStart,
+          end = editor.selectionEnd;
+        editor.value = serverText;
+        savedText = docBaseline = serverText;
+        docVersion = version || docVersion;
+        docConflict = false;
+        update();
+        try {
+          editor.setSelectionRange(Math.min(start, serverText.length), Math.min(end, serverText.length));
+        } catch (error) {}
+        placeCaretLine();
+        idleSync();
+        toast("Updated from another device");
+      }
+      setInterval(pollDoc, 15000);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) pollDoc(true);
+      });
+      window.addEventListener("focus", () => pollDoc(true));
+      window.addEventListener("pageshow", () => pollDoc(true));
       // Done saves at once and says whether it worked; waiting for the
       // debounce would hide a failure behind a closed pane.
       function flushSave() {
