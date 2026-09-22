@@ -124,7 +124,12 @@ export async function handleDav(request, env, deps) {
     // the event by its (possibly new) title in the saved text.
     const after = eventObjects(TimelineText.parse(saved.text), name, calendarHref, {});
     const wanted = (incoming.summary || (existing && existing.event.title) || "").trim();
+    // A new event with the same title as one already on the sheet ("Manhattan
+    // Beach" duplicated in the calendar app) must map to the line just added,
+    // not the old one, or the client ends up showing the old line twice.
+    const known = new Set(events.map((e) => e.ownUid));
     const target =
+      (!existing && after.find((e) => e.event.title === wanted && !known.has(e.ownUid))) ||
       after.find((e) => e.event.title === wanted && (!existing || e.day.iso === toWallIso(incoming, existing, model))) ||
       after.find((e) => e.event.title === wanted);
     if (target && target.ownUid !== uid && hrefMap[uid] !== target.ownUid) {
