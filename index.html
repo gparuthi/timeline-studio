@@ -215,6 +215,39 @@
       .toast.error {
         background: #8b2f22;
       }
+      .moved {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 41;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 10px max(14px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left));
+        padding-top: max(10px, env(safe-area-inset-top));
+        background: #143e55;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.35;
+        box-shadow: 0 4px 18px #0005;
+      }
+      .moved button {
+        border: 0;
+        border-radius: 999px;
+        padding: 7px 14px;
+        background: #8fc7dd;
+        color: #10222c;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .moved[hidden] {
+        display: none;
+      }
       .toast.action {
         pointer-events: auto;
       }
@@ -906,6 +939,12 @@ footer: See you there ♡</pre>
       </section>
     </main>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <!-- Shown only on the old GitHub Pages address: one tap moves to the
+         studio's own origin, carrying the text and any edit ids stored here. -->
+    <div id="moved" class="moved" hidden>
+      <span id="moved-text">Timeline Studio now lives at tl.gaup.uk.</span>
+      <button id="moved-go" type="button">Continue there</button>
+    </div>
     <input
       type="file"
       id="image-file"
@@ -2091,6 +2130,9 @@ footer: See you there ♡</pre>
       async function idleSync() {
         const name = namedLink;
         if (!name) return;
+        // An id that arrived in the text (a saved copy, a moved page) is
+        // kept on this device, so a later open without it still publishes.
+        if (namedKey && linkKeys()[name] !== namedKey) linkKeys({ [name]: namedKey });
         const key = namedKey || linkKeys()[name];
         if (key) return setSync("ok", `✓ Linked to ${name} · edits publish as you type`);
         if (!nameStatus.has(name)) {
@@ -2313,6 +2355,29 @@ footer: See you there ♡</pre>
       // under a short id by the Worker in worker/ (served at tl.gaup.uk).
       // Unlike the long link, this sends the timeline text off the device.
       let SHORT_LINK_API = "https://tl.gaup.uk/";
+      // The studio moved from GitHub Pages to the Worker's own origin. Edit
+      // ids live in this browser's storage per origin, so the old address
+      // offers one tap that carries the text, with every stored id written
+      // into its link line, over in the fragment (nothing goes to a server).
+      if (location.hostname === "gparuthi.github.io") {
+        const moved = document.querySelector("#moved"),
+          movedText = document.querySelector("#moved-text");
+        const stored = Object.keys(linkKeys());
+        movedText.textContent = stored.length
+          ? `Timeline Studio now lives at tl.gaup.uk. Your edit id${stored.length === 1 ? "" : "s"} for ${stored.join(", ")} come${stored.length === 1 ? "s" : ""} along.`
+          : "Timeline Studio now lives at tl.gaup.uk.";
+        moved.hidden = false;
+        document.querySelector("#moved-go").addEventListener("click", async () => {
+          const keys = linkKeys();
+          let text = editor.value;
+          for (const name of Object.keys(keys)) {
+            const bare = new RegExp(`^([ \\t]*link[ \\t]*:[ \\t]*${name})[ \\t]*$`, "m");
+            text = text.replace(bare, `$1 ${keys[name]}`);
+          }
+          const hash = await TimelineText.encodeLink(text);
+          location.href = "https://tl.gaup.uk/#" + hash;
+        });
+      }
       try {
         // Dev hook: point the studio at a local `wrangler dev` of worker/.
         SHORT_LINK_API = localStorage.getItem("shortLinkApi") || SHORT_LINK_API;
