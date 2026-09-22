@@ -66,9 +66,18 @@ export async function handleDav(request, env, deps) {
   // rename from either side still finds the line.
   const hrefMap = (await env.LINKS.get("dav:" + name, "json")) || {};
   const text = doc.text,
-    model = TimelineText.parse(text),
-    events = eventObjects(model, name, calendarHref, hrefMap),
-    ctag = doc.version,
+    model = TimelineText.parse(text);
+  let events = eventObjects(model, name, calendarHref, hrefMap);
+  // A remembered href can outlive its line id: an event created in the
+  // app while a same-titled line existed got the "-1" id, then the
+  // original line was deleted and the survivor took the plain id. The
+  // href follows the survivor when that id is free; an href whose line
+  // is gone altogether is forgotten.
+  if (healHrefMap(hrefMap, events)) {
+    await env.LINKS.put("dav:" + name, JSON.stringify(hrefMap));
+    events = eventObjects(model, name, calendarHref, hrefMap);
+  }
+  const ctag = doc.version,
     etag = `"${doc.version}"`;
   const depth = request.headers.get("depth") === "1" ? 1 : 0;
   const level = !pathName ? "root" : uid ? "event" : url.pathname.endsWith("/cal/") ? "calendar" : "principal";
@@ -159,6 +168,19 @@ function toWallIso(incoming, existing, model) {
 }
 
 // ---- the calendar's view of the timeline -------------------------------
+
+export function healHrefMap(hrefMap, events) {
+  let changed = false;
+  for (const [href, own] of Object.entries(hrefMap)) {
+    if (events.some((e) => e.ownUid === own)) continue;
+    const base = own.replace(/-\d+$/, ""),
+      free = events.find((e) => e.uid === e.ownUid && (e.ownUid === base || e.ownUid.startsWith(base + "-")));
+    if (free) hrefMap[href] = free.ownUid;
+    else delete hrefMap[href];
+    changed = true;
+  }
+  return changed;
+}
 
 export function eventObjects(model, name, calendarHref, hrefMap = {}) {
   const zone = model.timezone || DEFAULT_ZONE,
