@@ -215,39 +215,6 @@
       .toast.error {
         background: #8b2f22;
       }
-      .moved {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 41;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        flex-wrap: wrap;
-        padding: 10px max(14px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left));
-        padding-top: max(10px, env(safe-area-inset-top));
-        background: #143e55;
-        color: #fff;
-        font-size: 13px;
-        font-weight: 600;
-        line-height: 1.35;
-        box-shadow: 0 4px 18px #0005;
-      }
-      .moved button {
-        border: 0;
-        border-radius: 999px;
-        padding: 7px 14px;
-        background: #8fc7dd;
-        color: #10222c;
-        font: inherit;
-        font-weight: 700;
-        cursor: pointer;
-      }
-      .moved[hidden] {
-        display: none;
-      }
       .toast.action {
         pointer-events: auto;
       }
@@ -939,18 +906,13 @@ footer: See you there ♡</pre>
       </section>
     </main>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <!-- Shown only on the old GitHub Pages address: one tap moves to the
-         studio's own origin, carrying the text and any edit ids stored here. -->
-    <div id="moved" class="moved" hidden>
-      <span id="moved-text">Timeline Studio now lives at tl.gaup.uk.</span>
-      <button id="moved-go" type="button">Continue there</button>
-    </div>
     <input
       type="file"
       id="image-file"
       accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
       hidden
     />
+    <script type="application/json" id="doc">null</script>
     <script type="application/json" id="studio-source">
       "# A timeline is just text. Times set the scale; cards find their own space.\ntitle: A Day in Los Angeles\ndate: {{today}}\nsubtitle: Sunshine, tacos, and a sunset ♡\nrange: 08:00 - 20:00\ntheme: travel\nfooter: Bring sunscreen and a playlist ♡\n\n# time | title | description | icon | color\n08:00 | Coffee and pastries | Neighborhood bakery | coffee | sand\n09:30 | Griffith Observatory | Hike up, skip the parking | pin | sky\n11:30 | Farmers market | Tacos for lunch | palm | sage\n13:00 | Getty Center | Gardens first, then the galleries | ticket | sand\n15:30 - 17:30 | Venice Boardwalk | Rent bikes to Santa Monica | road | sky\n18:00 | Pier at sunset | Ferris wheel, funnel cake | palm | sand\n19:30 | Drive home | Sunset over the freeway | car | sage\n\nnote: Observatory parking fills by 10 AM\nnote: Getty entry is free, parking is not\nnote: Sunset is around 7 PM\n"
     </script>
@@ -1790,7 +1752,7 @@ footer: See you there ♡</pre>
         pane.inert = true;
         editToggle.setAttribute("aria-expanded", "false");
         fitPane();
-        flushNamed();
+        flushSave();
       }
       // On iOS the software keyboard shrinks the visual viewport but not the
       // layout viewport a fixed pane is sized against, so the bottom of the
@@ -1886,196 +1848,147 @@ footer: See you there ♡</pre>
         const hash = latestHTML ? await TimelineText.encodeLink(text) : "";
         if (text !== editor.value) return;
         latestLink = hash ? new URL("view.html#" + hash, location.href).href : "";
-        syncUrl(hash);
-        document.querySelector("#copy-link").disabled = !latestLink;
+        if (!HOSTED) syncUrl(hash);
+        document.querySelector("#copy-link").disabled = !latestLink && !HOSTED;
       }
-      // Named links: "link: la-week" in the text makes tl.gaup.uk/la-week
-      // follow every edit. The Worker hands out a key on the first claim; it
-      // lives only in this browser's storage, so other devices and recipients
-      // fall back to plain short links.
-      let namedLink = "",
-        namedKey = "",
-        publishedText = "",
-        publishedUrl = "",
-        namedBaseline = "",
-        namedConflict = "",
-        namedTimer;
-      // What the link server serves never carries the edit id; compare texts
-      // without it.
-      const withoutId = (text) => String(text).replace(/^([ \t]*link[ \t]*:[ \t]*[a-z0-9-]+)[ \t]+[A-Za-z0-9_-]{16,40}[ \t]*$/m, "$1").trim();
-      // Before overwriting a name, make sure the server still holds the
-      // version this tab started from. A tab left open on a phone must not
-      // clobber an edit made elsewhere; it gets told to reload instead.
-      // The conflict stays on screen until the user decides: publish this
-      // version over the other one, or reload to see the other one.
-      function showConflict(name) {
-        const overwrite = () => {
-          namedConflict = "";
-          namedBaseline = namedServerText;
-          publishNamed().catch(() => {});
-        };
-        status.className = "status error";
-        status.textContent = `${name} was changed somewhere else since this page loaded. Your edits here are not on the link.`;
-        setSync("error", `⚠ ${name} was changed elsewhere — your edits are NOT on the link. Tap to publish yours anyway`, overwrite);
-        toast(`${name} changed elsewhere · not published`, "error", { label: "Publish mine", run: overwrite });
-      }
-      async function namedUpToDate(name, text) {
-        if (namedConflict === name) {
-          showConflict(name);
-          return false;
-        }
-        let serverText = null;
+      let SHORT_LINK_API = "https://tl.gaup.uk/";
+      let SHORT_LINK_OVERRIDE = "";
+      try {
+        SHORT_LINK_OVERRIDE = localStorage.getItem("shortLinkApi") || "";
+      } catch (error) {}
+      if (SHORT_LINK_OVERRIDE) SHORT_LINK_API = SHORT_LINK_OVERRIDE;
+      else if (location.hostname === "tl.gaup.uk") SHORT_LINK_API = location.origin + "/";
+      // ---- The document ------------------------------------------------
+      // On tl.gaup.uk the URL is the document: /<name> lives in the
+      // Worker's store and every edit saves there, so the address never
+      // changes and nothing rides in the fragment. Anyone with the link
+      // can edit, like a shared document. Elsewhere (the GitHub Pages copy,
+      // a saved studio file) the studio is standalone and the text rides in
+      // the address bar; the AI command box still uses the server.
+      const DOC = (() => {
         try {
-          const response = await fetch(`${SHORT_LINK_API}${name}.txt`, { cache: "no-store" });
-          if (response.status === 404) return true;
-          if (!response.ok) return true;
-          serverText = await response.text();
+          return JSON.parse(document.querySelector("#doc").textContent || "null");
         } catch (error) {
-          return true;
+          return null;
         }
-        const server = withoutId(serverText);
-        if (server === withoutId(text) || server === withoutId(namedBaseline) || server === withoutId(publishedText)) return true;
-        namedConflict = name;
-        namedServerText = serverText;
-        showConflict(name);
-        return false;
-      }
-      const namedFailed = new Set();
-      // What the pane says about the named link, and what a tap does about it.
+      })();
+      const HOSTED = !!DOC || location.hostname === "tl.gaup.uk" || !!SHORT_LINK_OVERRIDE;
+      const NAME_RE = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
+      let docName = (DOC && DOC.name) || "",
+        savedText = "",
+        docBaseline = "",
+        docConflict = false,
+        docServerText = "",
+        saveTimer,
+        saveInFlight = null;
+      const withoutLink = (text) => String(text).replace(/^[ \t]*link[ \t]*:.*(?:\r?\n|$)/gm, "").trim();
+      const docUrl = () => (docName ? SHORT_LINK_API + docName : "");
+      // What the pane says about saving, and what a tap does about it.
       const syncBox = document.querySelector("#sync");
-      let syncFix = null,
-        namedServerText = "";
+      let syncFix = null;
       function setSync(kind, text, fix) {
         syncFix = fix || null;
-        syncBox.hidden = !namedLink || !text;
+        syncBox.hidden = !HOSTED || !text;
         syncBox.className = "sync" + (kind ? " " + kind : "");
         syncBox.textContent = text || "";
       }
       syncBox.addEventListener("click", () => {
         if (syncFix) syncFix();
       });
-      // The edit id lives on the device that created the link (in its text:
-      // "link: name <id>"); paste it here and this device can publish too.
-      function pasteEditId(name) {
-        const answer = window.prompt(
-          `Paste the edit id for ${name}. On the device that made the link, the text reads:\nlink: ${name} <id>`,
-        );
-        if (answer === null) return;
-        const id = answer.trim().replace(/^link\s*:\s*\S+\s+/, "");
-        if (!/^[A-Za-z0-9_-]{16,40}$/.test(id)) {
-          toast("That does not look like an edit id", "error");
-          return;
-        }
-        const linePattern = new RegExp(`^([ \\t]*link[ \\t]*:[ \\t]*${name})(?:[ \\t]+\\S+)?[ \\t]*$`, "m");
-        editor.value = editor.value.replace(linePattern, `$1 ${id}`);
-        namedKey = id;
-        linkKeys({ [name]: id });
-        namedFailed.delete(name);
-        dirty = true;
-        update();
-        publishNamed().catch(() => {});
+      function newName() {
+        const slug =
+          latestTitle
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 24) || "timeline";
+        return `${slug}-${Math.random().toString(36).slice(2, 7)}`.replace(/-+/g, "-");
       }
-      function linkKeys(update) {
-        let keys = {};
+      // The conflict stays on screen until the user decides: save this
+      // version over the other one, or reload to see the other one.
+      function showConflict() {
+        const overwrite = () => {
+          docConflict = false;
+          docBaseline = docServerText;
+          saveDoc().catch(() => {});
+        };
+        status.className = "status error";
+        status.textContent = `${docName} was changed somewhere else since this page loaded. Your edits here are not saved.`;
+        setSync("error", `⚠ ${docName} was changed elsewhere — your edits are NOT saved. Tap to save yours anyway`, overwrite);
+        toast(`${docName} changed elsewhere · not saved`, "error", { label: "Save mine", run: overwrite });
+      }
+      // Before saving over a name, make sure this page saw its latest
+      // version (a stale tab once wiped a newer one).
+      async function upToDate(text) {
+        if (docConflict) {
+          showConflict();
+          return false;
+        }
+        let serverText = null;
         try {
-          keys = JSON.parse(localStorage.getItem("tl-link-keys") || "{}");
-          if (update) {
-            Object.assign(keys, update);
-            localStorage.setItem("tl-link-keys", JSON.stringify(keys));
-          }
+          const response = await fetch(`${SHORT_LINK_API}${docName}.txt`, { cache: "no-store" });
+          if (!response.ok) return true;
+          serverText = await response.text();
         } catch (error) {
-          /* storage may be blocked; the key then lasts this page only */
-          if (update) Object.assign(linkKeys.memory, update);
+          return true;
         }
-        return { ...linkKeys.memory, ...keys };
+        const server = withoutLink(serverText);
+        if (server === withoutLink(text) || server === withoutLink(docBaseline) || server === withoutLink(savedText)) return true;
+        docConflict = true;
+        docServerText = serverText;
+        showConflict();
+        return false;
       }
-      linkKeys.memory = {};
-      // One publish at a time: a second call while the first is in flight
-      // (Done right after an edit, two close paths) would PUT without the
-      // key the first one is about to receive and fail with 403.
-      let namedInFlight = null;
-      function publishNamed() {
-        const run = namedInFlight ? namedInFlight.catch(() => {}).then(publishNamedNow) : publishNamedNow();
-        namedInFlight = run.finally(() => {
-          if (namedInFlight === chain) namedInFlight = null;
+      // One save at a time: a second call while the first is in flight
+      // (Done right after an edit, two close paths) waits for it.
+      function saveDoc() {
+        const run = saveInFlight ? saveInFlight.catch(() => {}).then(saveDocNow) : saveDocNow();
+        const chain = run.finally(() => {
+          if (saveInFlight === chain) saveInFlight = null;
         });
-        const chain = namedInFlight;
+        saveInFlight = chain;
         return run;
       }
-      async function publishNamedNow() {
-        const name = namedLink,
-          text = editor.value;
-        if (!name || !latestHTML) return "";
-        const key = namedKey || linkKeys()[name];
-        if (text === publishedText) return publishedUrl;
-        if (!key && namedFailed.has(name)) {
-          setSync("error", `⚠ Not on ${name}: this device has no edit id for it. Tap to paste the id`, () => pasteEditId(name));
-          return "";
-        }
-        setSync("busy", `Saving to ${name}…`);
-        if (!(await namedUpToDate(name, text))) return "";
+      async function saveDocNow(attempt = 0) {
+        if (!HOSTED || !latestHTML) return "";
+        const text = editor.value;
+        if (docName && text === savedText) return docUrl();
+        const creating = !docName;
+        if (creating) docName = newName();
+        setSync("busy", `Saving to ${docName}…`);
+        if (!creating && !(await upToDate(text))) return "";
         const payload = await TimelineText.encodeLink(text);
+        const retry = () => saveDoc().catch(() => {});
         let response;
         try {
-          response = await fetch(SHORT_LINK_API + name, {
+          response = await fetch(SHORT_LINK_API + docName, {
             method: "PUT",
-            headers: key ? { "content-type": "text/plain", "x-link-key": key } : { "content-type": "text/plain" },
+            headers: creating ? { "content-type": "text/plain", "if-none-match": "*" } : { "content-type": "text/plain" },
             body: payload,
           });
         } catch (error) {
-          setSync("error", `⚠ Not on ${name}: ${error.message}. Tap to retry`, () => publishNamed().catch(() => {}));
+          if (creating) docName = "";
+          setSync("error", `⚠ Not saved: ${error.message}. Tap to retry`, retry);
           throw error;
+        }
+        if (creating && response.status === 412 && attempt < 3) {
+          docName = "";
+          return saveDocNow(attempt + 1);
         }
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
-          if (response.status === 403 || response.status === 409) namedFailed.add(name);
-          status.className = "status error";
-          status.textContent =
-            response.status === 403 || response.status === 409
-              ? `${body.error || "That name is taken"} on the link server.`
-              : `Named link failed: ${body.error || response.status}`;
-          if (response.status === 403 && !key)
-            setSync("error", `⚠ Not on ${name}: this device has no edit id for it. Tap to paste the id`, () => pasteEditId(name));
-          else if (response.status === 403)
-            setSync("error", `⚠ Not on ${name}: the edit id here is wrong. Tap to paste the right one`, () => pasteEditId(name));
-          else if (response.status === 409)
-            setSync("error", `⚠ “${name}” is not available. Tap to choose another name`, () => document.querySelector("#custom-link").click());
-          else setSync("error", `⚠ Not on ${name}: ${body.error || response.status}. Tap to retry`, () => publishNamed().catch(() => {}));
-          toast(`Edits are NOT on ${name}`, "error");
+          if (creating) docName = "";
+          setSync("error", `⚠ Not saved: ${body.error || response.status}. Tap to retry`, retry);
+          toast(`Not saved: ${body.error || response.status}`, "error");
           return "";
         }
-        setSync("ok", `✓ On ${name} · ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
-        if (body.key) linkKeys({ [name]: body.key });
-        namedBaseline = text;
-        // Write the edit id into the link line so the text itself is the
-        // proof of ownership: paste it into any device's studio and that
-        // device can update the name too. The link server strips it from
-        // what it stores, so shared short links never carry it. This also
-        // migrates names claimed before ids lived in the text.
-        const id = body.key || (!namedKey && key) || "";
-        if (id && editor.value === text) {
-          const linePattern = new RegExp(`^([ \\t]*link[ \\t]*:[ \\t]*${name})[ \\t]*$`, "m"),
-            withKey = text.replace(linePattern, `$1 ${id}`);
-          if (withKey !== text) {
-            const start = editor.selectionStart,
-              end = editor.selectionEnd,
-              at = text.search(linePattern),
-              grew = withKey.length - text.length,
-              shift = (pos) => (pos > at ? pos + grew : pos);
-            editor.value = withKey;
-            editor.setSelectionRange(shift(start), shift(end));
-            namedKey = id;
-            publishedText = withKey;
-            publishedUrl = body.url;
-            update();
-            return body.url;
-          }
-        }
-        publishedText = text;
-        publishedUrl = body.url;
-        if (!status.classList.contains("error"))
-          status.textContent = status.textContent.replace(/ · up to date.*$/, ` · up to date · ${body.url}`);
-        return body.url;
+        savedText = text;
+        docBaseline = text;
+        // The address becomes the document's, once, and then never moves.
+        if (location.origin + "/" === SHORT_LINK_API && location.pathname !== "/" + docName)
+          history.replaceState(null, "", "/" + docName);
+        setSync("ok", `✓ Saved · ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · ${docUrl().replace(/^https?:\/\//, "")}`);
+        return docUrl();
       }
       // A description that is only a map short link gets its place written
       // in: "REI · 1900 Empire Ave, Burbank, CA 91504 · https://maps.app…".
@@ -2123,63 +2036,38 @@ footer: See you there ♡</pre>
         update();
         toast(`Map link → ${place.name}`);
       }
-      // Before any edit, say up front whether this device can publish to
-      // the name: a page opened from a shared view carries no edit id, and
-      // finding that out after typing is what lost edits before.
-      const nameStatus = new Map();
-      async function idleSync() {
-        const name = namedLink;
-        if (!name) return;
-        // An id that arrived in the text (a saved copy, a moved page) is
-        // kept on this device, so a later open without it still publishes.
-        if (namedKey && linkKeys()[name] !== namedKey) linkKeys({ [name]: namedKey });
-        const key = namedKey || linkKeys()[name];
-        if (key) return setSync("ok", `✓ Linked to ${name} · edits publish as you type`);
-        if (!nameStatus.has(name)) {
-          nameStatus.set(name, "pending");
-          try {
-            const response = await fetch(`${SHORT_LINK_API}${name}.txt`, { method: "HEAD", cache: "no-store" });
-            nameStatus.set(name, response.status === 404 ? "free" : "taken");
-          } catch (error) {
-            nameStatus.set(name, "unknown");
-          }
-          if (namedLink !== name || dirty) return;
-        }
-        const state = nameStatus.get(name);
-        if (state === "free") setSync("ok", `✓ ${name} is free · claimed on your first edit`);
-        else if (state === "taken")
-          setSync("error", `⚠ This device has no edit id for ${name} — edits will not reach the link. Tap to paste the id`, () => pasteEditId(name));
-        else setSync("busy", `Linked to ${name}`);
+      function idleSync() {
+        if (!HOSTED) return;
+        if (docName) setSync("ok", `✓ ${docUrl().replace(/^https?:\/\//, "")} · edits save as you type`);
+        else setSync("busy", "New timeline · it gets its own link on your first edit");
       }
-      function queueNamedPublish() {
-        clearTimeout(namedTimer);
-        if (!namedLink) return setSync("", "");
-        if (!dirty || editor.value === publishedText) {
+      function queueSave() {
+        clearTimeout(saveTimer);
+        if (!HOSTED) return setSync("", "");
+        if (!dirty || (docName && editor.value === savedText)) {
           if (!dirty) idleSync();
           return;
         }
-        setSync("busy", `Unsaved edits · saving to ${namedLink} in a moment…`);
-        namedTimer = setTimeout(() => publishNamed().catch(() => {}), 1500);
+        setSync("busy", "Unsaved edits · saving in a moment…");
+        saveTimer = setTimeout(() => saveDoc().catch(() => {}), 1500);
       }
-      // Done publishes at once and says whether the link has the edits;
-      // waiting for the debounce would hide a failure behind a closed pane.
-      function flushNamed() {
-        if (!namedLink || !dirty || editor.value === publishedText) return;
-        clearTimeout(namedTimer);
-        publishNamed()
+      // Done saves at once and says whether it worked; waiting for the
+      // debounce would hide a failure behind a closed pane.
+      function flushSave() {
+        if (!HOSTED || !dirty || (docName && editor.value === savedText)) return;
+        clearTimeout(saveTimer);
+        saveDoc()
           .then((url) => {
-            if (url) toast(`Saved to ${namedLink}`);
-            else toast(syncBox.textContent || `Edits are NOT on ${namedLink}`, "error", syncFix ? { label: "Fix", run: syncFix } : undefined);
+            if (url) toast(`Saved · ${url.replace(/^https?:\/\//, "")}`);
+            else toast(syncBox.textContent || "Not saved", "error", syncFix ? { label: "Fix", run: syncFix } : undefined);
           })
-          .catch((error) => toast(`Edits are NOT on ${namedLink}: ${error.message}`, "error"));
+          .catch((error) => toast(`Not saved: ${error.message}`, "error"));
       }
       function update() {
         try {
           const model = TimelineText.parse(editor.value);
           latestHTML = TimelineText.render(model);
           latestTitle = model.title;
-          namedLink = model.link || "";
-          namedKey = model.linkKey || "";
           themePicker.value = model.theme;
           // Navigating srcdoc on each edit clears Safari's native undo history.
           if (!preview.hasAttribute("srcdoc")) {
@@ -2194,7 +2082,7 @@ footer: See you there ♡</pre>
               : `✓ ${model.events.length} events · ${(model.end - model.start) / 60} hours · up to date`;
           exportButton.disabled = false;
           refreshLink();
-          queueNamedPublish();
+          queueSave();
           resolveMapLinks(model);
         } catch (error) {
           latestHTML = "";
@@ -2279,6 +2167,7 @@ footer: See you there ♡</pre>
         copy.querySelector("#studio-source").textContent = JSON.stringify(
           source,
         ).replace(/</g, "\\u003c");
+        copy.querySelector("#doc").textContent = "null";
         copy.querySelector("#source").textContent = "";
         copy.querySelector("#preview").removeAttribute("srcdoc");
         copy.querySelector("#status").textContent = "";
@@ -2300,21 +2189,26 @@ footer: See you there ♡</pre>
             .replace(/^-|-$/g, "") || "timeline"
         );
       }
-      editor.value = example;
+      editor.value = DOC && typeof DOC.text === "string" ? DOC.text : example;
       update();
+      docBaseline = editor.value;
+      if (DOC && DOC.name && typeof DOC.text === "string") savedText = editor.value;
+      idleSync();
       // A studio link (index.html#z=…) opens with that timeline loaded. The
       // fragment can also change while the page is already open: on a phone,
       // a shared link tapped while the studio is on the home screen lands in
       // the running copy as a same-document navigation, which only fires
       // hashchange. Load it then too, unless it is the text already shown.
       function loadFromHash() {
+        // A named document ignores fragments; a fresh page imports one.
+        if (docName) return Promise.resolve();
         return TimelineText.decodeLink(location.hash)
           .then((text) => {
             if (!text || text === editor.value) return;
-            // Loaded, not edited: nothing publishes until the user types.
+            // Loaded, not edited: nothing saves until the user types.
             editor.value = text;
             update();
-            namedBaseline = editor.value;
+            docBaseline = editor.value;
             // A shared view sends "?line=N" when a card was tapped there:
             // open the editor on that line, then drop the query so the
             // address bar is back to a plain share link.
@@ -2330,7 +2224,12 @@ footer: See you there ♡</pre>
           });
       }
       loadFromHash().then(() => {
-        namedBaseline = namedBaseline || editor.value;
+        // "?line=N" opens the editor on that line (older shared views sent it).
+        const line = Number(new URLSearchParams(location.search).get("line"));
+        if (line && docName) {
+          history.replaceState(null, "", location.pathname);
+          editLine(line);
+        }
       });
       window.addEventListener("hashchange", loadFromHash);
       function copyViaSelection(text) {
@@ -2354,68 +2253,17 @@ footer: See you there ♡</pre>
       // Short links: the same compressed payload the long link carries, stored
       // under a short id by the Worker in worker/ (served at tl.gaup.uk).
       // Unlike the long link, this sends the timeline text off the device.
-      let SHORT_LINK_API = "https://tl.gaup.uk/";
-      // The studio moved from GitHub Pages to the Worker's own origin. Edit
-      // ids live in this browser's storage per origin, so the old address
-      // offers one tap that carries the text, with every stored id written
-      // into its link line, over in the fragment (nothing goes to a server).
-      if (location.hostname === "gparuthi.github.io") {
-        const moved = document.querySelector("#moved"),
-          movedText = document.querySelector("#moved-text");
-        const stored = Object.keys(linkKeys());
-        movedText.textContent = stored.length
-          ? `Timeline Studio now lives at tl.gaup.uk. Your edit id${stored.length === 1 ? "" : "s"} for ${stored.join(", ")} come${stored.length === 1 ? "s" : ""} along.`
-          : "Timeline Studio now lives at tl.gaup.uk.";
-        moved.hidden = false;
-        document.querySelector("#moved-go").addEventListener("click", async () => {
-          const keys = linkKeys();
-          let text = editor.value;
-          for (const name of Object.keys(keys)) {
-            const bare = new RegExp(`^([ \\t]*link[ \\t]*:[ \\t]*${name})[ \\t]*$`, "m");
-            text = text.replace(bare, `$1 ${keys[name]}`);
-          }
-          const hash = await TimelineText.encodeLink(text);
-          location.href = "https://tl.gaup.uk/#" + hash;
-        });
-      }
-      try {
-        // Dev hook: point the studio at a local `wrangler dev` of worker/.
-        SHORT_LINK_API = localStorage.getItem("shortLinkApi") || SHORT_LINK_API;
-      } catch (error) {
-        /* storage may be blocked */
-      }
-      // Copy link copies a short link: the named one when the text has a
-      // "link:" line, else a content link. If the link server cannot be
-      // reached the long fragment link is copied instead, so the button
-      // always yields something that opens.
-      // Copy link and Calendar feed share one path: the named link when the
-      // text has one, else a content link, else (for the link only) the long
-      // fragment link. The feed is the same address with ".ics" appended.
       async function copyLink(suffix = "") {
-        if (!latestLink) return;
-        const payload = latestLink.slice(latestLink.indexOf("#") + 1);
         status.className = "status";
         status.textContent = suffix ? "Making calendar feed…" : "Making link…";
-        const plainLink = () =>
-          fetch(SHORT_LINK_API, {
-            method: "POST",
-            headers: { "content-type": "text/plain" },
-            body: payload,
-          }).then(async (response) => {
-            const body = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(body.error || `Link server answered ${response.status}`);
-            return body.url;
-          });
-        // A named link that cannot be published from here (name taken, no
-        // key on this device) degrades to a plain content link.
-        let fallback = "";
-        const request = (namedLink ? publishNamed().then((url) => url || plainLink()) : plainLink())
-          .then((url) => url + suffix)
-          .catch((error) => {
-            if (suffix) throw error;
-            fallback = error.message;
-            return latestLink;
-          });
+        // Hosted: the address itself (saved first). Standalone: the long
+        // fragment link, which needs no server.
+        const request = HOSTED
+          ? saveDoc().then((url) => {
+              if (!url) throw new Error(syncBox.textContent.replace(/^⚠\s*/, "") || "not saved");
+              return url + suffix;
+            })
+          : Promise.resolve(latestLink);
         let copied = false;
         // Safari only honours clipboard writes made during the click, so hand
         // it the pending request as a ClipboardItem instead of awaiting first.
@@ -2434,63 +2282,69 @@ footer: See you there ♡</pre>
           link = await request;
         } catch (error) {
           status.className = "status error";
-          status.textContent = `Calendar feed needs the link server: ${error.message}`;
-          toast("Calendar feed unavailable: " + error.message, "error");
+          status.textContent = `Could not make the link: ${error.message}`;
+          toast(`Not copied: ${error.message}`, "error");
           return;
         }
+        if (!link) return;
         if (!copied)
           copied = navigator.clipboard
             ? await navigator.clipboard.writeText(link).then(() => true, () => false)
             : copyViaSelection(link);
         status.className = "status";
-        const label = fallback
-          ? `✓ Long link copied (link server: ${fallback})`
-          : `✓ ${suffix ? "Calendar feed" : "Link"} copied · ${link}`;
         if (copied) {
-          status.textContent = label;
+          status.textContent = `✓ ${suffix ? "Calendar feed" : "Link"} copied · ${link}`;
           toast(
-            fallback
-              ? `Long link copied (link server unreachable)${namedKey ? " · it carries your edit id" : ""}`
-              : suffix
-                ? "Calendar feed copied · in Google Calendar: Other calendars → From URL"
-                : `Link copied · ${link.replace(/^https?:\/\//, "")}`,
+            suffix
+              ? "Calendar feed copied · in Google Calendar: Other calendars → From URL"
+              : HOSTED
+                ? `Link copied · ${link.replace(/^https?:\/\//, "")}`
+                : "Long link copied · it carries the whole timeline",
           );
         } else {
-          status.textContent = fallback ? "Could not copy; the long link is in the dialog." : `Link: ${link}`;
+          status.textContent = `Link: ${link}`;
           toast("Could not copy automatically", "error");
           window.prompt("Copy this link:", link);
         }
       }
       document.querySelector("#copy-link").addEventListener("click", () => copyLink());
       document.querySelector("#calendar-link").addEventListener("click", () => copyLink(".ics"));
-      document.querySelector("#custom-link").addEventListener("click", () => {
+      document.querySelector("#custom-link").addEventListener("click", async () => {
         const suggested =
-          namedLink ||
           latestTitle
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, "-")
             .replace(/^-+|-+$/g, "")
-            .slice(0, 32) ||
-          "my-week";
-        const answer = window.prompt("Name for your link (letters, digits, hyphens):", suggested);
+            .slice(0, 32) || "my-week";
+        const answer = window.prompt("Name for this timeline's link (letters, digits, hyphens):", suggested);
         if (answer === null) return;
         const name = answer.trim().toLowerCase();
-        if (!/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(name)) {
+        if (!NAME_RE.test(name)) {
           status.className = "status error";
           status.textContent = "A link name is 3–32 lowercase letters, digits or hyphens.";
           return;
         }
-        const line = `link: ${name}`,
-          pattern = /^link\s*:.*$/m;
-        editor.value = pattern.test(editor.value)
-          ? editor.value.replace(pattern, line)
-          : editor.value.replace(/^(title\s*:.*)$/m, `$1\n${line}`) || line + "\n" + editor.value;
-        if (!editor.value.includes(line)) editor.value = line + "\n" + editor.value;
-        dirty = true;
-        clearTimeout(pending);
-        update();
-        document.querySelector("#copy-link").click();
+        if (name === docName) return;
+        status.className = "status";
+        status.textContent = `Making ${name}…`;
+        try {
+          const response = await fetch(SHORT_LINK_API + name, {
+            method: "PUT",
+            headers: { "content-type": "text/plain", "if-none-match": "*" },
+            body: await TimelineText.encodeLink(editor.value),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error || `${response.status}`);
+          toast(`Now at ${body.url.replace(/^https?:\/\//, "")}`);
+          location.href = body.url;
+        } catch (error) {
+          status.className = "status error";
+          status.textContent = `Could not make ${name}: ${error.message}`;
+          toast(`Could not make ${name}: ${error.message}`, "error");
+        }
       });
+      document.querySelector("#custom-link").hidden = !HOSTED;
+      document.querySelector("#calendar-link").hidden = !HOSTED;
       editor.addEventListener("input", () => {
         dirty = true;
         clearTimeout(pending);

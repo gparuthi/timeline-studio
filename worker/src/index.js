@@ -1,165 +1,164 @@
-// Short links for Timeline Studio.
+// Timeline Studio's server: the URL is the document.
 //
-// A long share link carries the whole timeline in its fragment as
-// "z=<deflate-raw, base64url>" (see TimelineText.encodeLink). This Worker
-// stores that same payload under a short id in KV:
+//   GET  /                the studio, a fresh timeline
+//   GET  /<name>          the studio open on that timeline (the text is
+//                         inlined; og: tags for message previews)
+//   PUT  /<name>          body = link payload (z=… / t=…); stores the text
+//                         under the name. "If-None-Match: *" makes it a
+//                         create that fails with 412 when the name exists.
+//   GET  /<name>.txt      the text          GET /<name>.ics   calendar feed
+//   /dav/<name>/          CalDAV: calendar apps edit the events (caldav.js)
+//   GET  /resolve?u=      follows a Google/Apple Maps link -> { url, name, address }
+//   POST /command         { text, command, today } -> { text, note }   edit by instruction
+//   GET  /<id>            a snapshot from the earlier content-addressed
+//                         scheme, opened in the studio read-only-until-edited
 //
-//   POST /            body = the payload      -> { id, url }
-//   GET  /<id>        the viewer page with the payload inlined
-//   GET  /<id>.txt    the timeline text itself
-//   GET  /<id>.ics    the same as a calendar feed (also /<name>.ics)
-//   PUT  /<name>      body = the payload      -> { url, key? }   named link
-//   GET  /<name>      the viewer for whatever that name points to now
-//   GET  /resolve?u=  follows a Google/Apple Maps link -> { url, name, address }
-//   POST /command     { text, command, today } -> { text, note }   edit by instruction
-//   GET  /claim/<tok> one-time hand-off of a name's edit id to another device
-//
-// Ids are content-addressed (a prefix of sha256(payload)), so sharing the
-// same timeline twice yields the same link and never a second KV write.
-//
-// A named link ("link: la-week" in the timeline text) is a mutable alias:
-// KV "alias:<name>" holds { id, key }. The first PUT claims the name and
-// returns a random key; later PUTs must present it, either as x-link-key
-// or inside the text as "link: la-week <key>" (the studio writes it there
-// so the owner's other devices can update too). The key is stripped from
-// every payload before it is stored, so what a short link serves never
-// carries the ability to overwrite it.
-// Nothing here is authenticated: anyone can create a link, which is the
-// point of a share service. Payloads are capped and validated so KV only
-// ever holds something the viewer can decode.
+// A name is the whole capability: anyone with the link can read and edit,
+// like a shared document. Names the studio makes up carry a random tail
+// (la-week-k3x9p); a name you choose is as guessable as you make it.
+// Nothing is authenticated beyond that, and nothing carries an edit key.
+// The studio and its files are this Worker's static assets (wrangler.jsonc).
 
-// The renderer's parser, shared with the studio (the file is a
-// dependency-free IIFE; bundled here as CommonJS).
 import TimelineText from "../../timeline-renderer.js";
+import { isDavRequest, handleDav } from "./caldav.js";
 
 const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
-const LINK_LINE = /^([ \t]*link[ \t]*:[ \t]*[a-z0-9][a-z0-9-]{1,30}[a-z0-9])[ \t]+([A-Za-z0-9_-]{16,40})[ \t]*$/m;
+const LINK_LINES = /^[ \t]*link[ \t]*:.*(?:\r?\n|$)/gm;
+const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics)?$/;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
-const CLAIM = /^\/claim\/([A-Za-z0-9_-]{16,64})$/;
-const ALIAS = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
-const RESERVED = new Set(["index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api"]);
+const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api"]);
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, PUT, GET, OPTIONS",
-  "access-control-allow-headers": "content-type, x-link-key",
+  "access-control-allow-headers": "content-type, if-none-match",
+  "access-control-expose-headers": "etag",
   "access-control-max-age": "86400",
 };
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // CalDAV lives under /dav (see caldav.js); calendar apps also probe
+    // /.well-known/caldav and send PROPFIND/OPTIONS at the root.
+    if (isDavRequest(url, request.method) && !(request.method === "OPTIONS" && request.headers.get("origin")))
+      return handleDav(request, env, { loadDoc, saveDoc });
     if (request.method === "OPTIONS")
       // The extra header lets a studio on a LAN/tailnet host talk to a local
       // `wrangler dev` under Chrome's private-network-access rules.
       return new Response(null, { status: 204, headers: { ...CORS, "access-control-allow-private-network": "true" } });
-    if (url.pathname === "/") {
-      if (request.method === "POST") return create(request, env);
-      // The studio itself, from this Worker's static assets.
-      if (env.ASSETS) return env.ASSETS.fetch(new Request(new URL("/index.html", url), request));
-      return Response.redirect(env.STUDIO_URL, 302);
-    }
+    if (url.pathname === "/") return studio(env, url, null);
     if (url.pathname === "/resolve" && request.method === "GET") return resolveMap(url.searchParams.get("u") || "");
     if (url.pathname === "/command" && request.method === "POST") return command(request, env);
-    const claimToken = url.pathname.match(CLAIM);
-    if (claimToken && request.method === "GET") return claimHandoff(claimToken[1], env);
-    const alias = url.pathname.match(ALIAS);
-    if (alias && request.method === "PUT") return claim(request, env, alias[1]);
-    const match = url.pathname.match(ID) || alias;
-    if (!match || (request.method !== "GET" && request.method !== "HEAD"))
-      return new Response("Not found", { status: 404, headers: CORS });
-    // A name resolves through its alias record; a content id is immutable
-    // and may be cached, a name must always show the latest edit.
-    let payload = null,
-      cache = "public, max-age=86400";
-    if (alias) {
-      const record = await env.LINKS.get("alias:" + alias[1], "json");
-      if (record) {
-        payload = await env.LINKS.get(record.id);
-        cache = "no-store";
-      }
+    const named = url.pathname.match(NAME);
+    if (named && request.method === "PUT") return put(request, env, named[1]);
+    if (request.method !== "GET" && request.method !== "HEAD") return new Response("Not found", { status: 404, headers: CORS });
+    if (named) {
+      const doc = await loadDoc(env, named[1]);
+      if (named[2] === ".txt") return doc ? plain(doc.text) : new Response("No such timeline", { status: 404, headers: CORS });
+      if (named[2] === ".ics")
+        return doc
+          ? new Response(calendar(doc.text, named[1], `${url.origin}/${named[1]}`), {
+              headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "no-store", ...CORS },
+            })
+          : new Response("No such timeline", { status: 404, headers: CORS });
+      // A name nobody has used yet opens as a fresh timeline bound to it.
+      return studio(env, url, { name: named[1], text: doc ? doc.text : null, version: doc ? doc.version : "" });
     }
-    if (!payload && url.pathname.match(ID)) payload = await env.LINKS.get(url.pathname.match(ID)[1]);
-    if (!payload) return page(notFound(env), 404);
-    if (match[2]) {
+    const snapshot = url.pathname.match(ID);
+    if (snapshot) {
+      const payload = await env.LINKS.get(snapshot[1]);
+      if (!payload) return page(notFound(env), 404);
       const text = await decode(payload);
-      if (match[2] === ".ics")
-        return new Response(calendar(text, match[1], `${url.origin}/${match[1]}`), {
-          headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": cache, ...CORS },
+      if (snapshot[2] === ".txt") return plain(text, "public, max-age=86400");
+      if (snapshot[2] === ".ics")
+        return new Response(calendar(text, snapshot[1], `${url.origin}/${snapshot[1]}`), {
+          headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "public, max-age=86400", ...CORS },
         });
-      return new Response(text, {
-        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": cache, ...CORS },
-      });
+      return studio(env, url, { name: "", text, snapshot: true });
     }
-    return page(await viewer(payload, match[1], env), 200, { "cache-control": cache });
+    return page(notFound(env), 404);
   },
 };
 
-async function readPayload(request) {
-  if (Number(request.headers.get("content-length")) > MAX_PAYLOAD) throw new HttpError(413, "Timeline too large");
-  const payload = (await request.text()).trim();
-  if (payload.length > MAX_PAYLOAD) throw new HttpError(413, "Timeline too large");
-  if (!PAYLOAD.test(payload)) throw new HttpError(400, "Expected a timeline link payload (z=… or t=…)");
-  let text;
-  try {
-    text = await decode(payload);
-  } catch (error) {
-    throw new HttpError(400, "Payload does not decode");
-  }
-  if (!text.trim()) throw new HttpError(400, "Empty timeline");
-  // Never store or serve an edit key: drop it from the link line.
-  const keyed = text.match(LINK_LINE);
-  if (keyed) {
-    const stripped = text.replace(LINK_LINE, "$1");
-    return { payload: await encode(stripped), text: stripped, textKey: keyed[2] };
-  }
-  return { payload, text, textKey: "" };
+function plain(text, cache = "no-store") {
+  return new Response(text, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": cache, ...CORS } });
 }
 
-async function encode(text) {
-  const bytes = new TextEncoder().encode(text);
-  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
-  return "z=" + b64url(new Uint8Array(await new Response(stream).arrayBuffer()));
-}
+// ---- documents ------------------------------------------------------------
 
-// Content-addressed store: the same timeline always gets the same id. On
-// the (astronomically unlikely) prefix collision, take a longer prefix.
-async function store(env, payload, text) {
-  const digest = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload))));
-  for (const length of [7, 10, 14, 22]) {
-    const candidate = digest.slice(0, length);
-    const existing = await env.LINKS.get(candidate);
-    if (existing === null) {
-      await env.LINKS.put(candidate, payload, { metadata: { created: new Date().toISOString(), title: title(text) } });
-      return candidate;
-    }
-    if (existing === payload) return candidate;
-  }
-  throw new HttpError(500, "Could not allocate an id");
-}
-
-async function claim(request, env, name) {
-  try {
-    const { payload, text, textKey } = await readPayload(request);
+// "doc:<name>" holds the link payload; the version is a hash of it. Names
+// from before this scheme ("alias:<name>" -> { id } pointing at a content
+// key) are read through and copied over on first use.
+async function loadDoc(env, name) {
+  let payload = await env.LINKS.get("doc:" + name);
+  if (payload === null) {
     const record = await env.LINKS.get("alias:" + name, "json");
-    const key = request.headers.get("x-link-key") || textKey || "";
+    payload = record && (await env.LINKS.get(record.id));
+    if (!payload) return null;
+    await env.LINKS.put("doc:" + name, payload, { metadata: { migrated: new Date().toISOString() } });
+  }
+  const text = await decode(payload);
+  return { name, text, payload, version: await version(payload) };
+}
+
+async function saveDoc(env, name, text) {
+  const clean = text.replace(LINK_LINES, "").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  TimelineText.parse(clean); // never store something the studio cannot open
+  const payload = await encode(clean);
+  await env.LINKS.put("doc:" + name, payload, { metadata: { title: title(clean), updated: new Date().toISOString() } });
+  return { name, text: clean, payload, version: await version(payload) };
+}
+
+async function version(payload) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  return b64url(new Uint8Array(digest)).slice(0, 12);
+}
+
+async function put(request, env, name) {
+  try {
     if (RESERVED.has(name)) throw new HttpError(409, `“${name}” is reserved`);
-    if (record && record.key !== key) throw new HttpError(403, `“${name}” is already taken`);
-    if (!record && (await env.LINKS.get(name)) !== null) throw new HttpError(409, `“${name}” is not available`);
-    const id = await store(env, payload, text);
-    const now = new Date().toISOString();
-    const next = record
-      ? { ...record, id, updated: now }
-      : { id, key: b64url(crypto.getRandomValues(new Uint8Array(18))), created: now, updated: now };
-    await env.LINKS.put("alias:" + name, JSON.stringify(next), { metadata: { title: title(text), updated: now } });
+    if (Number(request.headers.get("content-length")) > MAX_PAYLOAD) throw new HttpError(413, "Timeline too large");
+    const payload = (await request.text()).trim();
+    if (payload.length > MAX_PAYLOAD) throw new HttpError(413, "Timeline too large");
+    if (!PAYLOAD.test(payload)) throw new HttpError(400, "Expected a timeline link payload (z=… or t=…)");
+    let text;
+    try {
+      text = await decode(payload);
+    } catch (error) {
+      throw new HttpError(400, "Payload does not decode");
+    }
+    if (!text.trim()) throw new HttpError(400, "Empty timeline");
+    if (request.headers.get("if-none-match") === "*" && (await loadDoc(env, name)))
+      throw new HttpError(412, `“${name}” is already taken`);
+    const doc = await saveDoc(env, name, text);
     const link = new URL("/" + name, request.url);
     if (link.hostname !== "localhost") link.protocol = "https:";
-    return json(record ? { url: link.href, id } : { url: link.href, id, key: next.key, created: true });
+    return json({ url: link.href, version: doc.version }, 200, { etag: `"${doc.version}"` });
   } catch (error) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
-    throw error;
+    return json({ error: error.message || String(error) }, 400);
   }
+}
+
+// The studio page with the document inlined: no second request, no flash
+// of the sample, and og: tags so a pasted link previews as the timeline.
+async function studio(env, url, doc) {
+  const asset = await env.ASSETS.fetch(new Request(new URL("/index.html", url)));
+  let html = await asset.text();
+  if (doc) {
+    const inline = JSON.stringify(doc).replace(/<\//g, "<\\/").replace(/<!--/g, "<\\!--");
+    html = html.replace('<script type="application/json" id="doc">null</script>', `<script type="application/json" id="doc">${inline}</script>`);
+    if (doc.text) {
+      const name = title(doc.text) || "Timeline";
+      html = html.replace(
+        /<title>[^<]*<\/title>/,
+        `<title>${escape(name)}</title><meta property="og:title" content="${escape(name)}"><meta property="og:description" content="${escape(summary(doc.text))}"><meta property="og:type" content="website"><meta name="robots" content="noindex">`,
+      );
+    }
+  }
+  return page(html, 200, { "cache-control": doc ? "no-store" : "public, max-age=0, must-revalidate" });
 }
 
 // Map short links (maps.app.goo.gl) only reveal the place after a redirect
@@ -266,12 +265,11 @@ async function command(request, env) {
     if (!instruction) throw new HttpError(400, "Say what to change");
     if (instruction.length > MAX_COMMAND) throw new HttpError(400, "Keep a command under 600 characters");
     if (text.length > MAX_COMMAND_TEXT) throw new HttpError(413, "Timeline too large for a command (embedded images count)");
-    // Embedded images and the edit key never reach the model: an asset line
-    // is thousands of tokens of base64 it would mangle, and the key is a
-    // secret. Both go back in afterwards.
     const assets = text.match(ASSET_LINE) || [];
-    const keyed = text.match(LINK_LINE);
-    const trimmed = text.replace(ASSET_LINE, "").replace(LINK_LINE, "$1").replace(/\n{3,}/g, "\n\n").trim();
+    // Embedded images never reach the model: an asset line is thousands of
+    // tokens of base64 it would mangle. They go back in afterwards. Link
+    // lines from older texts are dropped; the name is the URL now.
+    const trimmed = text.replace(ASSET_LINE, "").replace(LINK_LINES, "").replace(/\n{3,}/g, "\n\n").trim();
     if (!trimmed) throw new HttpError(400, "Empty timeline");
     const answer = await env.AI.run(COMMAND_MODEL, {
       messages: [
@@ -292,15 +290,6 @@ async function command(request, env) {
     const block = raw.match(/```(?:timeline|text)?[ \t]*\n([\s\S]*?)\n?```/);
     if (!block) throw new HttpError(502, "The model did not return a timeline" + (raw.trim() ? ": " + raw.trim().slice(0, 240) : ""));
     let edited = block[1].replace(/[ \t]+$/gm, "").trim();
-    // The link line comes back exactly as it went in (id included), whether
-    // the model kept it, changed it or dropped it: losing it would silently
-    // stop the studio from publishing to the named link.
-    const linkLine = (text.match(/^[ \t]*link[ \t]*:.*$/m) || [])[0];
-    if (linkLine)
-      edited = /^[ \t]*link[ \t]*:/m.test(edited)
-        ? edited.replace(/^[ \t]*link[ \t]*:.*$/m, linkLine.trim())
-        : edited.replace(/^([ \t]*title[ \t]*:.*)$/m, `$1\n${linkLine.trim()}`) || linkLine.trim() + "\n" + edited;
-    if (linkLine && !edited.includes(linkLine.trim())) edited = linkLine.trim() + "\n" + edited;
     if (assets.length) edited += "\n\n" + assets.join("\n");
     const note = (raw.slice(raw.indexOf(block[0]) + block[0].length).match(/^\s*note:\s*(.+)$/im) || [])[1] || "";
     return json({ text: edited + "\n", note: note.trim().slice(0, 300), model: COMMAND_MODEL });
@@ -407,27 +396,14 @@ function calendar(text, name, link) {
   );
 }
 
-// A one-time token ("claim:<token>" -> { name } in KV, written by the
-// owner's tooling) opens the studio with the name's current text and its
-// edit id on the link line, so a device that never had the id gets it
-// without the id ever appearing anywhere readable. The token is deleted
-// on first use; the id travels only in the fragment.
-async function claimHandoff(token, env) {
-  const claim = await env.LINKS.get("claim:" + token, "json");
-  if (!claim) return page(notFound(env), 404);
-  await env.LINKS.delete("claim:" + token);
-  const record = await env.LINKS.get("alias:" + claim.name, "json");
-  const payload = record && (await env.LINKS.get(record.id));
-  if (!record || !payload) return page(notFound(env), 404);
-  const text = await decode(payload);
-  const linePattern = new RegExp(`^([ \\t]*link[ \\t]*:[ \\t]*${claim.name})(?:[ \\t]+\\S+)?[ \\t]*$`, "m");
-  const withId = linePattern.test(text)
-    ? text.replace(linePattern, `$1 ${record.key}`)
-    : `link: ${claim.name} ${record.key}\n` + text;
-  return new Response(null, {
-    status: 302,
-    headers: { location: `${env.STUDIO_URL}#${await encode(withId)}`, "cache-control": "no-store" },
-  });
+function notFound(env) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>No such timeline</title><style>:root{color-scheme:dark}html,body{margin:0;background:#0f1418;color:#dfebf2;font-family:system-ui,-apple-system,sans-serif}.msg{max-width:520px;margin:18vh auto;padding:0 24px;text-align:center;line-height:1.5}.msg a{color:#8fc7dd}</style></head><body><p class="msg">There is no timeline at this link.<br><a href="${escape(env.STUDIO_URL)}">Open Timeline Studio</a></p></body></html>`;
+}
+
+async function encode(text) {
+  const bytes = new TextEncoder().encode(text);
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+  return "z=" + b64url(new Uint8Array(await new Response(stream).arrayBuffer()));
 }
 
 class HttpError extends Error {
@@ -435,89 +411,6 @@ class HttpError extends Error {
     super(message);
     this.status = status;
   }
-}
-
-async function create(request, env) {
-  try {
-    const { payload, text } = await readPayload(request);
-    const id = await store(env, payload, text);
-    const link = new URL("/" + id, request.url);
-    if (link.hostname !== "localhost") link.protocol = "https:";
-    return json({ id, url: link.href });
-  } catch (error) {
-    if (error instanceof HttpError) return json({ error: error.message }, error.status);
-    throw error;
-  }
-}
-
-async function viewer(payload, id, env) {
-  const text = await decode(payload).catch(() => "");
-  const name = title(text) || "Timeline";
-  const studio = env.STUDIO_URL;
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#101418">
-<meta name="robots" content="noindex">
-<meta property="og:title" content="${escape(name)}">
-<meta property="og:description" content="${escape(summary(text))}">
-<meta property="og:type" content="website">
-<link rel="icon" href="${studio}icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="${studio}apple-touch-icon.png">
-<title>${escape(name)}</title>
-<style>
-:root{color-scheme:dark}
-html,body{margin:0;background:#0f1418;color:#dfebf2;font-family:system-ui,-apple-system,sans-serif}
-.msg{max-width:520px;margin:18vh auto;padding:0 24px;text-align:center;line-height:1.5}
-.msg a{color:#8fc7dd}
-</style>
-</head>
-<body>
-<p class="msg">Loading timeline…</p>
-<script src="${studio}timeline-renderer.js"></script>
-<script>
-(async () => {
-  const payload = ${JSON.stringify(payload)}, studio = ${JSON.stringify(studio)};
-  const message = document.querySelector(".msg");
-  try {
-    if (typeof TimelineText === "undefined") throw new Error("The timeline renderer did not load.");
-    const text = await TimelineText.decodeLink(payload);
-    const html = TimelineText.render(TimelineText.parse(text));
-    document.open();
-    document.write(html);
-    document.close();
-    // document.open() dropped every window listener; a second link tapped
-    // into this tab must still trigger a fresh load.
-    window.addEventListener("hashchange", () => location.reload());
-    // Tapping a card opens the studio on that line, like the live preview.
-    document.head.insertAdjacentHTML("beforeend", "<style>[data-line]{cursor:pointer}</style>");
-    document.addEventListener("click", (event) => {
-      if (event.target.closest("a")) return;
-      const target = event.target.closest("[data-line]");
-      if (target) location.href = studio + "?line=" + target.dataset.line + "#" + payload;
-    });
-    document.body.insertAdjacentHTML(
-      "beforeend",
-      '<a href="' + studio + "#" + payload + '" style="position:fixed;right:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:28;padding:9px 14px;border-radius:999px;background:#143e55;color:#fff;font:600 13px system-ui,-apple-system,sans-serif;text-decoration:none;opacity:.85;box-shadow:0 4px 18px #0004">✎ Edit</a>'
-    );
-  } catch (error) {
-    message.innerHTML = "";
-    message.append(error.message, document.createElement("br"));
-    const link = document.createElement("a");
-    link.href = studio + "#" + payload;
-    link.textContent = "Open in Timeline Studio";
-    message.append(link);
-  }
-})();
-</script>
-</body>
-</html>`;
-}
-
-function notFound(env) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>No such timeline</title><style>:root{color-scheme:dark}html,body{margin:0;background:#0f1418;color:#dfebf2;font-family:system-ui,-apple-system,sans-serif}.msg{max-width:520px;margin:18vh auto;padding:0 24px;text-align:center;line-height:1.5}.msg a{color:#8fc7dd}</style></head><body><p class="msg">There is no timeline at this link.<br><a href="${escape(env.STUDIO_URL)}">Open Timeline Studio</a></p></body></html>`;
 }
 
 async function decode(payload) {
