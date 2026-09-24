@@ -30,7 +30,7 @@ const LINK_LINES = /^[ \t]*link[ \t]*:.*(?:\r?\n|$)/gm;
 const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics|\.mobileconfig|\.webmanifest)?$/;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
-const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version"]);
+const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version", "llms"]);
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, PUT, GET, OPTIONS",

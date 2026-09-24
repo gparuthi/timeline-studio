@@ -866,6 +866,17 @@ footer: See you there ♡</pre>
             </p>
           </details>
           <details>
+            <summary>Write one with ChatGPT or Claude</summary>
+            <p>
+              Any AI chat can write a timeline for you. Start your message with
+              <code>Read https://tl.gaup.uk/llms.txt and make me a timeline:</code>
+              and describe the day or trip. It answers with a link that opens
+              the timeline here, and the text to paste into the editor if the
+              link does not work. The instructions it reads:
+              <a href="https://tl.gaup.uk/llms.txt" target="_blank" rel="noopener">tl.gaup.uk/llms.txt</a>.
+            </p>
+          </details>
+          <details>
             <summary>Add your own images</summary>
             <p>
               Name an image, then choose a file. It becomes an embedded asset in
@@ -1003,7 +1014,7 @@ footer: See you there ♡</pre>
           let m = v.match(/^(.+?)\s*\+\s*(.+)$/);
           if (m) {
             const start = time(m[1], line),
-              d = m[2].trim().match(/^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(\d+)\s*(?:m|min|mins|minutes))?$/i),
+              d = m[2].trim().match(/^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(\d+)\s*(?:m|min|mins|minutes)?)?$/i),
               bare = m[2].trim().match(/^(\d+(?:\.\d+)?)$/);
             const minutes = bare
               ? Math.round(Number(bare[1]) * 60)
@@ -1752,6 +1763,16 @@ footer: See you there ♡</pre>
           return "t=" + b64.enc(bytes);
         }
         async function decodeLink(hash) {
+          // "text=" carries the timeline as plain percent-encoded text, so a link can
+          // be written by hand or by an AI chat (see llms.txt); z=/t= are ours.
+          const plain = String(hash).replace(/^#/, "").match(/^text=([\s\S]*)$/);
+          if (plain) {
+            try {
+              return decodeURIComponent(plain[1]);
+            } catch {
+              return plain[1];
+            }
+          }
           const m = String(hash).replace(/^#/, "").match(/^(z|t)=([A-Za-z0-9_-]+)$/);
           if (!m) return "";
           const bytes = b64.dec(m[2]);

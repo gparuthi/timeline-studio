@@ -81,7 +81,7 @@
     let m = v.match(/^(.+?)\s*\+\s*(.+)$/);
     if (m) {
       const start = time(m[1], line),
-        d = m[2].trim().match(/^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(\d+)\s*(?:m|min|mins|minutes))?$/i),
+        d = m[2].trim().match(/^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(\d+)\s*(?:m|min|mins|minutes)?)?$/i),
         bare = m[2].trim().match(/^(\d+(?:\.\d+)?)$/);
       const minutes = bare
         ? Math.round(Number(bare[1]) * 60)
@@ -830,6 +830,16 @@ ${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-sc
     return "t=" + b64.enc(bytes);
   }
   async function decodeLink(hash) {
+    // "text=" carries the timeline as plain percent-encoded text, so a link can
+    // be written by hand or by an AI chat (see llms.txt); z=/t= are ours.
+    const plain = String(hash).replace(/^#/, "").match(/^text=([\s\S]*)$/);
+    if (plain) {
+      try {
+        return decodeURIComponent(plain[1]);
+      } catch {
+        return plain[1];
+      }
+    }
     const m = String(hash).replace(/^#/, "").match(/^(z|t)=([A-Za-z0-9_-]+)$/);
     if (!m) return "";
     const bytes = b64.dec(m[2]);

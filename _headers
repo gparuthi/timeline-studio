@@ -1,0 +1,3 @@
+# Cloudflare static-asset headers (parsed by the Worker deploy, not served).
+/llms.txt
+  Content-Type: text/plain; charset=utf-8

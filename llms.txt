@@ -1,0 +1,154 @@
+# Timeline Studio: instructions for AI assistants
+
+Timeline Studio (https://tl.gaup.uk/) turns a small plain-text format into a
+visual day plan or trip itinerary. You are reading this because a person wants
+you to write one. Follow this page: write the timeline text, then give the
+person an "open" link and the text itself.
+
+## What to send back
+
+1. A link that opens the timeline, built like this:
+
+       https://tl.gaup.uk/#text=<the whole timeline text, percent-encoded>
+
+   Percent-encode the text the way JavaScript's `encodeURIComponent` does:
+   newline is `%0A`, space is `%20`, `|` is `%7C`, `:` is `%3A`, `@` is `%40`,
+   `#` is `%23`, `&` is `%26`, `+` is `%2B`, `%` is `%25`. Letters, digits and
+   `- _ . ! ~ * ' ( )` stay as they are. Encode every newline; a raw line break
+   breaks the link. Show it as a clickable Markdown link, for example
+   `[Open the timeline](https://tl.gaup.uk/#text=title%3A%20...)`.
+
+2. The same text in a ```text code block, so the person can paste it by hand:
+   open https://tl.gaup.uk/, tap **✎ Edit** (bottom right), replace the text,
+   tap **Done**.
+
+If the text is longer than about 4,000 characters, skip the link and give only
+the code block with the paste instructions. If you can run code, build the link
+with `"https://tl.gaup.uk/#text=" + encodeURIComponent(text)` rather than by hand.
+
+Opening the link loads the timeline without saving anything. The person's first
+edit gives it a permanent address that follows later edits. The text in the
+fragment never reaches a server until then.
+
+## The format
+
+A timeline is lines of text. Settings are `key: value` lines; events are lines
+of fields separated by `|`. Lines starting with `#` are comments. Blank lines
+are ignored.
+
+    title: A Day in Los Angeles
+    date: Saturday, Jun 6, 2026
+    subtitle: Sunshine, tacos, and a sunset
+    range: 08:00 - 20:00
+    theme: travel
+    city: Los Angeles
+    timezone: PT
+
+    08:00 | Coffee and pastries | Neighborhood bakery | coffee | sand
+    09:30 | Griffith Observatory | Hike up, skip the parking | pin | sky
+    11:30 | Farmers market | Tacos for lunch @ Grand Central Market | meal | sage
+    13:00 | Getty Center | Gardens first, then the galleries @ | ticket | sand
+    15:30 - 17:30 | Venice Boardwalk | Rent bikes to Santa Monica | road | sky
+    18:00 | Pier at sunset | Ferris wheel @ Santa Monica Pier | palm | sand
+    19:30 | Drive home | | car | sage
+
+    note: Observatory parking fills by 10 AM
+    note: Sunset is around 7 PM
+    footer: Bring sunscreen
+
+### Events
+
+    time | title | description | icon | color
+
+Only `time` and `title` are required. Leave a field empty to skip it
+(`19:30 | Drive home | | car`). Write `\|` for a literal pipe inside text.
+
+Time forms:
+
+- `08:00`, `14:30` (24-hour) or `8:00 AM`, `2:30 PM`. Always give minutes.
+- A span: `15:00 - 17:00` or `3:00 - 5:00 PM` (the start borrows the end's
+  AM/PM). Spans draw a bar from start to end. Use them for things with a real
+  duration (a flight, a tour, a meeting).
+- Start plus duration: `15:00 +2h`, `15:00 +90m`, `15:00 +1h30`.
+
+Events are sorted by time, so list order does not matter; equal times keep
+their written order. Keep titles short (2 to 5 words) and put detail in the
+description.
+
+Icons (pick one, or leave empty and the studio guesses from the words):
+`home`, `plane`, `depart`, `land`, `coffee`, `meal`, `tree`, `bed`, `shop`,
+`ticket`, `pin`, `car`, `road`, `palm`.
+
+Colors: `sky` (blue), `sand` (yellow), `sage` (green). Use them to group
+kinds of events (for example travel = sky, food = sand, outdoors = sage), and
+be consistent within one timeline.
+
+### Places and links
+
+End a description with ` @ ` and a place name and the card shows a map chip
+that searches Google Maps for it: `Tacos for lunch @ Grand Central Market`. A
+bare `@` at the end means the title itself is the place:
+`Getty Center | Gardens first @`, or `Manhattan Beach | @`. The `@` needs a
+space before it. Use real venue names; do not invent addresses. Set
+`city: <city>` so short place names resolve in the right town.
+
+URLs in a description or note are clickable. Google and Apple Maps links show
+as a "Map" chip.
+
+### Settings
+
+| Setting | Meaning |
+|---|---|
+| `title:` | Heading of the sheet. Always set one. |
+| `date:` | Display text under the title, e.g. `Saturday, Jun 6, 2026`. |
+| `subtitle:` | One short tagline. |
+| `range:` | Hour scale, whole hours within one day: `07:00 - 22:00`. Omit to fit the events. |
+| `theme:` | `travel` (default, illustrated header), `minimal`, `retro`, `future`, `code`. |
+| `note:` | Repeatable. Short reminders shown in a notes block. |
+| `footer:` | One line at the bottom. |
+| `city:` | Added to every map search. Global, or per day. |
+| `timezone:` | `PT`, `ET`, `CET`, `IST`, or an IANA name like `Asia/Tokyo`. Global, or per day. Only affects calendar export. |
+| `places: off` | Stops the studio auto-adding `@ place` to events. |
+
+### Several days
+
+Start each day with `day: <label>`. Events, `range:`, `note:`, `city:` and
+`timezone:` lines under it belong to that day. Settings before the first
+`day:` are global. A one-day timeline needs no `day:` line.
+
+    title: Long Weekend in Tokyo
+    theme: travel
+    timezone: Asia/Tokyo
+
+    day: Saturday, Jun 6, 2026
+    city: Tokyo
+    range: 08:00 - 22:00
+    09:00 - 10:30 | Tsukiji breakfast | Tamagoyaki and tuna @ Tsukiji Outer Market | meal | sand
+    13:00 | Senso-ji | Go early, it gets packed @ | ticket | sage
+    19:00 | Shibuya crossing | Dinner nearby | pin | sky
+    note: Get a Suica card at the airport
+
+    day: Sunday, Jun 7, 2026
+    city: Hakone
+    08:15 +1h30 | Train to Hakone | Romancecar from Shinjuku | road | sky
+    12:00 | Lake Ashi cruise | @ | palm | sage
+    16:00 | Onsen | Towels provided | bed | sand
+
+Write day labels as real dates with weekday, month, day and year
+(`Sunday, Jun 7, 2026`) whenever you know them: the masthead then shows the
+date span and calendar export works. Undated labels (`Day 1`) are allowed.
+
+## Rules for a good result
+
+- Output only the format above: no Markdown, bold or bullets inside the
+  timeline text.
+- Every event line starts with a time. Do not write events without times; if
+  the person gave none, choose sensible ones and say so.
+- Ask for missing essentials only when you truly cannot guess (usually the
+  date). Otherwise make reasonable choices and mention them in one line.
+- Keep it to what fits on a phone: about 4 to 10 events a day, titles short,
+  descriptions under about 60 characters, a few notes at most.
+- Resolve relative dates ("next Saturday") to real dates.
+- To change an existing timeline, the person can paste its text to you; edit
+  it and send back the complete new text and link, keeping lines you did not
+  need to change exactly as they were.
