@@ -453,19 +453,28 @@ const ASSET_LINE = /^[ \t]*asset[ \t]+[^:\n]+:[ \t]*data:.*$/gm;
 const COMMAND_PROMPT = `You edit a text timeline. The user gives the current timeline and one instruction; you return the complete updated timeline.
 
 Format, one item per line:
-- Header lines: "title:", "subtitle:", "date:", "theme:", "timezone:", "city:", "places:", "footer:", "header-art:". Keep them exactly as they are.
+- Header lines: "title:", "subtitle:", "date:", "theme:", "timezone:", "city:", "places:", "footer:", "header-art:", "clock:", "cover:". Keep them exactly as they are.
+- "asset <name>: <url>" lines define images. Keep them exactly as they are.
 - "day: Weekday, Mon D, YYYY" starts a day. The lines after it belong to that day until the next "day:". Keep days in chronological order; add a "day:" line when the instruction needs a day that is not there yet.
 - "range: HH:MM - HH:MM" under a day sets its visible hours. "note: ..." adds a note.
-- Events: "HH:MM | title | description | icon | color". Only the time and title are required; leave the other fields empty rather than inventing them. Time can be a span "HH:MM - HH:MM". Use 24-hour times.
-- Icons: home, plane, depart, land, coffee, meal, tree, bed, shop, ticket, pin, car, road, palm. Colors: sky, sand, sage. Leave the icon empty to let it be guessed.
+- Events: "HH:MM | title | description | icon | color | picture". Only the time and title are required; leave the other fields empty rather than inventing them. Time can be a span "HH:MM - HH:MM". Use 24-hour times.
+- Lines starting with "- " directly under an event are that event's notes. They stay directly under their event; when you move an event, move its notes with it.
+- Icons: home, plane, depart, land, coffee, meal, tree, bed, shop, ticket, pin, car, road, palm, dumbbell, run, stretch, timer, pot. Colors: sky, sand, sage. Leave the icon empty to let it be guessed. The 6th field is a picture ("@name" or an image URL); keep it, never invent one.
 - A place goes at the end of the description after " @ ": "Gear run @ REI Baldwin Hills", or just "@ Wi Spa" when there is nothing else to say; a bare "@" as the description means the title is the place ("Manhattan Beach | @"). It becomes a map link by itself, so never write addresses or URLs. When the instruction names a place for an event, add it this way.
 - Lines starting with # are comments.
 
+Routines. A timeline with "clock: relative" is a workout or a recipe timed from Start, not a day:
+- Its times are elapsed time since Start: "M:SS" (5:30 is 5 minutes 30 seconds in) or "H:MM:SS". Never write clock times or AM/PM in a routine.
+- "+45s | Plank" is a step that starts when the line above it ends. Its length is the duration: "+45s", "+2m", "+1m30s", "+1h". To make a step longer or shorter, change only its duration ("make rests 20s": every "+15s | Rest" becomes "+20s | Rest"); the steps after it move by themselves, so leave their lines alone.
+- A span "0:00 - 15:00" or "15:00 +25m" has a fixed start; to lengthen it change its end or its duration ("roast 5 minutes longer": "15:00 +25m | Roast" becomes "15:00 +30m | Roast"). Spans may overlap.
+- Order matters: a "+duration" step follows the line above it, so never sort a routine's lines. To add a step, insert a new line (for example "+45s | Plank") at the place in the order where it happens, and copy the fields and notes of a similar step when the user says "another".
+- "day:" lines in a routine are section labels ("Warm-up", "Main set"), not dates.
+
 Rules:
 - Change only what the instruction asks. Every other line stays byte-for-byte the same, in the same order within its day.
-- Changing an event's time means rewriting the HH:MM at the start of its line (and both ends of a span). Moving it to another day means cutting the line and pasting it under that day. Keep its title, description, icon and color.
+- Changing an event's time means rewriting the time at the start of its line (and both ends of a span). Moving it to another day means cutting the line (and its "- " notes) and pasting it under that day. Keep its title, description, icon, color and picture.
 - A time without AM/PM takes the reading closest to the event's current time and to what the event is: dinner at 7:30 is 19:30, coffee at 9 is 09:00, "3 pm" is 15:00.
-- Keep events under each day sorted by time.
+- Keep events under each day sorted by time (except in a routine, see above).
 - "Today" and "tomorrow" are relative to the date given with the instruction.
 - If the instruction cannot be applied or is ambiguous, return the timeline unchanged and explain in the note.
 
@@ -715,8 +724,10 @@ async function command(request, env) {
       // Qwen3 reasons before it answers (a hidden <think> block). With the
       // reasoning suppressed it passed 6 of 8 eval commands and got times
       // wrong ("dinner at 7:30" -> 17:30); with it, 8 of 8 at ~5.5 s. The
-      // budget covers the reasoning plus a full day-by-day rewrite.
-      max_tokens: Math.min(8000, Math.ceil(trimmed.length / 2) + 2500),
+      // budget covers the reasoning plus a full day-by-day rewrite; adding
+      // a step to a routine (where to insert it, which notes to copy) once
+      // ran out at +2500 and returned no timeline.
+      max_tokens: Math.min(8000, Math.ceil(trimmed.length / 2) + 4000),
     });
     const raw = String(answer?.response ?? answer?.result?.response ?? "").replace(/<think>[\s\S]*?<\/think>/g, "");
     const block = raw.match(/```(?:timeline|text)?[ \t]*\n([\s\S]*?)\n?```/);

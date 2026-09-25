@@ -58,7 +58,7 @@ are ignored.
 
 ### Events
 
-    time | title | description | icon | color
+    time | title | description | icon | color | picture
 
 Only `time` and `title` are required. Leave a field empty to skip it
 (`19:30 | Drive home | | car`). Write `\|` for a literal pipe inside text.
@@ -77,7 +77,8 @@ description.
 
 Icons (pick one, or leave empty and the studio guesses from the words):
 `home`, `plane`, `depart`, `land`, `coffee`, `meal`, `tree`, `bed`, `shop`,
-`ticket`, `pin`, `car`, `road`, `palm`.
+`ticket`, `pin`, `car`, `road`, `palm`, and for routines `dumbbell`, `run`,
+`stretch`, `timer`, `pot`.
 
 Colors: `sky` (blue), `sand` (yellow), `sage` (green). Use them to group
 kinds of events (for example travel = sky, food = sand, outdoors = sage), and
@@ -109,6 +110,8 @@ as a "Map" chip.
 | `city:` | Added to every map search. Global, or per day. |
 | `timezone:` | `PT`, `ET`, `CET`, `IST`, or an IANA name like `Asia/Tokyo`. Global, or per day. Only affects calendar export. |
 | `places: off` | Stops the studio auto-adding `@ place` to events. |
+| `clock: relative` | A routine timed from Start (see Routines and recipes). |
+| `cover:` | An `https://` image URL shown above the title. |
 
 ### Several days
 
@@ -134,6 +137,10 @@ Start each day with `day: <label>`. Events, `range:`, `note:`, `city:` and
     12:00 | Lake Ashi cruise | @ | palm | sage
     16:00 | Onsen | Towels provided | bed | sand
 
+Write day labels as real dates with weekday, month, day and year
+(`Sunday, Jun 7, 2026`) whenever you know them: the masthead then shows the
+date span and calendar export works. Undated labels (`Day 1`) are allowed.
+
 ### Step notes
 
 Lines starting with `- ` directly under an event line are that event's notes
@@ -143,30 +150,87 @@ Lines starting with `- ` directly under an event line are that event's notes
     - Bring a jacket
     - Cash for the arcade
 
-### Routines: workouts and recipes (`clock: relative`)
+## Routines and recipes (`clock: relative`)
 
-For something you follow live from Start, write `clock: relative`. Times are
-then elapsed time, not time of day: `5:30` is 5 min 30 s after Start
-(`1:02:03` is H:MM:SS), and `+45s` alone is a step that starts when the line
-above it ends. Durations take `s`, `m`, `h`: `+45s`, `+2m`, `+1m30s`. Spans
-(`0:00 - 15:00`, `15:00 +25m`) can overlap for parallel recipe steps. `day:`
-lines become section labels on one continuous clock; `date:`, `range:`,
-`timezone:` and `city:` are ignored. Write repeated steps out in full. The
-page gets a Start button with a countdown, beeps and a voice.
+A workout or a recipe is followed live from a **Start** button rather than
+laid out on a day. Write `clock: relative` in the header (it is never guessed)
+and every time becomes elapsed time since Start. The page then gets a Start
+button, a countdown with beeps and an optional voice, and pictures of each
+step; on a saved link every device with the link open follows the same run.
 
-    title: 10-min Core
+- `+45s | Plank` is a step that starts when the line above it (in the text)
+  ends, or at 0:00 if it is the first. Durations take `s`, `m`, `h` and
+  combinations: `+45s`, `+2m`, `+1m30s`, `+90s`, `+1h`. This is the usual
+  form: write the steps in order, each with its length.
+- `5:30` is a moment 5 min 30 s after Start (M:SS); `1:02:03` is H:MM:SS.
+  Never use AM/PM or clock times in a routine.
+- Spans have a fixed start: `0:00 - 15:00` or `15:00 +25m`. Spans may
+  overlap, for parallel recipe tracks (the oven heats while you chop).
+- `- ` lines directly under a step are its notes: form cues, or a recipe
+  step's ingredients and details. They open while the step is running.
+- `day: Warm-up` lines are section labels on one continuous clock, not dates.
+  `date:`, `range:`, `timezone:` and `city:` are ignored.
+- Write repeated steps out in full (there is no repeat block), and put the
+  equipment or the shopping list in `note:` lines.
+- Leave the icon empty: plank/squat → dumbbell, jog/warm-up → run,
+  stretch/cool-down → stretch, rest → timer, boil/simmer → pot,
+  chop/roast/bake → meal are guessed for you.
+
+A workout:
+
+    title: 7-min Core
     clock: relative
     theme: future
+    subtitle: No equipment, one mat
 
-    +1m  | Jog in place | Easy pace | | sand
+    day: Warm-up
+    +1m  | Jog in place | Easy pace, loose shoulders | | sand
+
+    day: Main set
     +45s | Plank | Elbows under shoulders | | sky
     - Hips level with shoulders
+    - Breathe out slowly
     +15s | Rest | | | sage
     +45s | Side plank L | Stack your feet | | sky
+    +15s | Rest | | | sage
+    +45s | Side plank R | Stack your feet | | sky
+    +15s | Rest | | | sage
+    +45s | Dead bug | Low back pressed into the mat | | sky
 
-Write day labels as real dates with weekday, month, day and year
-(`Sunday, Jun 7, 2026`) whenever you know them: the masthead then shows the
-date span and calendar export works. Undated labels (`Day 1`) are allowed.
+    day: Cool-down
+    +2m  | Stretch | Child's pose, then cobra | | sand
+
+    note: A mat and a bottle of water
+
+A recipe, with steps that overlap:
+
+    title: Sheet-pan dinner
+    clock: relative
+    theme: minimal
+
+    0:00 - 15:00 | Preheat the oven | 220°C, rack in the middle | | sand
+    0:00 +10m    | Chop | Onions and peppers in thick wedges | | sage
+    - 2 red onions
+    - 3 peppers
+    +5m          | Season the tray | Oil, salt and paprika | | sage
+    15:00 +25m   | Roast | Until the chicken is golden | | sand
+    +5m          | Rest and plate | Spoon the juices over | | sky
+
+    note: 8 chicken thighs, 2 red onions, 3 peppers
+
+### Pictures
+
+A 6th field on any event line (in both clocks) is its picture, shown as a
+thumbnail on the card and large while the step runs; `cover:` puts a photo
+above the title:
+
+    cover: https://example.com/kitchen.jpg
+    +45s | Plank | Elbows under shoulders | | sky | https://example.com/plank.jpg
+
+When you write a timeline, a picture must be an `https://` URL of an image
+that really exists: one the person gave you, or one you are certain of. Never
+invent an image URL; leave the field out instead. The person can add their
+own photos in the studio (tap a card, then **Photo**).
 
 ## Rules for a good result
 
@@ -177,8 +241,9 @@ date span and calendar export works. Undated labels (`Day 1`) are allowed.
   ones and say so.
 - Ask for missing essentials only when you truly cannot guess (usually the
   date). Otherwise make reasonable choices and mention them in one line.
-- Keep it to what fits on a phone: about 4 to 10 events a day, titles short,
-  descriptions under about 60 characters, a few notes at most.
+- Keep it to what fits on a phone: about 4 to 10 events a day (a routine may
+  have 30 steps), titles short, descriptions under about 60 characters, a few
+  notes at most.
 - Resolve relative dates ("next Saturday") to real dates.
 - To change an existing timeline, the person can paste its text to you; edit
   it and send back the complete new text and link, keeping lines you did not

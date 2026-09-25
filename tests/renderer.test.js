@@ -6,7 +6,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { inlined, expected } = require("../scripts/inline-renderer.js");
+const { inlined, expected, samplesInStep } = require("../scripts/inline-renderer.js");
 
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
@@ -38,6 +38,15 @@ const noScript = (page) => page.replace(/<script>[\s\S]*<\/script>/, "<script></
 
 test("index.html inlines exactly timeline-renderer.js", () => {
   assert.equal(inlined(html), expected(), "run: node scripts/inline-renderer.js");
+});
+
+test("the help panel's workout and recipe samples are the example files", () => {
+  assert.ok(samplesInStep(html), "run: node scripts/inline-renderer.js");
+  const sample = (id) => JSON.parse(html.match(new RegExp(`<script type="application/json" id="${id}">([\\s\\S]*?)</script>`))[1]);
+  assert.equal(sample("sample-workout"), read("example.routine.txt"));
+  assert.equal(sample("sample-recipe"), read("example.recipe.txt"));
+  assert.match(html, /id="try-workout"[^>]*>Try a workout</);
+  assert.match(html, /id="try-recipe"[^>]*>Try a recipe</);
 });
 
 for (const [name, text] of Object.entries(samples)) {
@@ -74,4 +83,23 @@ test("only relative timelines carry run mode", () => {
 test("the example files are in publish.sh's copy list", { skip: !fs.existsSync(path.join(root, "publish.sh")) && "no publish.sh here" }, () => {
   const publish = read("publish.sh");
   for (const file of ["example.timeline.txt", "example.routine.txt", "example.recipe.txt"]) assert.match(publish, new RegExp(file.replace(".", "\\.")));
+});
+
+// llms.txt teaches AI chats the format: every full example in it must parse.
+test("every example timeline in llms.txt parses", () => {
+  const blocks = [];
+  let block = null;
+  for (const line of read("llms.txt").split("\n")) {
+    if (/^ {4}/.test(line)) (block ||= []).push(line.slice(4));
+    else if (line === "" && block) block.push("");
+    else {
+      if (block) blocks.push(block.join("\n"));
+      block = null;
+    }
+  }
+  const examples = blocks.filter((b) => /^title:/m.test(b));
+  assert.ok(examples.length >= 4, "the day, several days, workout and recipe examples");
+  for (const example of examples) assert.doesNotThrow(() => fileCopy.parse(example), example.slice(0, 40));
+  assert.ok(examples.some((b) => fileCopy.parse(b).clock === "relative" && /^\+\d+s \|/m.test(b)), "a workout");
+  assert.ok(examples.some((b) => fileCopy.parse(b).clock === "relative" && /^\d+:\d\d \+\d+m/m.test(b)), "a recipe with spans");
 });

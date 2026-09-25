@@ -532,6 +532,18 @@
         line-height: 1.65;
         overflow-wrap: anywhere;
       }
+      .samples {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0 0 12px;
+      }
+      .samples button {
+        min-height: 40px;
+        padding: 0 16px;
+        border-radius: 999px;
+        font-weight: 600;
+      }
       .asset-controls {
         display: flex;
         gap: 7px;
@@ -891,6 +903,10 @@
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </section>
       <section class="support" id="help" aria-label="Help" hidden>
+          <div class="samples">
+            <button type="button" id="try-workout" title="Open a sample workout: a routine you run from Start">Try a workout</button
+            ><button type="button" id="try-recipe" title="Open a sample recipe with steps that overlap">Try a recipe</button>
+          </div>
           <details>
             <summary>How to write a timeline</summary>
             <p>
@@ -941,11 +957,37 @@ footer: See you there ♡</pre>
             </p>
           </details>
           <details>
+            <summary>Workouts and recipes</summary>
+            <p>
+              Write <code>clock: relative</code> and times become elapsed time
+              from a <b>Start</b> button: <code>+45s | Plank</code> is a
+              45-second step after the line above it, <code>15:00 +25m</code>
+              a step at a fixed time, and steps may overlap. <code>- </code>
+              lines under a step are its notes. A running routine shows the
+              step, a countdown and the next step, with beeps and an optional
+              voice. On a saved link every device with it open follows the
+              same run: start on the phone, watch on the TV.
+            </p>
+            <pre>
+title: 5-min Core
+clock: relative
++30s | Jog in place
++45s | Plank | Elbows under shoulders
+- Hips level
++15s | Rest</pre>
+            <p>
+              Tap a step's card, then <b>Photo</b>, to give it a picture; tap
+              the title for a cover photo.
+            </p>
+          </details>
+          <details>
             <summary>Change it in plain words</summary>
             <p>
               The box above the text takes an instruction: <em>move golf to
               3 pm</em>, <em>add dinner with Sam on Friday at 7</em>,
-              <em>push everything on Monday back an hour</em>. The text and
+              <em>push everything on Monday back an hour</em>, and in a
+              routine <em>make rests 20s</em> or <em>roast 5 minutes
+              longer</em>. The text and
               the instruction go to the link server, which asks a model for
               the edited text; it is applied only if it still reads as a
               timeline, the cursor lands on the first changed line, and the
@@ -1025,6 +1067,8 @@ footer: See you there ♡</pre>
       hidden
     />
     <script type="application/json" id="doc">null</script>
+    <script type="application/json" id="sample-workout">"# A routine runs on elapsed time: press Start and follow along.\ntitle: 10-min Core\nclock: relative\ntheme: future\nsubtitle: No equipment, one mat\n\nday: Warm-up\n+1m   | Jog in place | Easy pace, loose shoulders | | sand\n\nday: Main set\n+45s  | Plank | Elbows under shoulders | | sky\n- Hips level with shoulders\n- Breathe out slowly, don't hold your breath\n+15s  | Rest | | | sage\n+45s  | Side plank L | Stack your feet | | sky\n+15s  | Rest | | | sage\n+45s  | Side plank R | Stack your feet | | sky\n+15s  | Rest | | | sage\n+45s  | Dead bug | Low back pressed into the mat | | sky\n- Opposite arm and leg, slowly\n+15s  | Rest | | | sage\n+45s  | Bicycle crunches | Elbow to opposite knee | | sky\n+15s  | Rest | | | sage\n+45s  | Glute bridge | Squeeze at the top | | sky\n+15s  | Rest | | | sage\n+45s  | Mountain climbers | Knees to chest, hips down | | sky\n+15s  | Rest | | | sage\n+45s  | Hollow hold | Arms by your ears | | sky\n\nday: Cool-down\n+1m15s | Stretch | Child's pose, then cobra | | sand\n\nnote: A mat and a bottle of water\n"</script>
+    <script type="application/json" id="sample-recipe">"# Steps can overlap: the oven heats while you chop.\ntitle: Sheet-pan dinner\nclock: relative\ntheme: minimal\nsubtitle: Chicken thighs, peppers and onions for four\n\n0:00 - 15:00 | Preheat the oven | 220°C, rack in the middle | | sand\n0:00 +10m    | Chop | Onions and peppers in thick wedges | | sage\n- 2 red onions\n- 3 peppers, any colour\n+5m          | Season the tray | Oil, salt and paprika; chicken skin side up | | sage\n15:00 +25m   | Roast | Until the chicken is golden | | sand\n+5m          | Rest and plate | Spoon the juices over | | sky\n27:30        | Toss the vegetables | Leave the chicken where it is\n\nnote: 8 chicken thighs, 2 red onions, 3 peppers\nnote: Olive oil, salt, smoked paprika\n"</script>
     <script type="application/json" id="studio-source">
       "# A timeline is just text. Times set the scale; cards find their own space.\ntitle: A Day in Los Angeles\ndate: {{today}}\nsubtitle: Sunshine, tacos, and a sunset ♡\nrange: 08:00 - 20:00\ntheme: travel\ncity: Los Angeles\nfooter: Bring sunscreen and a playlist ♡\n\n# time | title | description | icon | color\n08:00 | Coffee and pastries | Neighborhood bakery | coffee | sand\n09:30 | Griffith Observatory | Hike up, skip the parking | pin | sky\n11:30 | Farmers market | Tacos for lunch @ Grand Central Market | palm | sage\n13:00 | Getty Center | Gardens first, then the galleries | ticket | sand\n15:30 - 17:30 | Venice Boardwalk | Rent bikes to Santa Monica | road | sky\n18:00 | Pier at sunset | Ferris wheel, funnel cake | palm | sand\n19:30 | Drive home | Sunset over the freeway | car | sage\n\nnote: Observatory parking fills by 10 AM\nnote: Getty entry is free, parking is not\nnote: Sunset is around 7 PM\n"
     </script>
@@ -4615,6 +4659,19 @@ footer: See you there ♡</pre>
         download(await bakeLayout(html), filename() + ".html", "text/html");
         toast(`Timeline saved · ${filename()}.html`);
       });
+      // "Try a workout" / "Try a recipe": the sample opens as a fresh page
+      // (a #text= link), so a named timeline is never overwritten; nothing
+      // is saved until the first edit.
+      function loadSample(id) {
+        const text = JSON.parse(document.getElementById(id).textContent),
+          hash = "text=" + encodeURIComponent(text);
+        setHelp(false);
+        closePane();
+        if (docName) location.href = SHORT_LINK_API + "#" + hash;
+        else location.hash = hash;
+      }
+      document.querySelector("#try-workout").addEventListener("click", () => loadSample("sample-workout"));
+      document.querySelector("#try-recipe").addEventListener("click", () => loadSample("sample-recipe"));
       document
         .querySelector("#add-image")
         .addEventListener("click", () =>
