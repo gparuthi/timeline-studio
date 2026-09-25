@@ -776,6 +776,68 @@
         background: #1b252c;
         border-color: #34434d;
       }
+      /* Photo for the highlighted line: a step's picture (6th field) or,
+         on the title or cover line, the cover. Hidden while typing. */
+      .line-photo {
+        position: absolute;
+        right: 10px;
+        z-index: 2;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 38px;
+        padding: 0 14px 0 11px;
+        border: 1px solid #8fc7dd;
+        border-radius: 999px;
+        background: #1d3a48;
+        color: #e4f3fa;
+        font: 600 13px system-ui, -apple-system, sans-serif;
+        box-shadow: 0 4px 14px #0007;
+        transform: translateY(-50%);
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .line-photo:hover {
+        background: #26506a;
+      }
+      .line-photo[hidden] {
+        display: none;
+      }
+      .line-photo svg {
+        width: 20px;
+        height: 20px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .line-photo.busy {
+        opacity: 0.7;
+        pointer-events: none;
+      }
+      /* A picture tapped in the preview, full screen over the studio (the
+         preview frame is as tall as its content on iOS, so an overlay
+         inside it would sit off screen). Tap or Escape closes it. */
+      .lightbox {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: grid;
+        place-items: center;
+        padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+        background: #000000eb;
+        cursor: zoom-out;
+      }
+      .lightbox[hidden] {
+        display: none;
+      }
+      .lightbox img {
+        max-width: 100vw;
+        max-height: 100vh;
+        max-height: 100dvh;
+        object-fit: contain;
+      }
     </style>
   </head>
   <body>
@@ -824,6 +886,7 @@
             aria-describedby="status"
           ></textarea>
           <div class="caret-line" id="caret-line" aria-hidden="true"></div>
+          <button type="button" class="line-photo" id="line-photo" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg><span>Photo</span></button>
         </div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </section>
@@ -841,15 +904,16 @@
 1:00 PM | Museum | Gardens first | ticket | sand
 3:00 - 5:00 PM | Playground | | palm | sage</pre>
             <p>
-              Fields: <code>time | title | description | icon | color</code>.
+              Fields: <code>time | title | description | icon | color | picture</code>.
               Leave an empty field to skip it. Write <code>\|</code> inside text
               for a literal pipe.
             </p>
             <p>
               Icons: home, plane, depart, land, coffee, meal, tree, bed, shop,
-              ticket, pin, car, road, palm. Leave the icon empty and it is
-              guessed from the words (lunch → meal, park → tree, flight lands →
-              land). Colors: sky, sand, sage. Links in a description or note
+              ticket, pin, car, road, palm, dumbbell, run, stretch, timer, pot.
+              Leave the icon empty and it is guessed from the words (lunch →
+              meal, park → tree, flight lands → land, plank → dumbbell, rest →
+              timer, boil → pot). Colors: sky, sand, sage. Links in a description or note
               are clickable; a map link becomes a pin chip, and a pasted
               <code>maps.app.goo.gl</code> link gets the place name and address
               filled in before it. Add <code>link: my-week</code>
@@ -904,8 +968,11 @@ footer: See you there ♡</pre>
           <details>
             <summary>Add your own images</summary>
             <p>
-              Name an image, then choose a file. It becomes an embedded asset in
-              your text, so it travels with saved files.
+              For a step's photo, tap its card and then <b>Photo</b> beside
+              the highlighted line; tap the title for a <b>Cover</b> photo.
+              Or name an image here and choose a file. On tl.gaup.uk a photo
+              is shrunk and uploaded, and the text gets its short link; in a
+              standalone copy it is embedded in the text.
             </p>
             <div class="asset-controls">
               <label for="asset-name" class="visually-hidden">Asset name</label
@@ -917,15 +984,16 @@ footer: See you there ♡</pre>
             </div>
             <div class="asset-feedback" id="asset-feedback" role="status"></div>
             <p>
-              Use <code>@hotel</code> instead of an icon, or
+              Use <code>@hotel</code> as a picture (the 6th field), instead of
+              an icon, as <code>cover: @hotel</code> above the title, or
               <code>header-art: @hotel</code> for header artwork.
             </p>
-            <pre>16:00 | Check in | Ocean view | @hotel | sage</pre>
+            <pre>16:00 | Check in | Ocean view | | sage | @hotel</pre>
             <p>Image URLs also work:</p>
             <pre>asset hotel: https://example.com/hotel.png</pre>
             <p>
-              Uploaded images work offline. Linked images need a network
-              connection.
+              Embedded images work offline. Linked and uploaded images need a
+              network connection.
             </p>
           </details>
           <p class="local-note">
@@ -948,6 +1016,8 @@ footer: See you there ♡</pre>
       <div id="run-start" class="run-start-slot" hidden></div>
     </main>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <div id="lightbox" class="lightbox" role="dialog" aria-label="Picture" hidden><img alt="" /></div>
+    <input type="file" id="photo-file" accept="image/*" hidden />
     <input
       type="file"
       id="image-file"
@@ -1010,7 +1080,26 @@ footer: See you there ♡</pre>
           "car",
           "road",
           "palm",
+          "dumbbell",
+          "run",
+          "stretch",
+          "timer",
+          "pot",
         ];
+        // Icons added for routines (workouts, recipes). A page carries only the
+        // ones it uses, so a day timeline's markup is unchanged by them.
+        const moreSymbols = {
+          dumbbell:
+            '<symbol id="dumbbell" viewBox="0 0 40 40"><g transform="rotate(-30 20 20)"><path d="M11 18h18v4H11z"/><rect x="7" y="9" width="6" height="22" rx="2"/><rect x="27" y="9" width="6" height="22" rx="2"/><rect x="2" y="13" width="6" height="14" rx="2"/><rect x="32" y="13" width="6" height="14" rx="2"/></g></symbol>',
+          run:
+            '<symbol id="run" viewBox="0 0 40 40"><circle cx="26" cy="5.5" r="4"/><path d="M20.8 10.8L15.8 21.8A3 3 0 0 0 21.2 24.2L26.2 13.2A3 3 0 0 0 20.8 10.8Z"/><path d="M20.7 16.2L26.7 20.7A2.1 2.1 0 0 0 29.3 17.3L23.3 12.8A2.1 2.1 0 0 0 20.7 16.2ZM29.2 20.7L34.2 17.2A2.1 2.1 0 0 0 31.8 13.8L26.8 17.3A2.1 2.1 0 0 0 29.2 20.7Z"/><path d="M21.7 12.4L15.2 13.4A2.1 2.1 0 0 0 15.8 17.6L22.3 16.6A2.1 2.1 0 0 0 21.7 12.4ZM14 14L9.5 18.5A2.1 2.1 0 0 0 12.5 21.5L17 17A2.1 2.1 0 0 0 14 14Z"/><path d="M17.5 25.1L25 28.6A2.3 2.3 0 0 0 27 24.4L19.5 20.9A2.3 2.3 0 0 0 17.5 25.1ZM23.7 26.3L22.7 35.8A2.3 2.3 0 0 0 27.3 36.2L28.3 26.7A2.3 2.3 0 0 0 23.7 26.3Z"/><path d="M16.5 21.8L12 29.3A2.3 2.3 0 0 0 16 31.7L20.5 24.2A2.3 2.3 0 0 0 16.5 21.8ZM13.6 28.2L5.6 29.7A2.3 2.3 0 0 0 6.4 34.3L14.4 32.8A2.3 2.3 0 0 0 13.6 28.2Z"/></symbol>',
+          stretch:
+            '<symbol id="stretch" viewBox="0 0 40 40"><circle cx="20" cy="8.5" r="4.2"/><path d="M16.8 15L16.8 25A3.2 3.2 0 0 0 23.2 25L23.2 15A3.2 3.2 0 0 0 16.8 15Z"/><path d="M18.7 14.8L10.7 2.8A2.1 2.1 0 0 0 7.3 5.2L15.3 17.2A2.1 2.1 0 0 0 18.7 14.8Z"/><path d="M24.7 17.2L32.7 5.2A2.1 2.1 0 0 0 29.3 2.8L21.3 14.8A2.1 2.1 0 0 0 24.7 17.2Z"/><path d="M17.9 22.9L10.9 35.9A2.4 2.4 0 0 0 15.1 38.1L22.1 25.1A2.4 2.4 0 0 0 17.9 22.9Z"/><path d="M17.9 25.1L24.9 38.1A2.4 2.4 0 0 0 29.1 35.9L22.1 22.9A2.4 2.4 0 0 0 17.9 25.1Z"/></symbol>',
+          timer:
+            '<symbol id="timer" viewBox="0 0 40 40"><path fill-rule="evenodd" d="M20 7a15 15 0 1 1 0 30 15 15 0 0 1 0-30m0 4a11 11 0 1 0 0 22 11 11 0 0 0 0-22"/><path d="M20 22V13.5A8.5 8.5 0 0 1 28.5 22z"/><rect x="16" y="1" width="8" height="4" rx="1.5"/><path d="m31 9 2.5-2.5 3 3L34 12z"/></symbol>',
+          pot:
+            '<symbol id="pot" viewBox="0 0 40 40"><path d="M5 17h30v12a7 7 0 0 1-7 7H12a7 7 0 0 1-7-7z"/><rect x="1" y="18" width="6" height="4" rx="2"/><rect x="33" y="18" width="6" height="4" rx="2"/><path d="M4 15a16 7 0 0 1 32 0z"/><rect x="17" y="5" width="6" height="4" rx="2"/></symbol>',
+        };
         const escape = (value) =>
           String(value).replace(
             /[&<>"']/g,
@@ -1155,6 +1244,13 @@ footer: See you there ♡</pre>
           ["palm", /\b(beach|boardwalk|pier|surf(?:ing)?|pool|swim(?:ming)?|ocean|coast)\b/],
           ["road", /\b(road ?trip|highway|freeway|scenic|mulholland)\b/],
           ["car", /\b(drive|driving|car|rental|uber|lyft|taxi|parking|gas|pick ?up|drop ?off)\b/],
+          // Workout and kitchen steps, after the day words so those still win.
+          ["dumbbell", /\b(workout|exercises?|planks?|squats?|lunges?|push[- ]?ups?|pull[- ]?ups?|sit[- ]?ups?|crunch(?:es)?|burpees?|deadlifts?|bench press|curls?|kettlebells?|dumbbells?|weights|strength|hiit|circuit|glute bridges?|dead ?bugs?|hollow (?:holds?|rocks?)|mountain climbers?|reps|core|abs)\b/],
+          ["run", /\b(jog|jogs|jogging|running|sprints?|sprinting|jumping jacks?|high knees|butt kicks|skipping|jump rope|warm[- ]?ups?|treadmill|cardio|laps?)\b/],
+          ["stretch", /\b(stretch(?:es|ing)?|yoga|cool[- ]?downs?|mobility|poses?|cobra|downward dog|pilates|foam roll(?:er|ing)?|breathe|breathing|meditat(?:e|ion))\b/],
+          ["timer", /\b(rest|resting|recover|recovery|break|pause|wait|hold|timer)\b/],
+          ["pot", /\b(boil|boiling|simmer|simmering|stew|soup|stir|stirring|saut[eé]e?|fry|frying|pan|pot|cook|cooking|pasta|rice|sauce|reduce)\b/],
+          ["meal", /\b(chop|chopping|dice|dicing|slice|slicing|mince|peel|grate|prep|season|seasoning|marinate|mix|whisk|knead|roast|roasting|bake|baking|grill|grilling|broil|preheat|oven|plate|plating|serve|toss|garnish)\b/],
         ];
         // "Gear run @ REI Baldwin Hills": what follows " @ " in a description (or
         // a description that starts with "@") is a place. The sheet shows it as a
@@ -1203,6 +1299,17 @@ footer: See you there ♡</pre>
         // then its step notes as "- " lines.
         function describe(event) {
           return [event.detail, ...(event.notes || []).map((note) => "- " + note)].filter(Boolean).join("\n");
+        }
+        // A picture (an event's 6th field, or `cover:`) is "@asset" or an
+        // https:// image URL; this is the URL to show, or "".
+        function pictureUrl(model, value) {
+          if (!value) return "";
+          return value.startsWith("@") ? model.assets[value.slice(1)] || "" : value;
+        }
+        function checkPicture(value, line) {
+          if (value && !value.startsWith("@") && !/^https:\/\/\S+$/i.test(value))
+            throw new Error(`Line ${line}: a picture (the 6th field) is @asset-name or an https:// image URL.`);
+          return value;
         }
         function guessIcon(title, detail) {
           for (const text of [title, detail]) {
@@ -1271,11 +1378,11 @@ footer: See you there ♡</pre>
               const fields = s
                 .split(/(?<!\\)\|/)
                 .map((v) => v.trim().replace(/\\\|/g, "|"));
-              if (fields.length > 5)
+              if (fields.length > 6)
                 throw new Error(
-                  `Line ${line}: at most five fields; write \\| for a literal pipe.`,
+                  `Line ${line}: at most six fields; write \\| for a literal pipe.`,
                 );
-              const [clock, title, written = "", icon = "", color = "sky"] = fields;
+              const [clock, title, written = "", icon = "", color = "sky", picture = ""] = fields;
               const { detail, place } = splitPlace(written, title);
               if (!title) throw new Error(`Line ${line}: add an event title.`);
               if (!["sky", "sand", "sage"].includes(color || "sky"))
@@ -1295,6 +1402,7 @@ footer: See you there ♡</pre>
                 place,
                 icon: icon || guessIcon(title, written),
                 color: color || "sky",
+                picture: checkPicture(picture, line),
                 line,
                 notes: [],
               });
@@ -1333,6 +1441,7 @@ footer: See you there ♡</pre>
                 "city",
                 "places",
                 "clock",
+                "cover",
               ].includes(key)
             )
               throw new Error(`Line ${line}: unknown setting “${key}”.`);
@@ -1466,6 +1575,8 @@ footer: See you there ♡</pre>
                 throw new Error(
                   `Line ${event.line}: unknown icon “${event.icon}”. Use a built-in icon or @asset-name.`,
                 );
+              if (event.picture.startsWith("@") && !Object.hasOwn(model.assets, event.picture.slice(1)))
+                throw new Error(`Line ${event.line}: define “asset ${event.picture.slice(1)}: …” first.`);
             }
           });
           model.events = model.days.flatMap((day) => day.events);
@@ -1480,6 +1591,11 @@ footer: See you there ♡</pre>
             throw new Error(
               "Header art must name an existing asset, for example “header-art: @beach”.",
             );
+          // "cover: @asset" or an https URL: a photo above the title.
+          if (model.cover && !model.cover.startsWith("@") && !/^https:\/\/\S+$/i.test(model.cover))
+            throw new Error("The cover is @asset-name or an https:// image URL, for example “cover: @kitchen”.");
+          if (model.cover && model.cover.startsWith("@") && !Object.hasOwn(model.assets, model.cover.slice(1)))
+            throw new Error(`The cover names no asset: add “asset ${model.cover.slice(1)}: …”.`);
           return model;
         }
         function layoutRuntime() {
@@ -1787,11 +1903,23 @@ footer: See you there ♡</pre>
         function previewRuntime(layout) {
           // In the studio's live preview a tap on a card (or a day heading) asks
           // the editor to open on that source line.
-          // A card's "3 notes" hint folds and unfolds its notes instead.
+          // A card's "3 notes" hint folds and unfolds its notes instead. A
+          // picture opens full screen in the studio (a fixed overlay in here
+          // would sit at the top of the frame, which iOS sizes to its content);
+          // the title opens the editor on the title line (for a cover photo).
           document.addEventListener("click", (event) => {
+            const picture = event.target.closest(".pic");
+            if (picture) {
+              event.preventDefault();
+              parent.postMessage({ type: "timeline:picture", src: picture.getAttribute("href") }, "*");
+              return;
+            }
             if (event.target.closest("a, summary")) return;
             const target = event.target.closest("[data-line]");
-            if (!target) return;
+            if (!target) {
+              if (event.target.closest(".masthead h1")) parent.postMessage({ type: "timeline:edit", title: true }, "*");
+              return;
+            }
             event.preventDefault();
             parent.postMessage({ type: "timeline:edit", line: Number(target.dataset.line) }, "*");
           });
@@ -1849,6 +1977,36 @@ footer: See you there ♡</pre>
             // through the patched scrollTo would send the studio's panel back to
             // the top after every keystroke.
             if (!fresh) scrollTo(0, top);
+          });
+        }
+        // Pictures on a page of its own (view.html, an exported file): a tap on
+        // a thumbnail or the cover shows it full screen; a tap anywhere or Escape
+        // closes it. Without scripts the picture is a plain link to the image.
+        function pictureRuntime() {
+          if (window.__timelineStatic) return;
+          const close = () => document.querySelector(".pic-view")?.remove();
+          document.addEventListener("click", (event) => {
+            const picture = event.target.closest(".pic");
+            if (!picture) return;
+            event.preventDefault();
+            close();
+            const view = document.createElement("div");
+            view.className = "pic-view";
+            view.setAttribute("role", "dialog");
+            view.setAttribute("aria-label", "Picture");
+            view.setAttribute("data-html2canvas-ignore", "");
+            const image = document.createElement("img");
+            image.src = picture.getAttribute("href");
+            image.alt = "";
+            view.append(image);
+            view.addEventListener("click", (e) => {
+              e.stopPropagation();
+              close();
+            });
+            document.body.append(view);
+          });
+          document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") close();
           });
         }
         // A time zone as written in the text -> IANA name, or "" if unknown.
@@ -2001,7 +2159,7 @@ footer: See you there ♡</pre>
           const steps = model.events
             .slice()
             .sort((a, b) => a.at - b.at || a.line - b.line)
-            .map((e) => ({ line: e.line, at: e.at, until: e.until, title: e.title, detail: e.detail, place: e.place, notes: e.notes }));
+            .map((e) => ({ line: e.line, at: e.at, until: e.until, title: e.title, detail: e.detail, place: e.place, notes: e.notes, picture: pictureUrl(model, e.picture) }));
           const source = JSON.stringify([model.title, steps.map((s) => [s.at, s.until ?? null, s.title])]);
           let h1 = 0xdeadbeef,
             h2 = 0x41c6ce57;
@@ -2048,6 +2206,9 @@ footer: See you there ♡</pre>
       .run-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .run-count{flex:none;font-variant-numeric:tabular-nums}
       .run-photo{margin:8px 0 0;border-radius:12px;overflow:hidden;background:#0b1013}
+      .run-photo img{display:block;width:100%;height:min(30vh,280px);height:min(30dvh,280px);object-fit:contain}
+      .run-next-thumb{flex:none;margin-left:auto;width:44px;height:44px;border-radius:8px;overflow:hidden;background:#0b1013}
+      .run-next-thumb img{display:block;width:100%;height:100%;object-fit:cover}
       .run-step{margin:6px 0 8px;font-size:26px;font-weight:800;line-height:1.1;letter-spacing:-.3px;text-transform:uppercase;overflow-wrap:anywhere}
       .run-meter{height:10px;border-radius:999px;background:#26323a;overflow:hidden}
       .run-fill{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#3ecf8e,#8fe3b9);transition:width .25s linear}
@@ -2133,6 +2294,8 @@ footer: See you there ♡</pre>
               notes: $(top, ".run-notes"),
               also: $(top, ".run-also"),
               next: $(top, ".run-next-text"),
+              photo: $(top, ".run-photo"),
+              nextThumb: $(top, ".run-next-thumb"),
               done: $(top, ".run-done"),
               doneTitle: $(top, ".run-done-title"),
               elapsed: $(bottom, ".run-elapsed"),
@@ -2316,6 +2479,20 @@ footer: See you there ♡</pre>
             if (el.innerHTML !== html) el.innerHTML = html;
             el.hidden = !items.length;
           };
+          const setPicture = (el, url) => {
+            url = url || "";
+            if (el.dataset.src !== url) {
+              el.dataset.src = url;
+              el.textContent = "";
+              if (url) {
+                const image = doc.createElement("img");
+                image.alt = "";
+                image.src = url;
+                el.append(image);
+              }
+            }
+            el.hidden = !url;
+          };
           const esc = (text) =>
             String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
           function show(mode) {
@@ -2386,6 +2563,9 @@ footer: See you there ♡</pre>
             const detail = primary ? [primary.detail, primary.place && `@ ${primary.place}`].filter(Boolean).join(" ") : "";
             setText(ui.detail, detail);
             ui.detail.hidden = !detail;
+            // The live step's picture, large; the next step's as a thumbnail.
+            setPicture(ui.photo, primary && primary.picture);
+            setPicture(ui.nextThumb, next && next.picture);
             setList(ui.notes, primary ? primary.notes.map((n) => `<li>${esc(n)}</li>`) : []);
             setList(
               ui.also,
@@ -2536,9 +2716,13 @@ footer: See you there ♡</pre>
           // A relative timeline carries run mode, except in the studio's preview,
           // where the studio itself runs it (audio, wake lock and vibration need
           // the top-level page) and sends the sheet its position.
+          // Pictures: a step's 6th field and the cover, resolved to URLs.
+          const cover = pictureUrl(m, m.cover),
+            pictured = !!cover || m.events.some((e) => e.picture);
           const runtime = live
             ? `(${previewRuntime.toString()})(${layoutRuntime.toString()});`
             : `(${layoutRuntime.toString()})();` +
+              (pictured ? `\n(${pictureRuntime.toString()})();` : "") +
               (rel ? `\n(${runRuntime.toString()})(${JSON.stringify(runConfig(m)).replace(/</g, "\\u003c")}, ${runCore.toString()});` : "");
           // URLs in a description or note become links. Map links (Google or
           // Apple Maps, including the short goo.gl form) render as a small pin
@@ -2573,8 +2757,12 @@ footer: See you there ♡</pre>
             e.notes && e.notes.length
               ? `<details class="step-notes"><summary>${e.notes.length} note${e.notes.length === 1 ? "" : "s"}</summary><ul>${e.notes.map((note) => `<li>${linkify(note)}</li>`).join("")}</ul></details>`
               : "";
+          // A picture is a link to the image (so it opens without scripts too);
+          // the page's script shows it full screen instead.
+          const picture = (url, className, label) =>
+            `<a class="pic ${className}" href="${escape(url)}" target="_blank" rel="noopener" aria-label="${escape(label)}"><img src="${escape(url)}" alt=""></a>`;
           const cardBody = (e, day) =>
-            `<div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail || e.place ? `<p>${[e.detail ? linkify(e.detail) : "", e.place ? `<a class="map-link" href="${escape(mapSearchUrl(e.place, day.city || m.city))}" target="_blank" rel="noopener" title="${escape(e.place)}"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg><span class="map-name">${escape(e.place)}</span></a>` : ""].filter(Boolean).join(" ")}</p>` : ""}${stepNotes(e)}</div></li>`;
+            `<div class="event-body${e.picture ? " has-pic" : ""}"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail || e.place ? `<p>${[e.detail ? linkify(e.detail) : "", e.place ? `<a class="map-link" href="${escape(mapSearchUrl(e.place, day.city || m.city))}" target="_blank" rel="noopener" title="${escape(e.place)}"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg><span class="map-name">${escape(e.place)}</span></a>` : ""].filter(Boolean).join(" ")}</p>` : ""}${stepNotes(e)}${e.picture ? picture(pictureUrl(m, e.picture), "thumb", `Photo: ${e.title}`) : ""}</div></li>`;
           // A relative clock is scaled so the whole routine has a readable height
           // (about one card per step); ticks every 1, 5, 10 or 30 min by length.
           const totalMin = rel ? Math.max(m.total, 1) / 60 : 0,
@@ -2643,12 +2831,20 @@ footer: See you there ♡</pre>
           const relativeCss = rel
             ? ` .offsets{position:absolute;inset:0;pointer-events:none;} .offset{position:absolute;left:0;width:calc(var(--axis) - 14px);top:calc(var(--m) / 60 * var(--hour-height));transform:translateY(-50%);text-align:right;font-size:12px;font-weight:700;line-height:1;letter-spacing:0;color:var(--blue);opacity:.85;font-variant-numeric:tabular-nums;white-space:nowrap;} .timeline.relative .hour-label,.timeline.relative .event time{font-variant-numeric:tabular-nums;} @media(max-width:580px){.timeline.relative .hour-label{font-size:13px;letter-spacing:-.3px;} .offset{width:calc(var(--axis) - 9px);font-size:10px;}}`
             : "";
+          const pictureCss = pictured
+            ? ` .pic{display:block;overflow:hidden;background:var(--sky);-webkit-tap-highlight-color:transparent;} .pic img{display:block;width:100%;height:100%;object-fit:cover;} .pic.cover{margin:-30px -34px 22px;aspect-ratio:16/7;max-height:380px;} .event-body.has-pic{min-height:80px;padding-right:86px;} .pic.thumb{position:absolute;right:7px;top:50%;width:64px;height:64px;transform:translateY(-50%);border-radius:12px;box-shadow:0 1px 4px #0002;} .event-body.has-pic .until{right:84px;} .pic-view{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);background:#000000eb;cursor:zoom-out;} .pic-view img{max-width:100vw;max-height:100vh;max-height:100dvh;object-fit:contain;} @media(max-width:850px){.pic.cover{margin:-25px -22px 18px;}} @media(max-width:580px){.pic.cover{margin:-27px -14px 16px;aspect-ratio:16/10;} .event-body.has-pic{min-height:76px;padding-right:64px;} .pic.thumb{right:6px;width:52px;height:52px;border-radius:10px;} .event-body.has-pic .until{right:62px;}} @media print{.pic.cover{margin-top:0;}}`
+            : "";
+          // The icons a page uses beyond the original set.
+          const symbols = (() => {
+            const extra = [...new Set(m.events.map((e) => e.icon))].filter((icon) => moreSymbols[icon]);
+            return extra.length ? art.symbols.replace("\n</defs>", `\n ${extra.map((icon) => moreSymbols[icon]).join("\n ")}\n</defs>`) : art.symbols;
+          })();
           const notesCss = m.events.some((e) => e.notes && e.notes.length)
             ? ` .step-notes{margin:5px 0 0;color:var(--blue);} .step-notes summary{display:inline-block;list-style:none;cursor:pointer;padding:3px 10px;border:1px solid currentColor;border-radius:999px;font-size:12px;font-weight:700;line-height:1.4;letter-spacing:.2px;opacity:.85;} .step-notes summary::-webkit-details-marker{display:none;} .step-notes summary::after{content:' ▾';} .step-notes[open] summary::after{content:' ▴';} .step-notes ul{margin:6px 0 2px;padding-left:18px;font-size:15px;line-height:1.3;color:var(--navy);} .step-notes li{margin:2px 0;} @media(max-width:580px){.step-notes ul{padding-left:16px;font-size:13px;}}`
             : "";
           return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="${darkThemes[m.theme] ? "light dark" : m.theme === "future" || m.theme === "code" ? "dark" : "light"}"><title>${escape(m.title)}</title><style>${art.css}
-      ${extraCss}${relativeCss}${notesCss}
-      ${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-scheme:dark){${darkThemes[m.theme]}}` : ""}</style></head><body class="theme-${m.theme}${live ? " live" : ""}">${art.symbols}<main class="sheet"><header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main><script>${runtime}<\/script></body></html>`;
+      ${extraCss}${relativeCss}${notesCss}${pictureCss}
+      ${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-scheme:dark){${darkThemes[m.theme]}}` : ""}</style></head><body class="theme-${m.theme}${live ? " live" : ""}">${symbols}<main class="sheet">${cover ? picture(cover, "cover", "Cover photo") : ""}<header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main><script>${runtime}<\/script></body></html>`;
         }
         // Shareable links: the whole timeline text travels in the URL fragment,
         // deflate-compressed when the browser can ("z="), plain otherwise ("t=").
@@ -2692,7 +2888,74 @@ footer: See you there ♡</pre>
           return new TextDecoder().decode(await pipe(bytes, DecompressionStream));
         }
 
-        const api = { parse, render, icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl, describe, runCore, runConfig, runRuntime };
+        // Text edits for the studio's Photo button: name an asset after its
+        // step, write or replace "asset <name>: <url>", set a line's picture (the
+        // 6th field) or the cover. Plain string work, kept here so node tests
+        // cover it.
+        function pictureEdits() {
+          const assetLine = (name) => new RegExp(`^[ \\t]*asset[ \\t]+${name}[ \\t]*:.*$`, "m");
+          // "Side plank L" -> "side-plank-l", then "-2", "-3" while taken.
+          function assetName(base, text) {
+            let slug =
+              String(base)
+                .toLowerCase()
+                .normalize("NFKD")
+                .replace(/[̀-ͯ]/g, "")
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^-+|-+$/g, "")
+                .slice(0, 24)
+                .replace(/-+$/, "") || "photo";
+            if (!/^[a-z]/.test(slug)) slug = "photo-" + slug;
+            let name = slug;
+            for (let n = 2; assetLine(name).test(text); n++) name = `${slug}-${n}`;
+            return name;
+          }
+          // In place when the asset exists, else after the last asset line, else
+          // at the end after a blank line.
+          function withAsset(text, name, url) {
+            const line = `asset ${name}: ${url}`;
+            if (assetLine(name).test(text)) return text.replace(assetLine(name), () => line);
+            const rows = text.split("\n"),
+              last = rows.map((row, i) => (/^\s*asset\s+/.test(row) ? i : -1)).filter((i) => i >= 0).pop();
+            if (last !== undefined) {
+              rows.splice(last + 1, 0, line);
+              return rows.join("\n");
+            }
+            return text.trimEnd() + "\n\n" + line + "\n";
+          }
+          // An asset only this picture uses is reused (its URL replaced) rather
+          // than left behind when the picture changes.
+          function reusable(text, value) {
+            if (!value || !value.startsWith("@")) return "";
+            const name = value.slice(1),
+              uses = text.match(new RegExp(`@${name}(?![\\w-])`, "g")) || [];
+            return uses.length === 1 && assetLine(name).test(text) ? name : "";
+          }
+          // Line `lineNo` (1-based) with its 6th field set to `value`; empty
+          // fields are filled in as " | " and the rest of the line is kept.
+          function withPicture(text, lineNo, value) {
+            const rows = text.split("\n"),
+              raw = rows[lineNo - 1].split(/(?<!\\)\|/);
+            raw[raw.length - 1] = raw[raw.length - 1].replace(/\s*$/, " ");
+            while (raw.length < 5) raw.push(" ");
+            raw[4] = raw[4].replace(/\s*$/, " ");
+            raw[5] = ` ${value}`;
+            rows[lineNo - 1] = raw.slice(0, 6).join("|").replace(/\s+$/, "");
+            return rows.join("\n");
+          }
+          // "cover: <value>", replacing the cover line or added under the title.
+          function withCover(text, value) {
+            const cover = /^[ \t]*cover[ \t]*:.*$/m;
+            if (cover.test(text)) return text.replace(cover, () => `cover: ${value}`);
+            const rows = text.split("\n"),
+              at = rows.findIndex((row) => /^\s*title\s*:/.test(row));
+            rows.splice(at + 1, 0, `cover: ${value}`);
+            return rows.join("\n");
+          }
+          return { assetName, withAsset, withPicture, withCover, reusable };
+        }
+
+        const api = { parse, render, pictureEdits: pictureEdits(), icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl, describe, runCore, runConfig, runRuntime };
         if (typeof module !== "undefined" && module.exports) module.exports = api;
         else root.TimelineText = api;
       })(typeof globalThis !== "undefined" ? globalThis : this);
@@ -2820,6 +3083,7 @@ footer: See you there ♡</pre>
         if (matchMedia("(max-width: 760px)").matches) closePane();
       });
       let latestHTML = "",
+        latestModel = null,
         latestTitle = "timeline",
         latestLink = "",
         pending;
@@ -3269,6 +3533,7 @@ footer: See you there ♡</pre>
         try {
           const model = TimelineText.parse(editor.value);
           latestHTML = TimelineText.render(model);
+          latestModel = model;
           latestTitle = model.title;
           themePicker.value = model.theme;
           // Navigating srcdoc on each edit clears Safari's native undo history.
@@ -3342,7 +3607,10 @@ footer: See you there ♡</pre>
           const panel = document.querySelector(".preview-panel");
           if (panel.scrollHeight > panel.clientHeight + 1)
             panel.scrollTo({ top: Number(event.data.y) || 0, behavior: event.data.smooth ? "smooth" : "auto" });
-        } else if (event.data?.type === "timeline:edit") editLine(Number(event.data.line));
+        } else if (event.data?.type === "timeline:edit") {
+          if (event.data.title) editTitle();
+          else editLine(Number(event.data.line));
+        } else if (event.data?.type === "timeline:picture") showPicture(String(event.data.src || ""));
       });
       // Keep the current-line highlight on the line the caret is on.
       const caretLine = document.querySelector("#caret-line");
@@ -3355,6 +3623,7 @@ footer: See you there ♡</pre>
         caretLine.style.display = inside ? "block" : "none";
         caretLine.style.top = `${top}px`;
         caretLine.style.height = `${lineHeight}px`;
+        placePhotoButton(line, inside ? top + lineHeight / 2 : null);
       }
       ["input", "click", "keyup", "select", "scroll", "focus"].forEach((type) =>
         editor.addEventListener(type, placeCaretLine),
@@ -3384,6 +3653,165 @@ footer: See you there ♡</pre>
         // while the pane is still transitioning from visibility:hidden).
         setTimeout(focusLine, 300);
       }
+      // ---- Pictures ---------------------------------------------------
+      // A step's picture is its line's 6th field; the title's is `cover:`.
+      // Chosen images are downscaled here (at most 1280 px on the long
+      // edge, WebP, or JPEG where the browser cannot write WebP, aiming for
+      // 400 KB), then stored on the link server (POST /img) so the text
+      // carries a short URL, not megabytes of base64. A standalone copy has
+      // no server and embeds the downscaled image as a data: URI instead.
+      const lightbox = document.querySelector("#lightbox");
+      function showPicture(src) {
+        if (!/^(https?:\/\/|data:image\/)/i.test(src)) return;
+        lightbox.querySelector("img").src = src;
+        lightbox.hidden = false;
+      }
+      function hidePicture() {
+        lightbox.hidden = true;
+        lightbox.querySelector("img").removeAttribute("src");
+      }
+      lightbox.addEventListener("click", hidePicture);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !lightbox.hidden) hidePicture();
+      });
+      function editTitle() {
+        const rows = editor.value.split("\n"),
+          at = rows.findIndex((row) => /^\s*title\s*:/.test(row));
+        editLine(at >= 0 ? at + 1 : 1);
+      }
+      async function shrinkImage(file) {
+        let source;
+        try {
+          source = await createImageBitmap(file);
+        } catch (error) {
+          source = await new Promise((resolve, reject) => {
+            const image = new Image(),
+              url = URL.createObjectURL(file);
+            image.onload = () => (URL.revokeObjectURL(url), resolve(image));
+            image.onerror = () => (URL.revokeObjectURL(url), reject(new Error("Could not read this image.")));
+            image.src = url;
+          });
+        }
+        const width = source.naturalWidth || source.width,
+          height = source.naturalHeight || source.height;
+        if (!width || !height) throw new Error("Could not read this image.");
+        const encode = (canvas, type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+        let blob = null;
+        for (const [edge, quality] of [[1280, 0.82], [1280, 0.7], [1024, 0.7], [800, 0.66]]) {
+          const scale = Math.min(1, edge / Math.max(width, height)),
+            canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(width * scale));
+          canvas.height = Math.max(1, Math.round(height * scale));
+          const context = canvas.getContext("2d");
+          context.drawImage(source, 0, 0, canvas.width, canvas.height);
+          blob = await encode(canvas, "image/webp", quality);
+          if (!blob || blob.type !== "image/webp") {
+            // No WebP encoder (older Safari): JPEG, on white, since JPEG has
+            // no transparency.
+            context.globalCompositeOperation = "destination-over";
+            context.fillStyle = "#fff";
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            blob = await encode(canvas, "image/jpeg", quality);
+          }
+          if (blob && blob.size <= 400 * 1024) break;
+        }
+        source.close?.();
+        if (!blob) throw new Error("Could not convert this image.");
+        return blob;
+      }
+      function dataUrl(blob) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Could not read this image."));
+          reader.readAsDataURL(blob);
+        });
+      }
+      // The picture's URL: uploaded where there is a server, embedded where
+      // there is not. A failed upload is an error rather than an embed: a
+      // named timeline has a size limit an embedded photo would break.
+      async function storeImage(file) {
+        const blob = await shrinkImage(file);
+        if (!HOSTED) return dataUrl(blob);
+        const response = await fetch(SHORT_LINK_API + "img", { method: "POST", headers: { "content-type": blob.type }, body: blob });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !body.url) throw new Error(body.error || `upload failed (${response.status})`);
+        return body.url;
+      }
+      const { assetName, withAsset, withPicture, withCover, reusable } = TimelineText.pictureEdits;
+      // What the highlighted line can take a photo for: "step", "cover" or "".
+      function photoTarget(line) {
+        const row = editor.value.split("\n")[line - 1] || "";
+        if (/^\s*(title|cover)\s*:/.test(row)) return "cover";
+        return latestModel && latestModel.events.some((e) => e.line === line && row.includes("|")) ? "step" : "";
+      }
+      const photoButton = document.querySelector("#line-photo"),
+        photoInput = document.querySelector("#photo-file");
+      let photoLine = 0,
+        photoTyping = 0;
+      function placePhotoButton(line, y) {
+        const target = y === null || Date.now() < photoTyping || photoButton.classList.contains("busy") ? "" : photoTarget(line);
+        if (photoButton.classList.contains("busy")) return;
+        photoButton.hidden = !target;
+        if (!target) return;
+        photoLine = line;
+        photoButton.dataset.target = target;
+        photoButton.querySelector("span").textContent = target === "cover" ? "Cover" : "Photo";
+        photoButton.title = target === "cover" ? "Add a cover photo above the title" : "Add a photo to this step";
+        photoButton.style.top = `${Math.max(20, y)}px`;
+      }
+      editor.addEventListener("input", () => {
+        photoTyping = Date.now() + 1200;
+        photoButton.hidden = true;
+        clearTimeout(placePhotoButton.timer);
+        placePhotoButton.timer = setTimeout(placeCaretLine, 1300);
+      });
+      // Opening the picker must happen inside the tap (iOS).
+      photoButton.addEventListener("mousedown", (event) => event.preventDefault());
+      photoButton.addEventListener("click", () => {
+        photoInput.dataset.line = String(photoLine);
+        photoInput.dataset.row = editor.value.split("\n")[photoLine - 1] || "";
+        photoInput.dataset.target = photoButton.dataset.target || "";
+        photoInput.click();
+      });
+      photoInput.addEventListener("change", async () => {
+        const file = photoInput.files[0],
+          target = photoInput.dataset.target,
+          row = photoInput.dataset.row;
+        photoInput.value = "";
+        if (!file) return;
+        photoButton.classList.add("busy");
+        photoButton.querySelector("span").textContent = HOSTED ? "Uploading…" : "Adding…";
+        try {
+          const url = await storeImage(file);
+          // The text may have changed during the upload: find the line again.
+          const text = editor.value,
+            rows = text.split("\n");
+          let line = Number(photoInput.dataset.line);
+          if (rows[line - 1] !== row) line = rows.indexOf(row) + 1;
+          if (!line) throw new Error("that line changed while the photo was uploading");
+          let next;
+          if (target === "cover") {
+            const current = ((latestModel && latestModel.cover) || "").trim(),
+              name = reusable(text, current) || assetName(latestTitle === "My Timeline" ? "cover" : latestTitle, text);
+            next = withCover(withAsset(text, name, url), `@${name}`);
+          } else {
+            const event = latestModel && latestModel.events.find((e) => e.line === line),
+              current = event ? event.picture : "",
+              name = reusable(text, current) || assetName(event ? event.title : "photo", text);
+            // The picture first: adding an asset line may shift line numbers.
+            next = withAsset(withPicture(text, line, `@${name}`), name, url);
+          }
+          TimelineText.parse(next);
+          setTextQuietly(next);
+          toast(target === "cover" ? "Cover photo added" : "Photo added to the step");
+        } catch (error) {
+          toast(`Photo not added: ${error.message}`, "error");
+        } finally {
+          photoButton.classList.remove("busy");
+          placeCaretLine();
+        }
+      });
       function download(content, name, type) {
         const url = URL.createObjectURL(
             content instanceof Blob ? content : new Blob([content], { type }),
@@ -3407,6 +3835,10 @@ footer: See you there ♡</pre>
         copy.querySelector("#preview").removeAttribute("srcdoc");
         copy.querySelector("#status").textContent = "";
         copy.querySelector("#asset-feedback").textContent = "";
+        copy.querySelector("#lightbox").setAttribute("hidden", "");
+        copy.querySelector("#lightbox img").removeAttribute("src");
+        copy.querySelector("#line-photo").setAttribute("hidden", "");
+        copy.querySelector("#line-photo").classList.remove("busy");
         copy.querySelector("#export").removeAttribute("disabled");
         copy.querySelector("body").classList.remove("pane-open");
         copy.querySelector("#pane").setAttribute("inert", "");
@@ -3929,21 +4361,14 @@ footer: See you there ♡</pre>
               ].includes(file.type)
             )
               throw new Error("Choose a PNG, JPEG, WebP, GIF, or SVG image.");
-            if (file.size > 10 * 1024 * 1024)
-              throw new Error("Please choose an image under 10 MB.");
-            const data = await new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result);
-              reader.onerror = () =>
-                reject(new Error("Could not read this image."));
-              reader.readAsDataURL(file);
-            });
-            const line = `asset ${name}: ${data}`,
-              pattern = new RegExp("^asset\\s+" + name + ":.*$", "m");
-            editor.value = pattern.test(editor.value)
-              ? editor.value.replace(pattern, () => line)
-              : editor.value.trimEnd() + "\n\n" + line + "\n";
-            feedback.textContent = `Added @${name}. Use it in an event’s icon field.`;
+            if (file.size > 25 * 1024 * 1024)
+              throw new Error("Please choose an image under 25 MB.");
+            // Photos go the same way as a step's: downscaled, then uploaded
+            // (hosted) or embedded (standalone). An SVG is embedded as is.
+            feedback.textContent = HOSTED && file.type !== "image/svg+xml" ? "Uploading…" : "Adding…";
+            const data = file.type === "image/svg+xml" ? await dataUrl(file) : await storeImage(file);
+            editor.value = withAsset(editor.value, name, data);
+            feedback.textContent = `Added @${name}. Use it in an event’s icon or picture field, or as cover: @${name}.`;
             dirty = true;
             update();
           } catch (error) {

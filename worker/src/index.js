@@ -12,6 +12,8 @@
 //   /dav/<name>/          CalDAV: calendar apps edit the events (caldav.js)
 //   GET  /resolve?u=      follows a Google/Apple Maps link -> { url, name, address }
 //   POST /command         { text, command, today } -> { text, note }   edit by instruction
+//   POST /img             image bytes (png/jpeg/webp/gif, <= 1.5 MB) -> { url }
+//   GET  /img/<hash>.<ext> the image, cached for a year (content-addressed)
 //   GET  /<id>            a snapshot from the earlier content-addressed
 //                         scheme, opened in the studio read-only-until-edited
 //
@@ -30,7 +32,7 @@ const LINK_LINES = /^[ \t]*link[ \t]*:.*(?:\r?\n|$)/gm;
 const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics|\.mobileconfig|\.webmanifest)?$/;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
-const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version", "llms"]);
+const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version", "llms", "img", "run", "places"]);
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, PUT, GET, OPTIONS",
@@ -56,6 +58,9 @@ export default {
     if (url.pathname === "/resolve" && request.method === "GET") return resolveMap(url.searchParams.get("u") || "");
     if (url.pathname === "/command" && request.method === "POST") return command(request, env);
     if (url.pathname === "/places" && request.method === "POST") return places(request, env);
+    if (url.pathname === "/img" && request.method === "POST") return putImage(request, env, url);
+    const image = url.pathname.match(IMAGE);
+    if (image && (request.method === "GET" || request.method === "HEAD")) return getImage(env, image[1], request.method);
     const named = url.pathname.match(NAME);
     if (named && request.method === "PUT") return put(request, env, named[1]);
     if (request.method !== "GET" && request.method !== "HEAD") return new Response("Not found", { status: 404, headers: CORS });
@@ -132,6 +137,68 @@ export default {
 function plain(text, cache = "no-store", version = "") {
   return new Response(text, {
     headers: { "content-type": "text/plain; charset=utf-8", "cache-control": cache, ...(version ? { etag: `"${version}"` } : {}), ...CORS },
+  });
+}
+
+// ---- pictures ---------------------------------------------------------------
+
+// Step photos and covers are stored once, by content, instead of riding in
+// the text as base64: a routine with ten photos would otherwise make every
+// save, poll and command carry megabytes. The studio downscales first
+// (<= 1280 px, WebP or JPEG, ~400 KB); this refuses anything over 1.5 MB
+// or that is not a PNG, JPEG, WebP or GIF by its own bytes (never SVG,
+// which could carry script on this origin). No expiry.
+const MAX_IMAGE = 1.5 * 1024 * 1024;
+const IMAGE = /^\/img\/([0-9a-f]{16})\.(?:png|jpg|webp|gif)$/;
+const IMAGE_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+export function sniffImage(bytes) {
+  const at = (i, ...values) => values.every((v, k) => bytes[i + k] === v);
+  if (at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  if (at(0, 0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return "image/webp";
+  if (at(0, 0x47, 0x49, 0x46, 0x38)) return "image/gif";
+  return "";
+}
+
+async function putImage(request, env, url) {
+  try {
+    if (env.IMAGES) {
+      const ip = request.headers.get("cf-connecting-ip") || "unknown";
+      const { success } = await env.IMAGES.limit({ key: ip });
+      if (!success) throw new HttpError(429, "Too many uploads, try again in a minute");
+    }
+    if (Number(request.headers.get("content-length")) > MAX_IMAGE) throw new HttpError(413, "Image too large (1.5 MB at most)");
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (bytes.length > MAX_IMAGE) throw new HttpError(413, "Image too large (1.5 MB at most)");
+    if (!bytes.length) throw new HttpError(400, "No image");
+    const type = sniffImage(bytes);
+    if (!type) throw new HttpError(415, "Only PNG, JPEG, WebP or GIF images");
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    const hash = [...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const key = "img:" + hash;
+    // Content-addressed: the same picture uploaded twice is stored once.
+    const existing = await env.LINKS.get(key, "stream");
+    if (existing) await existing.cancel();
+    else await env.LINKS.put(key, bytes, { metadata: { type, size: bytes.length } });
+    const link = new URL(`/img/${hash}.${IMAGE_TYPES[type]}`, url);
+    if (link.hostname !== "localhost" && link.hostname !== "127.0.0.1") link.protocol = "https:";
+    return json({ url: link.href, type, size: bytes.length }, 201);
+  } catch (error) {
+    if (error instanceof HttpError) return json({ error: error.message }, error.status);
+    return json({ error: error.message || String(error) }, 400);
+  }
+}
+
+async function getImage(env, hash, method) {
+  const { value, metadata } = await env.LINKS.getWithMetadata("img:" + hash, "arrayBuffer");
+  if (!value) return new Response("No such image", { status: 404, headers: CORS });
+  return new Response(method === "HEAD" ? null : value, {
+    headers: {
+      "content-type": (metadata && metadata.type) || "application/octet-stream",
+      "cache-control": "public, max-age=31536000, immutable",
+      "x-content-type-options": "nosniff",
+      ...CORS,
+    },
   });
 }
 
@@ -419,7 +486,7 @@ export function acceptPlaces(original, edited, candidates) {
     if (!candidates.has(i + 1)) return old;
     const a = old.split(FIELD_SPLIT).map((f) => f.trim()),
       b = next.split(FIELD_SPLIT).map((f) => f.trim());
-    if (b.length < 3 || b.length > 5 || b.length < a.length || b.length > Math.max(a.length, 3)) return old;
+    if (b.length < 3 || b.length > 6 || b.length < a.length || b.length > Math.max(a.length, 3)) return old;
     for (let k = 0; k < b.length; k++) {
       if (k === 2) continue;
       if ((a[k] || "") !== (b[k] || "")) return old;

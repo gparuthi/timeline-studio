@@ -49,7 +49,26 @@
     "car",
     "road",
     "palm",
+    "dumbbell",
+    "run",
+    "stretch",
+    "timer",
+    "pot",
   ];
+  // Icons added for routines (workouts, recipes). A page carries only the
+  // ones it uses, so a day timeline's markup is unchanged by them.
+  const moreSymbols = {
+    dumbbell:
+      '<symbol id="dumbbell" viewBox="0 0 40 40"><g transform="rotate(-30 20 20)"><path d="M11 18h18v4H11z"/><rect x="7" y="9" width="6" height="22" rx="2"/><rect x="27" y="9" width="6" height="22" rx="2"/><rect x="2" y="13" width="6" height="14" rx="2"/><rect x="32" y="13" width="6" height="14" rx="2"/></g></symbol>',
+    run:
+      '<symbol id="run" viewBox="0 0 40 40"><circle cx="26" cy="5.5" r="4"/><path d="M20.8 10.8L15.8 21.8A3 3 0 0 0 21.2 24.2L26.2 13.2A3 3 0 0 0 20.8 10.8Z"/><path d="M20.7 16.2L26.7 20.7A2.1 2.1 0 0 0 29.3 17.3L23.3 12.8A2.1 2.1 0 0 0 20.7 16.2ZM29.2 20.7L34.2 17.2A2.1 2.1 0 0 0 31.8 13.8L26.8 17.3A2.1 2.1 0 0 0 29.2 20.7Z"/><path d="M21.7 12.4L15.2 13.4A2.1 2.1 0 0 0 15.8 17.6L22.3 16.6A2.1 2.1 0 0 0 21.7 12.4ZM14 14L9.5 18.5A2.1 2.1 0 0 0 12.5 21.5L17 17A2.1 2.1 0 0 0 14 14Z"/><path d="M17.5 25.1L25 28.6A2.3 2.3 0 0 0 27 24.4L19.5 20.9A2.3 2.3 0 0 0 17.5 25.1ZM23.7 26.3L22.7 35.8A2.3 2.3 0 0 0 27.3 36.2L28.3 26.7A2.3 2.3 0 0 0 23.7 26.3Z"/><path d="M16.5 21.8L12 29.3A2.3 2.3 0 0 0 16 31.7L20.5 24.2A2.3 2.3 0 0 0 16.5 21.8ZM13.6 28.2L5.6 29.7A2.3 2.3 0 0 0 6.4 34.3L14.4 32.8A2.3 2.3 0 0 0 13.6 28.2Z"/></symbol>',
+    stretch:
+      '<symbol id="stretch" viewBox="0 0 40 40"><circle cx="20" cy="8.5" r="4.2"/><path d="M16.8 15L16.8 25A3.2 3.2 0 0 0 23.2 25L23.2 15A3.2 3.2 0 0 0 16.8 15Z"/><path d="M18.7 14.8L10.7 2.8A2.1 2.1 0 0 0 7.3 5.2L15.3 17.2A2.1 2.1 0 0 0 18.7 14.8Z"/><path d="M24.7 17.2L32.7 5.2A2.1 2.1 0 0 0 29.3 2.8L21.3 14.8A2.1 2.1 0 0 0 24.7 17.2Z"/><path d="M17.9 22.9L10.9 35.9A2.4 2.4 0 0 0 15.1 38.1L22.1 25.1A2.4 2.4 0 0 0 17.9 22.9Z"/><path d="M17.9 25.1L24.9 38.1A2.4 2.4 0 0 0 29.1 35.9L22.1 22.9A2.4 2.4 0 0 0 17.9 25.1Z"/></symbol>',
+    timer:
+      '<symbol id="timer" viewBox="0 0 40 40"><path fill-rule="evenodd" d="M20 7a15 15 0 1 1 0 30 15 15 0 0 1 0-30m0 4a11 11 0 1 0 0 22 11 11 0 0 0 0-22"/><path d="M20 22V13.5A8.5 8.5 0 0 1 28.5 22z"/><rect x="16" y="1" width="8" height="4" rx="1.5"/><path d="m31 9 2.5-2.5 3 3L34 12z"/></symbol>',
+    pot:
+      '<symbol id="pot" viewBox="0 0 40 40"><path d="M5 17h30v12a7 7 0 0 1-7 7H12a7 7 0 0 1-7-7z"/><rect x="1" y="18" width="6" height="4" rx="2"/><rect x="33" y="18" width="6" height="4" rx="2"/><path d="M4 15a16 7 0 0 1 32 0z"/><rect x="17" y="5" width="6" height="4" rx="2"/></symbol>',
+  };
   const escape = (value) =>
     String(value).replace(
       /[&<>"']/g,
@@ -194,6 +213,13 @@
     ["palm", /\b(beach|boardwalk|pier|surf(?:ing)?|pool|swim(?:ming)?|ocean|coast)\b/],
     ["road", /\b(road ?trip|highway|freeway|scenic|mulholland)\b/],
     ["car", /\b(drive|driving|car|rental|uber|lyft|taxi|parking|gas|pick ?up|drop ?off)\b/],
+    // Workout and kitchen steps, after the day words so those still win.
+    ["dumbbell", /\b(workout|exercises?|planks?|squats?|lunges?|push[- ]?ups?|pull[- ]?ups?|sit[- ]?ups?|crunch(?:es)?|burpees?|deadlifts?|bench press|curls?|kettlebells?|dumbbells?|weights|strength|hiit|circuit|glute bridges?|dead ?bugs?|hollow (?:holds?|rocks?)|mountain climbers?|reps|core|abs)\b/],
+    ["run", /\b(jog|jogs|jogging|running|sprints?|sprinting|jumping jacks?|high knees|butt kicks|skipping|jump rope|warm[- ]?ups?|treadmill|cardio|laps?)\b/],
+    ["stretch", /\b(stretch(?:es|ing)?|yoga|cool[- ]?downs?|mobility|poses?|cobra|downward dog|pilates|foam roll(?:er|ing)?|breathe|breathing|meditat(?:e|ion))\b/],
+    ["timer", /\b(rest|resting|recover|recovery|break|pause|wait|hold|timer)\b/],
+    ["pot", /\b(boil|boiling|simmer|simmering|stew|soup|stir|stirring|saut[eé]e?|fry|frying|pan|pot|cook|cooking|pasta|rice|sauce|reduce)\b/],
+    ["meal", /\b(chop|chopping|dice|dicing|slice|slicing|mince|peel|grate|prep|season|seasoning|marinate|mix|whisk|knead|roast|roasting|bake|baking|grill|grilling|broil|preheat|oven|plate|plating|serve|toss|garnish)\b/],
   ];
   // "Gear run @ REI Baldwin Hills": what follows " @ " in a description (or
   // a description that starts with "@") is a place. The sheet shows it as a
@@ -242,6 +268,17 @@
   // then its step notes as "- " lines.
   function describe(event) {
     return [event.detail, ...(event.notes || []).map((note) => "- " + note)].filter(Boolean).join("\n");
+  }
+  // A picture (an event's 6th field, or `cover:`) is "@asset" or an
+  // https:// image URL; this is the URL to show, or "".
+  function pictureUrl(model, value) {
+    if (!value) return "";
+    return value.startsWith("@") ? model.assets[value.slice(1)] || "" : value;
+  }
+  function checkPicture(value, line) {
+    if (value && !value.startsWith("@") && !/^https:\/\/\S+$/i.test(value))
+      throw new Error(`Line ${line}: a picture (the 6th field) is @asset-name or an https:// image URL.`);
+    return value;
   }
   function guessIcon(title, detail) {
     for (const text of [title, detail]) {
@@ -310,11 +347,11 @@
         const fields = s
           .split(/(?<!\\)\|/)
           .map((v) => v.trim().replace(/\\\|/g, "|"));
-        if (fields.length > 5)
+        if (fields.length > 6)
           throw new Error(
-            `Line ${line}: at most five fields; write \\| for a literal pipe.`,
+            `Line ${line}: at most six fields; write \\| for a literal pipe.`,
           );
-        const [clock, title, written = "", icon = "", color = "sky"] = fields;
+        const [clock, title, written = "", icon = "", color = "sky", picture = ""] = fields;
         const { detail, place } = splitPlace(written, title);
         if (!title) throw new Error(`Line ${line}: add an event title.`);
         if (!["sky", "sand", "sage"].includes(color || "sky"))
@@ -334,6 +371,7 @@
           place,
           icon: icon || guessIcon(title, written),
           color: color || "sky",
+          picture: checkPicture(picture, line),
           line,
           notes: [],
         });
@@ -372,6 +410,7 @@
           "city",
           "places",
           "clock",
+          "cover",
         ].includes(key)
       )
         throw new Error(`Line ${line}: unknown setting “${key}”.`);
@@ -505,6 +544,8 @@
           throw new Error(
             `Line ${event.line}: unknown icon “${event.icon}”. Use a built-in icon or @asset-name.`,
           );
+        if (event.picture.startsWith("@") && !Object.hasOwn(model.assets, event.picture.slice(1)))
+          throw new Error(`Line ${event.line}: define “asset ${event.picture.slice(1)}: …” first.`);
       }
     });
     model.events = model.days.flatMap((day) => day.events);
@@ -519,6 +560,11 @@
       throw new Error(
         "Header art must name an existing asset, for example “header-art: @beach”.",
       );
+    // "cover: @asset" or an https URL: a photo above the title.
+    if (model.cover && !model.cover.startsWith("@") && !/^https:\/\/\S+$/i.test(model.cover))
+      throw new Error("The cover is @asset-name or an https:// image URL, for example “cover: @kitchen”.");
+    if (model.cover && model.cover.startsWith("@") && !Object.hasOwn(model.assets, model.cover.slice(1)))
+      throw new Error(`The cover names no asset: add “asset ${model.cover.slice(1)}: …”.`);
     return model;
   }
   function layoutRuntime() {
@@ -826,11 +872,23 @@
   function previewRuntime(layout) {
     // In the studio's live preview a tap on a card (or a day heading) asks
     // the editor to open on that source line.
-    // A card's "3 notes" hint folds and unfolds its notes instead.
+    // A card's "3 notes" hint folds and unfolds its notes instead. A
+    // picture opens full screen in the studio (a fixed overlay in here
+    // would sit at the top of the frame, which iOS sizes to its content);
+    // the title opens the editor on the title line (for a cover photo).
     document.addEventListener("click", (event) => {
+      const picture = event.target.closest(".pic");
+      if (picture) {
+        event.preventDefault();
+        parent.postMessage({ type: "timeline:picture", src: picture.getAttribute("href") }, "*");
+        return;
+      }
       if (event.target.closest("a, summary")) return;
       const target = event.target.closest("[data-line]");
-      if (!target) return;
+      if (!target) {
+        if (event.target.closest(".masthead h1")) parent.postMessage({ type: "timeline:edit", title: true }, "*");
+        return;
+      }
       event.preventDefault();
       parent.postMessage({ type: "timeline:edit", line: Number(target.dataset.line) }, "*");
     });
@@ -888,6 +946,36 @@
       // through the patched scrollTo would send the studio's panel back to
       // the top after every keystroke.
       if (!fresh) scrollTo(0, top);
+    });
+  }
+  // Pictures on a page of its own (view.html, an exported file): a tap on
+  // a thumbnail or the cover shows it full screen; a tap anywhere or Escape
+  // closes it. Without scripts the picture is a plain link to the image.
+  function pictureRuntime() {
+    if (window.__timelineStatic) return;
+    const close = () => document.querySelector(".pic-view")?.remove();
+    document.addEventListener("click", (event) => {
+      const picture = event.target.closest(".pic");
+      if (!picture) return;
+      event.preventDefault();
+      close();
+      const view = document.createElement("div");
+      view.className = "pic-view";
+      view.setAttribute("role", "dialog");
+      view.setAttribute("aria-label", "Picture");
+      view.setAttribute("data-html2canvas-ignore", "");
+      const image = document.createElement("img");
+      image.src = picture.getAttribute("href");
+      image.alt = "";
+      view.append(image);
+      view.addEventListener("click", (e) => {
+        e.stopPropagation();
+        close();
+      });
+      document.body.append(view);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") close();
     });
   }
   // A time zone as written in the text -> IANA name, or "" if unknown.
@@ -1040,7 +1128,7 @@
     const steps = model.events
       .slice()
       .sort((a, b) => a.at - b.at || a.line - b.line)
-      .map((e) => ({ line: e.line, at: e.at, until: e.until, title: e.title, detail: e.detail, place: e.place, notes: e.notes }));
+      .map((e) => ({ line: e.line, at: e.at, until: e.until, title: e.title, detail: e.detail, place: e.place, notes: e.notes, picture: pictureUrl(model, e.picture) }));
     const source = JSON.stringify([model.title, steps.map((s) => [s.at, s.until ?? null, s.title])]);
     let h1 = 0xdeadbeef,
       h2 = 0x41c6ce57;
@@ -1087,6 +1175,9 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
 .run-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .run-count{flex:none;font-variant-numeric:tabular-nums}
 .run-photo{margin:8px 0 0;border-radius:12px;overflow:hidden;background:#0b1013}
+.run-photo img{display:block;width:100%;height:min(30vh,280px);height:min(30dvh,280px);object-fit:contain}
+.run-next-thumb{flex:none;margin-left:auto;width:44px;height:44px;border-radius:8px;overflow:hidden;background:#0b1013}
+.run-next-thumb img{display:block;width:100%;height:100%;object-fit:cover}
 .run-step{margin:6px 0 8px;font-size:26px;font-weight:800;line-height:1.1;letter-spacing:-.3px;text-transform:uppercase;overflow-wrap:anywhere}
 .run-meter{height:10px;border-radius:999px;background:#26323a;overflow:hidden}
 .run-fill{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#3ecf8e,#8fe3b9);transition:width .25s linear}
@@ -1172,6 +1263,8 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
         notes: $(top, ".run-notes"),
         also: $(top, ".run-also"),
         next: $(top, ".run-next-text"),
+        photo: $(top, ".run-photo"),
+        nextThumb: $(top, ".run-next-thumb"),
         done: $(top, ".run-done"),
         doneTitle: $(top, ".run-done-title"),
         elapsed: $(bottom, ".run-elapsed"),
@@ -1355,6 +1448,20 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
       if (el.innerHTML !== html) el.innerHTML = html;
       el.hidden = !items.length;
     };
+    const setPicture = (el, url) => {
+      url = url || "";
+      if (el.dataset.src !== url) {
+        el.dataset.src = url;
+        el.textContent = "";
+        if (url) {
+          const image = doc.createElement("img");
+          image.alt = "";
+          image.src = url;
+          el.append(image);
+        }
+      }
+      el.hidden = !url;
+    };
     const esc = (text) =>
       String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
     function show(mode) {
@@ -1425,6 +1532,9 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
       const detail = primary ? [primary.detail, primary.place && `@ ${primary.place}`].filter(Boolean).join(" ") : "";
       setText(ui.detail, detail);
       ui.detail.hidden = !detail;
+      // The live step's picture, large; the next step's as a thumbnail.
+      setPicture(ui.photo, primary && primary.picture);
+      setPicture(ui.nextThumb, next && next.picture);
       setList(ui.notes, primary ? primary.notes.map((n) => `<li>${esc(n)}</li>`) : []);
       setList(
         ui.also,
@@ -1575,9 +1685,13 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
     // A relative timeline carries run mode, except in the studio's preview,
     // where the studio itself runs it (audio, wake lock and vibration need
     // the top-level page) and sends the sheet its position.
+    // Pictures: a step's 6th field and the cover, resolved to URLs.
+    const cover = pictureUrl(m, m.cover),
+      pictured = !!cover || m.events.some((e) => e.picture);
     const runtime = live
       ? `(${previewRuntime.toString()})(${layoutRuntime.toString()});`
       : `(${layoutRuntime.toString()})();` +
+        (pictured ? `\n(${pictureRuntime.toString()})();` : "") +
         (rel ? `\n(${runRuntime.toString()})(${JSON.stringify(runConfig(m)).replace(/</g, "\\u003c")}, ${runCore.toString()});` : "");
     // URLs in a description or note become links. Map links (Google or
     // Apple Maps, including the short goo.gl form) render as a small pin
@@ -1612,8 +1726,12 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
       e.notes && e.notes.length
         ? `<details class="step-notes"><summary>${e.notes.length} note${e.notes.length === 1 ? "" : "s"}</summary><ul>${e.notes.map((note) => `<li>${linkify(note)}</li>`).join("")}</ul></details>`
         : "";
+    // A picture is a link to the image (so it opens without scripts too);
+    // the page's script shows it full screen instead.
+    const picture = (url, className, label) =>
+      `<a class="pic ${className}" href="${escape(url)}" target="_blank" rel="noopener" aria-label="${escape(label)}"><img src="${escape(url)}" alt=""></a>`;
     const cardBody = (e, day) =>
-      `<div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail || e.place ? `<p>${[e.detail ? linkify(e.detail) : "", e.place ? `<a class="map-link" href="${escape(mapSearchUrl(e.place, day.city || m.city))}" target="_blank" rel="noopener" title="${escape(e.place)}"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg><span class="map-name">${escape(e.place)}</span></a>` : ""].filter(Boolean).join(" ")}</p>` : ""}${stepNotes(e)}</div></li>`;
+      `<div class="event-body${e.picture ? " has-pic" : ""}"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail || e.place ? `<p>${[e.detail ? linkify(e.detail) : "", e.place ? `<a class="map-link" href="${escape(mapSearchUrl(e.place, day.city || m.city))}" target="_blank" rel="noopener" title="${escape(e.place)}"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg><span class="map-name">${escape(e.place)}</span></a>` : ""].filter(Boolean).join(" ")}</p>` : ""}${stepNotes(e)}${e.picture ? picture(pictureUrl(m, e.picture), "thumb", `Photo: ${e.title}`) : ""}</div></li>`;
     // A relative clock is scaled so the whole routine has a readable height
     // (about one card per step); ticks every 1, 5, 10 or 30 min by length.
     const totalMin = rel ? Math.max(m.total, 1) / 60 : 0,
@@ -1682,12 +1800,20 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
     const relativeCss = rel
       ? ` .offsets{position:absolute;inset:0;pointer-events:none;} .offset{position:absolute;left:0;width:calc(var(--axis) - 14px);top:calc(var(--m) / 60 * var(--hour-height));transform:translateY(-50%);text-align:right;font-size:12px;font-weight:700;line-height:1;letter-spacing:0;color:var(--blue);opacity:.85;font-variant-numeric:tabular-nums;white-space:nowrap;} .timeline.relative .hour-label,.timeline.relative .event time{font-variant-numeric:tabular-nums;} @media(max-width:580px){.timeline.relative .hour-label{font-size:13px;letter-spacing:-.3px;} .offset{width:calc(var(--axis) - 9px);font-size:10px;}}`
       : "";
+    const pictureCss = pictured
+      ? ` .pic{display:block;overflow:hidden;background:var(--sky);-webkit-tap-highlight-color:transparent;} .pic img{display:block;width:100%;height:100%;object-fit:cover;} .pic.cover{margin:-30px -34px 22px;aspect-ratio:16/7;max-height:380px;} .event-body.has-pic{min-height:80px;padding-right:86px;} .pic.thumb{position:absolute;right:7px;top:50%;width:64px;height:64px;transform:translateY(-50%);border-radius:12px;box-shadow:0 1px 4px #0002;} .event-body.has-pic .until{right:84px;} .pic-view{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);background:#000000eb;cursor:zoom-out;} .pic-view img{max-width:100vw;max-height:100vh;max-height:100dvh;object-fit:contain;} @media(max-width:850px){.pic.cover{margin:-25px -22px 18px;}} @media(max-width:580px){.pic.cover{margin:-27px -14px 16px;aspect-ratio:16/10;} .event-body.has-pic{min-height:76px;padding-right:64px;} .pic.thumb{right:6px;width:52px;height:52px;border-radius:10px;} .event-body.has-pic .until{right:62px;}} @media print{.pic.cover{margin-top:0;}}`
+      : "";
+    // The icons a page uses beyond the original set.
+    const symbols = (() => {
+      const extra = [...new Set(m.events.map((e) => e.icon))].filter((icon) => moreSymbols[icon]);
+      return extra.length ? art.symbols.replace("\n</defs>", `\n ${extra.map((icon) => moreSymbols[icon]).join("\n ")}\n</defs>`) : art.symbols;
+    })();
     const notesCss = m.events.some((e) => e.notes && e.notes.length)
       ? ` .step-notes{margin:5px 0 0;color:var(--blue);} .step-notes summary{display:inline-block;list-style:none;cursor:pointer;padding:3px 10px;border:1px solid currentColor;border-radius:999px;font-size:12px;font-weight:700;line-height:1.4;letter-spacing:.2px;opacity:.85;} .step-notes summary::-webkit-details-marker{display:none;} .step-notes summary::after{content:' ▾';} .step-notes[open] summary::after{content:' ▴';} .step-notes ul{margin:6px 0 2px;padding-left:18px;font-size:15px;line-height:1.3;color:var(--navy);} .step-notes li{margin:2px 0;} @media(max-width:580px){.step-notes ul{padding-left:16px;font-size:13px;}}`
       : "";
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="${darkThemes[m.theme] ? "light dark" : m.theme === "future" || m.theme === "code" ? "dark" : "light"}"><title>${escape(m.title)}</title><style>${art.css}
-${extraCss}${relativeCss}${notesCss}
-${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-scheme:dark){${darkThemes[m.theme]}}` : ""}</style></head><body class="theme-${m.theme}${live ? " live" : ""}">${art.symbols}<main class="sheet"><header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main><script>${runtime}<\/script></body></html>`;
+${extraCss}${relativeCss}${notesCss}${pictureCss}
+${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-scheme:dark){${darkThemes[m.theme]}}` : ""}</style></head><body class="theme-${m.theme}${live ? " live" : ""}">${symbols}<main class="sheet">${cover ? picture(cover, "cover", "Cover photo") : ""}<header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main><script>${runtime}<\/script></body></html>`;
   }
   // Shareable links: the whole timeline text travels in the URL fragment,
   // deflate-compressed when the browser can ("z="), plain otherwise ("t=").
@@ -1731,7 +1857,74 @@ ${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-sc
     return new TextDecoder().decode(await pipe(bytes, DecompressionStream));
   }
 
-  const api = { parse, render, icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl, describe, runCore, runConfig, runRuntime };
+  // Text edits for the studio's Photo button: name an asset after its
+  // step, write or replace "asset <name>: <url>", set a line's picture (the
+  // 6th field) or the cover. Plain string work, kept here so node tests
+  // cover it.
+  function pictureEdits() {
+    const assetLine = (name) => new RegExp(`^[ \\t]*asset[ \\t]+${name}[ \\t]*:.*$`, "m");
+    // "Side plank L" -> "side-plank-l", then "-2", "-3" while taken.
+    function assetName(base, text) {
+      let slug =
+        String(base)
+          .toLowerCase()
+          .normalize("NFKD")
+          .replace(/[̀-ͯ]/g, "")
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 24)
+          .replace(/-+$/, "") || "photo";
+      if (!/^[a-z]/.test(slug)) slug = "photo-" + slug;
+      let name = slug;
+      for (let n = 2; assetLine(name).test(text); n++) name = `${slug}-${n}`;
+      return name;
+    }
+    // In place when the asset exists, else after the last asset line, else
+    // at the end after a blank line.
+    function withAsset(text, name, url) {
+      const line = `asset ${name}: ${url}`;
+      if (assetLine(name).test(text)) return text.replace(assetLine(name), () => line);
+      const rows = text.split("\n"),
+        last = rows.map((row, i) => (/^\s*asset\s+/.test(row) ? i : -1)).filter((i) => i >= 0).pop();
+      if (last !== undefined) {
+        rows.splice(last + 1, 0, line);
+        return rows.join("\n");
+      }
+      return text.trimEnd() + "\n\n" + line + "\n";
+    }
+    // An asset only this picture uses is reused (its URL replaced) rather
+    // than left behind when the picture changes.
+    function reusable(text, value) {
+      if (!value || !value.startsWith("@")) return "";
+      const name = value.slice(1),
+        uses = text.match(new RegExp(`@${name}(?![\\w-])`, "g")) || [];
+      return uses.length === 1 && assetLine(name).test(text) ? name : "";
+    }
+    // Line `lineNo` (1-based) with its 6th field set to `value`; empty
+    // fields are filled in as " | " and the rest of the line is kept.
+    function withPicture(text, lineNo, value) {
+      const rows = text.split("\n"),
+        raw = rows[lineNo - 1].split(/(?<!\\)\|/);
+      raw[raw.length - 1] = raw[raw.length - 1].replace(/\s*$/, " ");
+      while (raw.length < 5) raw.push(" ");
+      raw[4] = raw[4].replace(/\s*$/, " ");
+      raw[5] = ` ${value}`;
+      rows[lineNo - 1] = raw.slice(0, 6).join("|").replace(/\s+$/, "");
+      return rows.join("\n");
+    }
+    // "cover: <value>", replacing the cover line or added under the title.
+    function withCover(text, value) {
+      const cover = /^[ \t]*cover[ \t]*:.*$/m;
+      if (cover.test(text)) return text.replace(cover, () => `cover: ${value}`);
+      const rows = text.split("\n"),
+        at = rows.findIndex((row) => /^\s*title\s*:/.test(row));
+      rows.splice(at + 1, 0, `cover: ${value}`);
+      return rows.join("\n");
+    }
+    return { assetName, withAsset, withPicture, withCover, reusable };
+  }
+
+  const api = { parse, render, pictureEdits: pictureEdits(), icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl, describe, runCore, runConfig, runRuntime };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.TimelineText = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
