@@ -201,6 +201,36 @@ test("the now line follows elapsed time through the drawn scale", () => {
   assert.equal(core.yAt(g.map, 99999), core.yAt(g.map, 2700));
 });
 
+test("run view: the header stays compact and the live card carries the notes, after its description", () => {
+  const text = "title: Soup\n+10m | Prep | Chop the onion and the tomato | | sage\n- 1 onion\n- 1 tomato\n+8m | Saute | In oil | | sand\n- 1 tbsp oil";
+  const page = render(text);
+  // The run header has no notes list and one line of description.
+  assert.doesNotMatch(page, /run-notes/);
+  assert.match(page, /\.run-detail\{[^}]*white-space:nowrap;[^}]*text-overflow:ellipsis/);
+  // Its big picture is for wide screens only.
+  assert.match(page, /@media\(max-width:699px\),\(max-height:699px\)\{\.run-photo\{display:none!important\}\}/);
+  // A full-width card: title, "2 notes", length and description in one
+  // row, ordered so open notes come after the description.
+  const prep = page.match(/<div class="cd w [^"]*"[^>]*data-line="2"[^>]*>(.*?)<\/div><span class="cd-th/)[1];
+  assert.match(prep, /^<div class="cd-row"><h3 class="cd-t">Prep<\/h3><details class="step-notes">.*<\/details><span class="dur">10 min<\/span><p class="cd-d">Chop the onion and the tomato<\/p>$/);
+  assert.match(page, /\.cd\.w \.cd-d\{order:3;flex-basis:100%;/);
+  assert.match(page, /\.cd \.step-notes\[open\]\{order:4;flex-basis:100%;\}/);
+  // The live card shows its whole description.
+  assert.match(page, /\.lanes \.cd\.live \.cd-d\{display:block;-webkit-line-clamp:none;white-space:normal;\}/);
+  // The two sound switches share the row equally, and it stays compact on a wide screen.
+  assert.match(page, /\.run-toggles\{display:flex;gap:8px;max-width:440px;margin:6px auto 8px\}/);
+  assert.match(page, /\.run-tg\{display:flex;flex:1 1 0;/);
+  assert.doesNotMatch(page, /\.run-tg\.run-announce\{flex:1/);
+});
+
+test("run view: the page follows the run to the top of the live steps", () => {
+  // The highest live step (or the rest and the move up next) goes just
+  // under the header; with nothing live or next, the now line does.
+  assert.equal(core.followTop([240, 0], 72), 0);
+  assert.equal(core.followTop([410, 438], 415), 410);
+  assert.equal(core.followTop([], 500), 440);
+});
+
 test("day timelines carry none of the routine sheet", () => {
   const page = render(read("example.timeline.txt"));
   assert.doesNotMatch(page, /class="lanes"|ready-go|routineRuntime/);
