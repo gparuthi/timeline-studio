@@ -103,8 +103,11 @@ export async function handleDav(request, env, deps) {
     }
     return multistatus(responses);
   }
+  // Bodies are read with a cap (100 KB), and writes count against the
+  // per-address save limit (deps from index.js; docs/limits.md).
+  const readBody = (r) => (deps.readText ? deps.readText(r) : r.text());
   if (method === "REPORT" && level === "calendar") {
-    const body = await request.text();
+    const body = await readBody(request);
     let chosen = events;
     if (/calendar-multiget/i.test(body)) {
       const hrefs = [...body.matchAll(/<(?:[A-Za-z0-9]+:)?href[^>]*>([^<]+)<\//g)].map((m) => decodeURIComponent(m[1].trim()));
@@ -126,8 +129,10 @@ export async function handleDav(request, env, deps) {
   }
   if (readOnly && (method === "PUT" || method === "DELETE"))
     return new Response("This timeline is a routine (clock: relative); its calendar is read-only.", { status: 403 });
+  if ((method === "PUT" || method === "DELETE") && deps.savesLimit && !(await deps.savesLimit(request)))
+    return new Response("Too many changes, try again in a minute", { status: 429, headers: { "retry-after": "60" } });
   if (level === "event" && method === "PUT") {
-    const incoming = parseEvent(await request.text());
+    const incoming = parseEvent(await readBody(request));
     if (!incoming) return new Response("Expected one VEVENT", { status: 400 });
     const existing = events.find((e) => e.uid === uid);
     if (!existing && request.headers.get("if-match")) return new Response("No such event", { status: 412 });

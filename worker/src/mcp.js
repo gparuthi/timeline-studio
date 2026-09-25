@@ -25,6 +25,7 @@
 
 import TimelineText from "../../timeline-renderer.js";
 import { ImageError, imageSource, storeImage } from "./images.js";
+import { BudgetError } from "./budget.js";
 
 const LEGACY_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const MODERN_VERSIONS = ["2026-07-28"];
@@ -172,7 +173,8 @@ class RpcError extends Error {
   }
 }
 
-// deps: { loadDoc, saveDoc, encode, summary, reserved, cors } from index.js.
+// deps: { loadDoc, saveDoc, encode, summary, reserved, cors, take } from
+// index.js (take: the daily budget, docs/limits.md).
 export async function handleMcp(request, env, deps) {
   const headers = { ...deps.cors, "cache-control": "no-store" };
   const reply = (body, status = 200) =>
@@ -285,9 +287,13 @@ async function method(name, params, context, modern) {
       if (!tool) throw new RpcError(-32602, `Unknown tool: ${params.name}. Tools: ${TOOLS.map((t) => t.name).join(", ")}`);
       const args = params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments) ? params.arguments : {};
       try {
+        // Every call counts against the day's connector calls (fails open);
+        // what it then writes, stores or fetches counts on its own.
+        if (context.deps.take) await context.deps.take("mcp", 1);
         return await CALLS[tool.name](args, context);
       } catch (error) {
         if (error instanceof ToolError) return toolError(error.message, error.structured);
+        if (error instanceof BudgetError) return toolError(error.message, error.body());
         throw error;
       }
     }
@@ -339,7 +345,7 @@ const CALLS = {
       }
       if (!name) throw new ToolError("Could not find a free name; try again.");
     }
-    const doc = await deps.saveDoc(env, name, text);
+    const doc = await deps.saveDoc(env, name, text, { fresh: true });
     const facts = describe(doc.text, deps);
     const url = context.origin + name;
     const structured = { url, name, title: facts.title, kind: facts.kind, summary: facts.summary, version: doc.version };
@@ -465,8 +471,8 @@ const CALLS = {
     }
     let stored;
     try {
-      const bytes = await imageSource({ data: args.data_base64, url: args.url, hosts: HOSTS, env, fetch: deps.fetch });
-      stored = await storeImage(env, bytes, context.origin);
+      const bytes = await imageSource({ data: args.data_base64, url: args.url, hosts: HOSTS, env, fetch: deps.fetch, take: deps.take });
+      stored = await storeImage(env, bytes, context.origin, { take: deps.take });
     } catch (error) {
       if (error instanceof ImageError) throw new ToolError(`Not uploaded: ${error.message}.`.replace(/\.\.$/, "."));
       throw error;

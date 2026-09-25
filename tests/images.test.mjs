@@ -22,7 +22,7 @@ function kv() {
       return { value: entry ? await this.get(key, type) : null, metadata: entry ? entry.metadata : null };
     },
     async put(key, value, options = {}) {
-      store.set(key, { value: typeof value === "string" ? value : bytes(value).slice(), metadata: options.metadata || null });
+      store.set(key, { value: typeof value === "string" ? value : bytes(value).slice(), metadata: options.metadata || null, options });
     },
   };
 }
@@ -47,7 +47,11 @@ test("an upload is stored once by content and served for a year", async () => {
   assert.match(body.url, /^https:\/\/tl\.gaup\.uk\/img\/[0-9a-f]{16}\.webp$/);
   assert.equal(body.type, "image/webp", "the bytes decide the type");
   const hash = body.url.match(/([0-9a-f]{16})/)[1];
-  assert.deepEqual(env.LINKS.store.get("img:" + hash).metadata, { type: "image/webp", size: WEBP.length });
+  const { metadata, options } = env.LINKS.store.get("img:" + hash);
+  assert.equal(metadata.type, "image/webp");
+  assert.equal(metadata.size, WEBP.length);
+  assert.ok(Math.abs(metadata.refreshed - Date.now()) < 5000, "when it was stored");
+  assert.equal(options.expirationTtl, 180 * 24 * 60 * 60, "it expires after 180 days unless a timeline refreshes it");
   // Again: the same URL, no second write.
   let writes = 0;
   const put = env.LINKS.put.bind(env.LINKS);

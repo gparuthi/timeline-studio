@@ -31,13 +31,30 @@
     { "name": "IMAGES", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
     // POST /mcp, the connector for ChatGPT and Claude (src/mcp.js): 60
     // requests a minute per client address.
-    { "name": "MCP", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } }
+    { "name": "MCP", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } },
+    // Timeline saves (PUT /<name>, CalDAV PUT/DELETE): 120 a minute per
+    // client address; the studio's debounced autosave stays far below.
+    { "name": "SAVES", "namespace_id": "1004", "simple": { "limit": 120, "period": 60 } }
   ],
   // A routine's live run, shared by every page open on its link: one
   // Durable Object per name (src/runroom.js), SQLite-backed so it runs on
   // the free plan, WebSockets through the hibernation API.
-  "durable_objects": { "bindings": [{ "name": "RUNS", "class_name": "RunRoom" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RunRoom"] }],
+  // Budget (src/budget.js): one instance keeps the global daily cost caps
+  // (docs/limits.md), asked before anything that writes, stores, fetches
+  // or calls AI.
+  "durable_objects": {
+    "bindings": [
+      { "name": "RUNS", "class_name": "RunRoom" },
+      { "name": "BUDGET", "class_name": "Budget" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RunRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["Budget"] }
+  ],
+  // Mondays 05:23 UTC: recount the bytes of stored pictures (img_total),
+  // since expired ones drop out of KV on their own.
+  "triggers": { "crons": ["23 5 * * 1"] },
   "vars": {
     // Where the studio lives (this Worker's own assets); the viewer page
     // loads the renderer from here and the Edit hand-off points back at it.

@@ -21,6 +21,7 @@
 //   POST /img             image bytes (png/jpeg/webp/gif, <= 1.5 MB), or JSON
 //                         { data } / { url } from an agent -> { url } (images.js)
 //   GET  /img/<hash>.<ext> the image, cached for a year (content-addressed)
+//   GET  /limits          today's usage against the daily cost caps (budget.js)
 //   GET  /<id>            a snapshot from the earlier content-addressed
 //                         scheme, opened in the studio read-only-until-edited
 //
@@ -34,10 +35,12 @@ import TimelineText from "../../timeline-renderer.js";
 import { isDavRequest, handleDav } from "./caldav.js";
 import { RunRoom } from "./runroom.js";
 import { handleMcp } from "./mcp.js";
-import { IMAGE_PATH, ImageError, MAX_IMAGE, MAX_IMAGE_JSON, imageSource, sniffImage, storeImage } from "./images.js";
+import { IMAGE_PATH, ImageError, MAX_IMAGE, MAX_IMAGE_JSON, imageSource, refreshImages, sniffImage, storeImage } from "./images.js";
+import { Budget, BudgetError, budget as costs } from "./budget.js";
+import { TooLarge, readBytes, readText } from "./http.js";
 
-// The Durable Object class must be exported by the Worker's main module.
-export { RunRoom, sniffImage };
+// The Durable Object classes must be exported by the Worker's main module.
+export { RunRoom, Budget, sniffImage };
 
 const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
@@ -46,7 +49,10 @@ const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics|\.mobileconfig|\.
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
 const RUN = /^\/run\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.json)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
-const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version", "llms", "img", "run", "places", "mcp"]);
+const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version", "llms", "img", "run", "places", "mcp", "limits"]);
+// Request bodies (docs/limits.md §3).
+const MAX_COMMAND_BODY = 100 * 1024;
+const MAX_DAV_BODY = 100 * 1024;
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, PUT, GET, OPTIONS",
@@ -57,100 +63,119 @@ const CORS = {
 };
 
 export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    // CalDAV lives under /dav (see caldav.js); calendar apps also probe
-    // /.well-known/caldav and send PROPFIND/OPTIONS at the root.
-    if (isDavRequest(url, request.method) && !(request.method === "OPTIONS" && request.headers.get("origin")))
-      return handleDav(request, env, { loadDoc, saveDoc });
-    if (request.method === "OPTIONS")
-      // The extra header lets a studio on a LAN/tailnet host talk to a local
-      // `wrangler dev` under Chrome's private-network-access rules.
-      return new Response(null, { status: 204, headers: { ...CORS, "access-control-allow-private-network": "true" } });
-    if (url.pathname === "/") return studio(env, url, null);
-    if (url.pathname === "/version" && request.method === "GET")
-      return json({ version: await appVersion(env, url) }, 200, { "cache-control": "no-store" });
-    if (url.pathname === "/resolve" && request.method === "GET") return resolveMap(url.searchParams.get("u") || "");
-    if (url.pathname === "/command" && request.method === "POST") return command(request, env);
-    if (url.pathname === "/mcp") return handleMcp(request, env, { loadDoc, saveDoc, encode, summary, reserved: RESERVED, cors: CORS });
-    if (url.pathname === "/places" && request.method === "POST") return places(request, env);
-    if (url.pathname === "/img" && request.method === "POST") return putImage(request, env, url);
-    const run = url.pathname.match(RUN);
-    if (run) return runRoom(request, env, run[1], !!run[2]);
-    const image = url.pathname.match(IMAGE_PATH);
-    if (image && (request.method === "GET" || request.method === "HEAD")) return getImage(env, image[1], request.method);
-    const named = url.pathname.match(NAME);
-    if (named && request.method === "PUT") return put(request, env, named[1]);
-    if (request.method !== "GET" && request.method !== "HEAD") return new Response("Not found", { status: 404, headers: CORS });
-    if (named) {
-      const doc = await loadDoc(env, named[1]);
-      // Each timeline's own manifest, so "Add to Home Screen" opens this
-      // timeline rather than the studio's front page with the example.
-      if (named[2] === ".webmanifest") {
-        if (!doc) return new Response("No such timeline", { status: 404, headers: CORS });
-        const label = (doc.text && title(doc.text)) || named[1];
-        return new Response(
-          JSON.stringify({
-            name: label,
-            short_name: label.length > 14 ? label.slice(0, 14).trim() : label,
-            description: "A timeline in Timeline Studio",
-            id: "/" + named[1],
-            start_url: "/" + named[1],
-            scope: "/",
-            display: "standalone",
-            background_color: "#101418",
-            theme_color: "#101418",
-            icons: [
-              { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
-              { src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
-              { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
-            ],
-          }),
-          { headers: { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "no-store", ...CORS } },
-        );
-      }
-      if (named[2] === ".txt") {
-        if (!doc) return new Response("No such timeline", { status: 404, headers: CORS });
-        // Pollers send the version they have; unchanged costs no body.
-        if (request.headers.get("if-none-match") === `"${doc.version}"`)
-          return new Response(null, { status: 304, headers: { etag: `"${doc.version}"`, "cache-control": "no-store", ...CORS } });
-        return plain(doc.text, "no-store", doc.version);
-      }
-      if (named[2] === ".ics")
-        return doc
-          ? new Response(calendar(doc.text, named[1], `${url.origin}/${named[1]}`), {
-              headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "no-store", ...CORS },
-            })
-          : new Response("No such timeline", { status: 404, headers: CORS });
-      if (named[2] === ".mobileconfig")
-        return doc
-          ? new Response(await profile(doc, named[1], url.hostname), {
-              headers: {
-                "content-type": "application/x-apple-aspen-config; charset=utf-8",
-                "content-disposition": `attachment; filename="${named[1]}.mobileconfig"`,
-                "cache-control": "no-store",
-                ...CORS,
-              },
-            })
-          : new Response("No such timeline", { status: 404, headers: CORS });
-      // A name nobody has used yet opens as a fresh timeline bound to it.
-      return studio(env, url, { name: named[1], text: doc ? doc.text : null, version: doc ? doc.version : "" });
+  async fetch(request, env, ctx) {
+    try {
+      return await route(request, env, ctx);
+    } catch (error) {
+      // A cost guard said no (docs/limits.md): 429 with the kind and when
+      // it resets, or 503 when the counter is down for a kind that fails
+      // closed. Nothing was written, fetched or sent to the model.
+      if (error instanceof BudgetError) return json(error.body(), error.status);
+      if (error instanceof TooLarge) return json({ error: error.message }, 413);
+      throw error;
     }
-    const snapshot = url.pathname.match(ID);
-    if (snapshot) {
-      const payload = await env.LINKS.get(snapshot[1]);
-      if (!payload) return page(notFound(env), 404);
-      const text = await decode(payload);
-      if (snapshot[2] === ".txt") return plain(text, "public, max-age=86400");
-      if (snapshot[2] === ".ics")
-        return new Response(calendar(text, snapshot[1], `${url.origin}/${snapshot[1]}`), {
-          headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "public, max-age=86400", ...CORS },
-        });
-      return studio(env, url, { name: "", text, snapshot: true });
-    }
-    return page(notFound(env), 404);
+  },
+  // Weekly: recount the bytes of stored pictures (expired ones are gone
+  // from the list), so img_total comes back down as pictures expire.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(recountImages(env));
   },
 };
+
+async function route(request, env, ctx) {
+  const url = new URL(request.url);
+  // CalDAV lives under /dav (see caldav.js); calendar apps also probe
+  // /.well-known/caldav and send PROPFIND/OPTIONS at the root.
+  if (isDavRequest(url, request.method) && !(request.method === "OPTIONS" && request.headers.get("origin")))
+    return handleDav(request, env, { loadDoc, saveDoc, readText: (r) => readText(r, MAX_DAV_BODY), savesLimit: (r) => savesLimit(r, env) });
+  if (request.method === "OPTIONS")
+    // The extra header lets a studio on a LAN/tailnet host talk to a local
+    // `wrangler dev` under Chrome's private-network-access rules.
+    return new Response(null, { status: 204, headers: { ...CORS, "access-control-allow-private-network": "true" } });
+  if (url.pathname === "/") return studio(env, url, null);
+  if (url.pathname === "/version" && request.method === "GET")
+    return json({ version: await appVersion(env, url) }, 200, { "cache-control": "no-store" });
+  if (url.pathname === "/resolve" && request.method === "GET") return resolveMap(url.searchParams.get("u") || "", env);
+  if (url.pathname === "/command" && request.method === "POST") return command(request, env);
+  if (url.pathname === "/mcp") return handleMcp(request, env, { loadDoc, saveDoc, encode, summary, reserved: RESERVED, cors: CORS, take: costs(env).take });
+  if (url.pathname === "/limits" && request.method === "GET") return limits(request, env, ctx);
+  if (url.pathname === "/places" && request.method === "POST") return places(request, env);
+  if (url.pathname === "/img" && request.method === "POST") return putImage(request, env, url);
+  const run = url.pathname.match(RUN);
+  if (run) return runRoom(request, env, run[1], !!run[2]);
+  const image = url.pathname.match(IMAGE_PATH);
+  if (image && (request.method === "GET" || request.method === "HEAD")) return getImage(env, image[1], request.method);
+  const named = url.pathname.match(NAME);
+  if (named && request.method === "PUT") return put(request, env, named[1]);
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Not found", { status: 404, headers: CORS });
+  if (named) {
+    const doc = await loadDoc(env, named[1]);
+    // Each timeline's own manifest, so "Add to Home Screen" opens this
+    // timeline rather than the studio's front page with the example.
+    if (named[2] === ".webmanifest") {
+      if (!doc) return new Response("No such timeline", { status: 404, headers: CORS });
+      const label = (doc.text && title(doc.text)) || named[1];
+      return new Response(
+        JSON.stringify({
+          name: label,
+          short_name: label.length > 14 ? label.slice(0, 14).trim() : label,
+          description: "A timeline in Timeline Studio",
+          id: "/" + named[1],
+          start_url: "/" + named[1],
+          scope: "/",
+          display: "standalone",
+          background_color: "#101418",
+          theme_color: "#101418",
+          icons: [
+            { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+            { src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+            { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+          ],
+        }),
+        { headers: { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "no-store", ...CORS } },
+      );
+    }
+    if (named[2] === ".txt") {
+      if (!doc) return new Response("No such timeline", { status: 404, headers: CORS });
+      // Pollers send the version they have; unchanged costs no body.
+      if (request.headers.get("if-none-match") === `"${doc.version}"`)
+        return new Response(null, { status: 304, headers: { etag: `"${doc.version}"`, "cache-control": "no-store", ...CORS } });
+      return plain(doc.text, "no-store", doc.version);
+    }
+    if (named[2] === ".ics")
+      return doc
+        ? new Response(calendar(doc.text, named[1], `${url.origin}/${named[1]}`), {
+            headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "no-store", ...CORS },
+          })
+        : new Response("No such timeline", { status: 404, headers: CORS });
+    if (named[2] === ".mobileconfig")
+      return doc
+        ? new Response(await profile(doc, named[1], url.hostname), {
+            headers: {
+              "content-type": "application/x-apple-aspen-config; charset=utf-8",
+              "content-disposition": `attachment; filename="${named[1]}.mobileconfig"`,
+              "cache-control": "no-store",
+              ...CORS,
+            },
+          })
+        : new Response("No such timeline", { status: 404, headers: CORS });
+    // A name nobody has used yet opens as a fresh timeline bound to it.
+    return studio(env, url, { name: named[1], text: doc ? doc.text : null, version: doc ? doc.version : "" });
+  }
+  const snapshot = url.pathname.match(ID);
+  if (snapshot) {
+    const payload = await env.LINKS.get(snapshot[1]);
+    if (!payload) return page(notFound(env), 404);
+    const text = await decode(payload);
+    if (snapshot[2] === ".txt") return plain(text, "public, max-age=86400");
+    if (snapshot[2] === ".ics")
+      return new Response(calendar(text, snapshot[1], `${url.origin}/${snapshot[1]}`), {
+        headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "public, max-age=86400", ...CORS },
+      });
+    return studio(env, url, { name: "", text, snapshot: true });
+  }
+  return page(notFound(env), 404);
+}
 
 function plain(text, cache = "no-store", version = "") {
   return new Response(text, {
@@ -188,12 +213,17 @@ async function putImage(request, env, url) {
       if (!success) throw new HttpError(429, "Too many uploads, try again in a minute");
     }
     const isJson = /^application\/json\b/i.test(request.headers.get("content-type") || "");
-    const cap = isJson ? MAX_IMAGE_JSON : MAX_IMAGE;
-    if (Number(request.headers.get("content-length")) > cap) throw new HttpError(413, "Image too large (1.5 MB at most)");
+    const cap = isJson ? MAX_IMAGE_JSON : MAX_IMAGE,
+      { take } = costs(env);
     let bytes;
+    try {
+      bytes = await readBytes(request, cap);
+    } catch (error) {
+      if (error instanceof TooLarge) throw new HttpError(413, "Image too large (1.5 MB at most)");
+      throw error;
+    }
     if (isJson) {
-      const raw = await request.text();
-      if (raw.length > cap) throw new HttpError(413, "Image too large (1.5 MB at most)");
+      const raw = new TextDecoder().decode(bytes);
       let body;
       try {
         body = JSON.parse(raw);
@@ -201,15 +231,13 @@ async function putImage(request, env, url) {
         throw new HttpError(400, 'Expected JSON { "data": "<base64 or data: URI>" } or { "url": "https://…" }');
       }
       if (!body || typeof body !== "object") throw new HttpError(400, 'Expected JSON { "data": … } or { "url": … }');
-      bytes = await imageSource({ data: body.data, url: body.url, hosts: HOSTS, env });
-    } else {
-      bytes = new Uint8Array(await request.arrayBuffer());
-      if (bytes.length > MAX_IMAGE) throw new HttpError(413, "Image too large (1.5 MB at most)");
+      bytes = await imageSource({ data: body.data, url: body.url, hosts: HOSTS, env, take });
     }
-    const stored = await storeImage(env, bytes, url);
+    const stored = await storeImage(env, bytes, url, { take });
     return json({ url: stored.url, type: stored.type, size: stored.size }, 201);
   } catch (error) {
     if (error instanceof HttpError || error instanceof ImageError) return json({ error: error.message }, error.status);
+    if (error instanceof BudgetError) throw error;
     return json({ error: error.message || String(error) }, 400);
   }
 }
@@ -225,6 +253,38 @@ async function getImage(env, hash, method) {
       ...CORS,
     },
   });
+}
+
+// ---- cost guards (docs/limits.md) -------------------------------------------
+
+// Today's usage against the caps, for a glance (the help panel links it).
+// Public and read-only; cached a minute at the edge so a flood of views
+// never reaches the Budget.
+async function limits(request, env, ctx) {
+  if (!env.BUDGET) return json({ error: "Usage is not counted here" }, 404);
+  const cache = typeof caches !== "undefined" ? caches.default : null,
+    key = new Request(new URL("/limits", request.url).href);
+  if (cache) {
+    const hit = await cache.match(key);
+    if (hit) return hit;
+  }
+  const response = json(await costs(env).usage(), 200, { "cache-control": "public, max-age=60" });
+  if (cache && ctx) ctx.waitUntil(cache.put(key, response.clone()));
+  return response;
+}
+
+// The bytes of every stored picture, from the list's metadata (an expired
+// picture is no longer listed), written back as img_total.
+async function recountImages(env) {
+  if (!env.BUDGET || !env.LINKS.list) return;
+  let bytes = 0,
+    cursor;
+  do {
+    const page = await env.LINKS.list({ prefix: "img:", cursor });
+    for (const key of page.keys) bytes += Number(key.metadata && key.metadata.size) || 0;
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  await costs(env).setTotal(bytes);
 }
 
 // ---- documents ------------------------------------------------------------
@@ -244,12 +304,37 @@ async function loadDoc(env, name) {
   return { name, text, payload, version: await version(payload) };
 }
 
-async function saveDoc(env, name, text) {
+// Every doc write goes through here (the studio's PUT, MCP, CalDAV), so
+// the daily budget is taken here: doc_save always, doc_new for a name that
+// had no timeline (`fresh`). Both fail open. The pictures it references
+// are kept from expiring.
+async function saveDoc(env, name, text, { fresh = false } = {}) {
   const clean = text.replace(LINK_LINES, "").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   TimelineText.parse(clean); // never store something the studio cannot open
   const payload = await encode(clean);
+  const { take } = costs(env);
+  if (fresh) await take("doc_new", 1);
+  await take("doc_save", 1);
   await env.LINKS.put("doc:" + name, payload, { metadata: { title: title(clean), updated: new Date().toISOString() } });
+  await refreshImages(env, clean, HOSTS).catch(() => {});
   return { name, text: clean, payload, version: await version(payload) };
+}
+
+// Whether a name has a timeline yet (without reading it).
+async function docExists(env, name) {
+  const stream = await env.LINKS.get("doc:" + name, "stream");
+  if (!stream) return false;
+  await stream.cancel();
+  return true;
+}
+
+// Doc writes per address (docs/limits.md §2): the studio's debounced
+// autosave stays far below 120 a minute.
+async function savesLimit(request, env) {
+  if (!env.SAVES) return true;
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+  const { success } = await env.SAVES.limit({ key: ip });
+  return success;
 }
 
 async function version(payload) {
@@ -260,9 +345,14 @@ async function version(payload) {
 async function put(request, env, name) {
   try {
     if (RESERVED.has(name)) throw new HttpError(409, `“${name}” is reserved`);
-    if (Number(request.headers.get("content-length")) > MAX_PAYLOAD) throw new HttpError(413, "Timeline too large");
-    const payload = (await request.text()).trim();
-    if (payload.length > MAX_PAYLOAD) throw new HttpError(413, "Timeline too large");
+    if (!(await savesLimit(request, env))) throw new HttpError(429, "Too many saves, try again in a minute");
+    let payload;
+    try {
+      payload = (await readText(request, MAX_PAYLOAD)).trim();
+    } catch (error) {
+      if (error instanceof TooLarge) throw new HttpError(413, "Timeline too large");
+      throw error;
+    }
     if (!PAYLOAD.test(payload)) throw new HttpError(400, "Expected a timeline link payload (z=… or t=…)");
     let text;
     try {
@@ -271,14 +361,16 @@ async function put(request, env, name) {
       throw new HttpError(400, "Payload does not decode");
     }
     if (!text.trim()) throw new HttpError(400, "Empty timeline");
-    if (request.headers.get("if-none-match") === "*" && (await loadDoc(env, name)))
+    const exists = await docExists(env, name);
+    if (request.headers.get("if-none-match") === "*" && (exists || (await loadDoc(env, name))))
       throw new HttpError(412, `“${name}” is already taken`);
-    const doc = await saveDoc(env, name, text);
+    const doc = await saveDoc(env, name, text, { fresh: !exists });
     const link = new URL("/" + name, request.url);
     if (link.hostname !== "localhost") link.protocol = "https:";
     return json({ url: link.href, version: doc.version }, 200, { etag: `"${doc.version}"` });
   } catch (error) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
+    if (error instanceof BudgetError) throw error;
     return json({ error: error.message || String(error) }, 400);
   }
 }
@@ -395,7 +487,7 @@ async function studio(env, url, doc) {
 // the browser cannot follow cross-origin, so the studio asks here. Only map
 // hosts are fetched, and only the final URL's place text is returned.
 const MAP_HOSTS = /^(?:maps\.app\.goo\.gl|goo\.gl|g\.co|maps\.google\.[a-z.]+|(?:www\.)?google\.[a-z.]+|maps\.apple\.com)$/i;
-async function resolveMap(raw) {
+async function resolveMap(raw, env) {
   let target;
   try {
     target = new URL(raw);
@@ -403,6 +495,7 @@ async function resolveMap(raw) {
     return json({ error: "Not a URL" }, 400);
   }
   if (!/^https?:$/.test(target.protocol) || !MAP_HOSTS.test(target.hostname)) return json({ error: "Not a map link" }, 400);
+  await costs(env).take("fetch", 1);
   let final;
   try {
     const response = await fetch(target.href, {
@@ -627,8 +720,9 @@ async function places(request, env) {
     if (Number(request.headers.get("content-length")) > MAX_COMMAND_TEXT + 1024) throw new HttpError(413, "Timeline too large");
     let body;
     try {
-      body = await request.json();
+      body = JSON.parse(await readText(request, MAX_COMMAND_BODY));
     } catch (error) {
+      if (error instanceof TooLarge) throw new HttpError(413, "Timeline too large");
       throw new HttpError(400, "Expected JSON { text }");
     }
     const text = String(body.text || "").replace(/\r\n?/g, "\n");
@@ -655,6 +749,7 @@ async function places(request, env) {
       }
     }
     if (!candidates.size) return finish(trimmed, [], "");
+    await costs(env).take("ai", 1);
     const answer = await env.AI.run(COMMAND_MODEL, {
       messages: [
         { role: "system", content: PLACES_PROMPT },
@@ -707,6 +802,7 @@ async function places(request, env) {
     return finish(accepted, added, "");
   } catch (error) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
+    if (error instanceof BudgetError) throw error;
     return json({ error: "Places failed: " + (error.message || error) }, 502);
   }
 }
@@ -722,8 +818,9 @@ async function command(request, env) {
       throw new HttpError(413, "Timeline too large");
     let body;
     try {
-      body = await request.json();
+      body = JSON.parse(await readText(request, MAX_COMMAND_BODY));
     } catch (error) {
+      if (error instanceof TooLarge) throw new HttpError(413, "Timeline too large");
       throw new HttpError(400, "Expected JSON { text, command }");
     }
     const instruction = String(body.command || "").trim();
@@ -745,7 +842,9 @@ async function command(request, env) {
         content: `Today is ${today || "unknown"}.\n\nTimeline:\n\`\`\`timeline\n${trimmed || "(empty: write a new timeline)"}\n\`\`\`\n\nInstruction: ${instruction}`,
       },
     ];
-    const budget = Math.min(8000, Math.ceil(trimmed.length / 2) + (trimmed ? 4000 : 6000));
+    const budget = Math.min(8000, Math.ceil(trimmed.length / 2) + (trimmed ? 4000 : 6000)),
+      { take } = costs(env);
+    await take("ai", 1);
     const answer = await env.AI.run(COMMAND_MODEL, {
       messages,
       temperature: 0.2,
@@ -772,7 +871,18 @@ async function command(request, env) {
       }
     };
     const firstProblem = problem(block[1]);
-    if (firstProblem) {
+    // The repair try is a second AI call: it counts too, and is skipped
+    // (the first answer goes back) once the day's allowance is used up.
+    const canRetry = firstProblem
+      ? await take("ai", 1).then(
+          () => true,
+          (error) => {
+            if (error instanceof BudgetError) return false;
+            throw error;
+          },
+        )
+      : false;
+    if (canRetry) {
       const retry = await env.AI.run(COMMAND_MODEL, {
         messages: [...messages, { role: "assistant", content: raw.trim() }, { role: "user", content: `That timeline does not open: ${firstProblem} Fix it and answer again with the complete timeline in one fenced block.` }],
         temperature: 0.2,
@@ -791,6 +901,7 @@ async function command(request, env) {
     return json({ text: edited + "\n", note: note.trim().slice(0, 300), model: COMMAND_MODEL });
   } catch (error) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
+    if (error instanceof BudgetError) throw error;
     return json({ error: "Command failed: " + (error.message || error) }, 502);
   }
 }

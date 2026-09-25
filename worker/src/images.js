@@ -12,8 +12,13 @@
 //
 // Every costly step takes a `take(kind, amount)` hook when one is given
 // (the daily budget, docs/limits.md): "fetch" before a URL is fetched,
-// "img_count" and "img_bytes" before a new picture is written. A picture
-// already stored costs nothing. The hook throws to refuse.
+// "img_count", "img_bytes" and "img_total" before a new picture is
+// written. A picture already stored costs nothing. The hook throws to
+// refuse.
+//
+// A picture expires 180 days after it was stored or last refreshed; a
+// saved timeline that references it refreshes it (at most once a month),
+// so only pictures nobody uses any more go away.
 
 export const MAX_IMAGE = 1.5 * 1024 * 1024;
 // A JSON body carrying one picture as base64 (4/3 of the bytes) plus room
@@ -22,6 +27,9 @@ export const MAX_IMAGE_JSON = Math.ceil((MAX_IMAGE * 4) / 3) + 64 * 1024;
 export const IMAGE_PATH = /^\/img\/([0-9a-f]{16})\.(?:png|jpg|webp|gif)$/;
 export const IMAGE_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 const FETCH_TIMEOUT = 10_000;
+const DAY = 24 * 60 * 60 * 1000;
+export const IMAGE_TTL_DAYS = 180;
+const REFRESH_AFTER = 30 * DAY;
 const MAX_REDIRECTS = 3;
 const TOO_LARGE = "Image too large (1.5 MB at most). Send at most about 1280 px on the long edge, as JPEG or WebP.";
 const NOT_AN_IMAGE = "Only PNG, JPEG, WebP or GIF images";
@@ -151,8 +159,9 @@ export async function storeImage(env, bytes, origin, { take } = {}) {
     if (take) {
       await take("img_count", 1);
       await take("img_bytes", bytes.length);
+      await take("img_total", bytes.length);
     }
-    await env.LINKS.put(key, bytes, { metadata: { type, size: bytes.length } });
+    await env.LINKS.put(key, bytes, { expirationTtl: IMAGE_TTL_DAYS * DAY / 1000, metadata: { type, size: bytes.length, refreshed: Date.now() } });
   }
   const link = new URL(`/img/${hash}.${IMAGE_TYPES[type]}`, origin);
   if (link.hostname !== "localhost" && link.hostname !== "127.0.0.1") link.protocol = "https:";
@@ -182,4 +191,31 @@ function ownImage(value, hosts) {
   } catch (error) {
     return "";
   }
+}
+
+// Keep the pictures a saved text references from expiring: each one's
+// expiry is pushed out again when its last refresh is over 30 days old.
+// The check reads only the metadata (the body stream is dropped), and this
+// isolate remembers what it checked for a day, so an autosave every few
+// seconds costs nothing more.
+const checked = new Map();
+export async function refreshImages(env, text, hosts, now = Date.now()) {
+  const hashes = new Set();
+  for (const match of String(text).matchAll(/https:\/\/([a-z0-9.-]+)\/img\/([0-9a-f]{16})\.(?:png|jpg|webp|gif)\b/g))
+    if (!hosts || hosts.has(match[1])) hashes.add(match[2]);
+  let refreshed = 0;
+  for (const hash of hashes) {
+    if (now - (checked.get(hash) || 0) < DAY) continue;
+    checked.set(hash, now);
+    const key = "img:" + hash,
+      { value, metadata } = await env.LINKS.getWithMetadata(key, "stream");
+    if (!value) continue;
+    await value.cancel();
+    if (metadata && now - (Number(metadata.refreshed) || 0) < REFRESH_AFTER) continue;
+    const bytes = await env.LINKS.get(key, "arrayBuffer");
+    if (!bytes) continue;
+    await env.LINKS.put(key, bytes, { expirationTtl: IMAGE_TTL_DAYS * DAY / 1000, metadata: { ...(metadata || {}), refreshed: now } });
+    refreshed++;
+  }
+  return refreshed;
 }

@@ -18,6 +18,10 @@
 // nothing of the steps: the pages have the text, and the page that sees the
 // end first sends "stop".
 //
+// Caps (docs/limits.md §2): at most 20 open sockets per room (the next one
+// is closed with a reason, and that page polls .json instead), and at most
+// 10 ops a second per room (more are dropped, or 429 for a POST).
+//
 // A plain class rather than an extension of cloudflare:workers'
 // DurableObject, so node can import it for the tests; the hibernation API
 // (ctx.acceptWebSocket, webSocketMessage) works the same either way.
@@ -27,6 +31,8 @@ import TimelineText from "../../timeline-renderer.js";
 const core = TimelineText.runCore();
 const OPS = new Set(["start", "pause", "resume", "seek", "stop"]);
 const DAY_MS = 24 * 60 * 60 * 1000;
+export const MAX_SOCKETS = 20;
+export const MAX_OPS_PER_SECOND = 10;
 
 // A well-formed op, or null.
 export function checkOp(op) {
@@ -43,6 +49,7 @@ export class RunRoom {
     this.env = env;
     this.clock = clock;
     this.state = undefined;
+    this.recent = []; // when the last ops were applied, for the per-second cap
   }
 
   async load() {
@@ -58,7 +65,12 @@ export class RunRoom {
     if ((request.headers.get("upgrade") || "").toLowerCase() === "websocket") {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
+      const full = this.ctx.getWebSockets().length >= MAX_SOCKETS;
       this.ctx.acceptWebSocket(server);
+      if (full) {
+        server.close(1013, "Room full: poll /run/<name>.json");
+        return new Response(null, { status: 101, webSocket: client });
+      }
       await this.load();
       server.send(this.message());
       return new Response(null, { status: 101, webSocket: client });
@@ -71,7 +83,7 @@ export class RunRoom {
         op = null;
       }
       if (!op) return reply({ error: "Expected { op: start | pause | resume | seek | stop }" }, 400);
-      await this.apply(op);
+      if (!(await this.apply(op))) return reply({ error: "Too many run changes, try again in a second" }, 429);
       return reply(JSON.parse(this.message()));
     }
     await this.load();
@@ -108,7 +120,12 @@ export class RunRoom {
   }
 
   // Apply an op with the server's clock, keep the result, tell every page.
+  // False when this second's ops are used up (the op is dropped).
   async apply(op) {
+    const now = this.clock();
+    this.recent = this.recent.filter((t) => now - t < 1000);
+    if (this.recent.length >= MAX_OPS_PER_SECOND) return false;
+    this.recent.push(now);
     await this.load();
     this.state = core.apply(this.state, op, this.clock());
     if (this.state) await this.ctx.storage.put("state", this.state);
@@ -120,6 +137,7 @@ export class RunRoom {
       } catch (error) {
         /* a socket on its way out */
       }
+    return true;
   }
 }
 

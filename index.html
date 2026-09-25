@@ -1209,6 +1209,10 @@ title: 5-min Core
             together in one HTML file.
           </p>
           <p class="local-note" id="app-version">App version: checking…</p>
+          <p class="local-note" id="usage-link" hidden>
+            <a href="/limits" target="_blank" rel="noopener">Usage today</a>:
+            the daily limits that keep this free to run.
+          </p>
       </section>
     </aside>
     <main class="workspace">
@@ -4220,6 +4224,21 @@ title: 5-min Core
       const toastBox = document.querySelector("#toast");
       // An optional action ({ label, run }) adds a button, e.g. Undo, and
       // keeps the toast up long enough to reach it.
+      // A server refusal in words. A cost guard (docs/limits.md) says which
+      // daily limit was reached and when it resets; the text stays in the
+      // editor and the #z= address, so nothing is lost.
+      function serverError(body, fallback) {
+        if (body && body.error === "daily-limit") {
+          if (body.kind === "img_total") return "The storage limit for photos is reached";
+          const what =
+            { ai: "AI edits", img_count: "photo uploads", img_bytes: "photo uploads", doc_new: "new timelines", doc_save: "saving", mcp: "connector calls", fetch: "looking up links" }[body.kind] ||
+            "this";
+          const at = body.resets_at ? new Date(body.resets_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+          return `The daily limit for ${what} is reached${at ? `, it resets at ${at}` : ""}`;
+        }
+        if (body && body.error === "budget-unavailable") return "The usage counter is not answering; try again in a minute";
+        return (body && body.error) || fallback;
+      }
       function toast(message, kind = "", action) {
         toastBox.textContent = message;
         if (action) {
@@ -4481,8 +4500,8 @@ title: 5-min Core
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
           if (creating) docName = "";
-          setSync("error", `⚠ Not saved: ${body.error || response.status}. Tap to retry`, retry);
-          toast(`Not saved: ${body.error || response.status}`, "error");
+          setSync("error", `⚠ Not saved: ${serverError(body, response.status)}. Tap to retry`, retry);
+          toast(`Not saved: ${serverError(body, response.status)}`, "error");
           return "";
         }
         savedText = text;
@@ -4712,6 +4731,12 @@ title: 5-min Core
         appChecked = 0,
         appTold = "";
       function showAppVersion() {
+        // The usage page is on the server this studio saves to.
+        const usage = document.querySelector("#usage-link");
+        if (usage && HOSTED) {
+          usage.hidden = false;
+          usage.querySelector("a").href = SHORT_LINK_API + "limits";
+        }
         const box = document.querySelector("#app-version");
         if (!box) return;
         if (!HOSTED || !APP_VERSION) {
@@ -5018,7 +5043,7 @@ title: 5-min Core
         if (!HOSTED) return dataUrl(blob);
         const response = await fetch(SHORT_LINK_API + "img", { method: "POST", headers: { "content-type": blob.type }, body: blob });
         const body = await response.json().catch(() => ({}));
-        if (!response.ok || !body.url) throw new Error(body.error || `upload failed (${response.status})`);
+        if (!response.ok || !body.url) throw new Error(serverError(body, `upload failed (${response.status})`));
         return body.url;
       }
       const { assetName, withAsset, withPicture, withCover, reusable } = TimelineText.pictureEdits;
@@ -5127,6 +5152,7 @@ title: 5-min Core
         copy.querySelector("#pane").setAttribute("inert", "");
         copy.querySelector("#edit-toggle").setAttribute("aria-expanded", "false");
         copy.querySelector("#help").setAttribute("hidden", "");
+        copy.querySelector("#usage-link")?.setAttribute("hidden", "");
         copy.querySelector("#help-toggle").setAttribute("aria-pressed", "false");
         copy.querySelector("#pane").classList.remove("help");
         // The run chrome is rebuilt on load from the saved copy's own state;
@@ -5312,7 +5338,7 @@ title: 5-min Core
             body: await TimelineText.encodeLink(editor.value),
           });
           const body = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(body.error || `${response.status}`);
+          if (!response.ok) throw new Error(serverError(body, `${response.status}`));
           toast(`Now at ${body.url.replace(/^https?:\/\//, "")}`);
           location.href = body.url;
         } catch (error) {
@@ -5403,7 +5429,7 @@ title: 5-min Core
             }),
           });
           const body = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(body.error || `Command failed (${response.status})`);
+          if (!response.ok) throw new Error(serverError(body, `Command failed (${response.status})`));
           const next = String(body.text || "");
           TimelineText.parse(next);
           if (next.trim() === before.trim()) {
