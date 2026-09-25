@@ -30,22 +30,29 @@
           if (!text)
             throw new Error("There is no timeline in this link. Make one in the studio and choose “Open link”.");
           const html = TimelineText.render(TimelineText.parse(text));
+          // A #text= link decodes at once, while this page is still being
+          // parsed, and document.open() is ignored then: the timeline would
+          // be appended under "Loading timeline…" instead of replacing it.
+          if (document.readyState === "loading")
+            await new Promise((done) => document.addEventListener("DOMContentLoaded", done, { once: true }));
           document.open();
           document.write(html);
           document.close();
           // document.open() dropped every window listener; a second link tapped
           // into this tab must still trigger a fresh load.
           window.addEventListener("hashchange", () => location.reload());
-          // Tapping a card opens the studio on that line, like the live preview.
+          // Tapping a card opens the studio on that line, like the live preview;
+          // not during a run (a stray tap mid-workout), and not on a card's
+          // "3 notes" hint, which folds its notes.
           document.head.insertAdjacentHTML("beforeend", "<style>[data-line]{cursor:pointer}</style>");
           document.addEventListener("click", (event) => {
-            if (event.target.closest("a")) return;
+            if (event.target.closest("a, summary") || document.body.classList.contains("run-active")) return;
             const target = event.target.closest("[data-line]");
             if (target) location.href = `./?line=${target.dataset.line}${location.hash}`;
           });
           document.body.insertAdjacentHTML(
             "beforeend",
-            `<a href="./${location.hash}" style="position:fixed;right:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:28;padding:9px 14px;border-radius:999px;background:#143e55;color:#fff;font:600 13px system-ui,-apple-system,sans-serif;text-decoration:none;opacity:.85;box-shadow:0 4px 18px #0004">✎ Edit</a>`,
+            `<a class="edit-pill" href="./${location.hash}" style="position:fixed;right:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:28;padding:9px 14px;border-radius:999px;background:#143e55;color:#fff;font:600 13px system-ui,-apple-system,sans-serif;text-decoration:none;opacity:.85;box-shadow:0 4px 18px #0004">✎ Edit</a>`,
           );
         } catch (error) {
           message.innerHTML = "";

@@ -43,6 +43,35 @@ day: Sunday, Jun 7
 
 Each day gets its own heading, hour scale and notes on the same sheet. Without a `date:` line the masthead shows the span (`Jun 6 – Jun 8, 2026`) when the day labels parse as dates. Notes written before any `day:` line are global and appear after the last day. Today mode works per day: days already over fade entirely, today's day carries the marker, later days are untouched.
 
+## Step notes
+
+Lines starting with `- ` directly under an event line (or under another such line) are that event's notes, for form cues or a step's ingredients. The card shows a small "2 notes ▾" that unfolds them (a `<details>`, so it works in exports without scripts too); tapping elsewhere on the card still opens the editor. A `- ` line anywhere else is an error. The calendar feed and CalDAV append them to the event's description, and a calendar-app move carries them along with their event.
+
+## Routines: workouts and recipes
+
+`clock: relative` turns a timeline into something you run from a Start button. It has to be written: `0:30` could be either clock, so it is never guessed.
+
+```text
+title: 10-min Core
+clock: relative
+theme: future
+
+day: Warm-up
++1m   | Jog in place | Easy pace, loose shoulders | | sand
+
+day: Main set
++45s  | Plank | Elbows under shoulders | | sky
+- Hips level with shoulders
++15s  | Rest | | | sage
++45s  | Side plank L | Stack your feet | | sky
+```
+
+Times are elapsed time with second resolution: `5:30` is M:SS, `1:02:03` is H:MM:SS. A duration alone (`+45s`, `+2m`, `+1m30s`, `+1h30`) is a sequential step: it starts where the event line above it in the source ends (at its start if it has no end), or at 0:00. Spans (`0:00 - 15:00`, `15:00 +25m`) work as on a day and may overlap, for parallel recipe tracks; see `example.recipe.txt`. `day:` lines are section labels on one continuous clock; `date:`, `range:`, `timezone:` and `city:` are ignored, and places are not filled in for you (an explicit `@ place` still shows). The sheet is scaled so the routine has a readable height, with ticks every 1, 5, 10 or 30 minutes by its length and a small start-time label on the axis for each step; a step's badge shows its length (`45s`, `2m`, `1:30`), a moment shows its time (`5:30`), and the masthead shows `10 min · 17 steps`. Samples: `example.routine.txt`, `example.recipe.txt`.
+
+**Run mode.** Every relative timeline gets a **▶ Start** button (bottom centre, in the studio, `view.html` and exported HTML). A running routine pins a focus panel over the sheet: the step, its description and notes, a countdown bar with the seconds left, and the next step; parallel steps are all listed, the countdown following the one that ends first. The sheet below reuses today mode (past steps fade, the live step is outlined and its notes open, a marker sits at the current second, the page scrolls to each new step). The bar at the bottom has Back (to the step's start, or the previous step within 3 s of it), Pause/Resume, Skip, the sound (beeps → beeps and voice → off, remembered per device) and Stop, which asks first. Cues: short beeps at 3, 2, 1 s before a step ends, a long beep, a vibration and (with voice) the step's name and length at each new step. The screen is kept awake while running. At the end it shows `Done · 10:14` (the time it really took, pauses included) and Restart.
+
+The run is a small state object (`startedAt`, `pausedAt`, `pausedMs`, `shiftMs`) from which elapsed time is always computed, never counted up, so a locked phone, a background tab or a reload resumes at the right second. It is kept in localStorage under a hash of the routine's steps, so the same routine resumes across the studio, `view.html` and a saved copy on the same device; an edit during a run takes effect at once and keeps the elapsed time. In the studio the run lives in the studio page rather than the preview frame, because audio, the wake lock and vibration need the top-level page, and its focus panel and controls sit outside the preview's scroller so they stay put on iOS; the frame is sent the run's position for the sheet. Sound needs a tap on iOS: Start, Resume and the sound button unlock it, and a run resumed by a reload shows **Tap for sound**. Verify on an iPhone: beeps and voice after the tap, the screen staying on, vibration (not on iOS Safari).
+
 ## Themes
 
 `theme:` picks a look: `travel` (default, with the header art), `minimal`, `retro`, `future`, or `code`. The studio's toolbar picker writes that line for you. `travel` and `minimal` follow the system appearance: the same text is a light sheet by day and a dark one when the phone switches to dark mode at night (screen only; printing stays light, and a shared image takes whichever the device shows at the time). `future` and `code` are always dark, `retro` keeps its sun. See them side by side at `themes.html`; each card there has a "Use in studio" link. Themes are plain CSS blocks in `timeline-renderer.js` (`themes`), layered over the base sheet, so adding one is adding a string.
@@ -127,6 +156,8 @@ const source = fs.readFileSync("example.timeline.txt", "utf8");
 fs.writeFileSync("trip.html", render(source));
 ```
 
+**The studio carries its own copy.** `index.html` inlines `timeline-renderer.js` so a saved studio file is self-contained. Edit `timeline-renderer.js`, then run `node scripts/inline-renderer.js` to rewrite the inline copy. `node --test tests/*.test.*` (no dependencies) checks that the two copies are identical and parse and render every sample the same, pins the day-timeline markup against snapshots in `tests/fixtures/`, and covers the relative clock, step notes, the run arithmetic and CalDAV's handling of step notes.
+
 This is a small custom format inspired by Mermaid's text-to-diagram workflow; it is not Mermaid syntax. The exported HTML contains the event content and uses JavaScript to position cards and connectors; the export also bakes the computed layout into inline styles so viewers that run no scripts (iOS Files/QuickLook, mail previews) still show every card. It is responsive, with no fixed one-page print guarantee for long timelines.
 
 ## On a phone
@@ -141,6 +172,6 @@ Open `index.html` directly, or run `python3 -m http.server 8766` from this direc
 
 ## Publishing
 
-The app is served at https://tl.gaup.uk/ by the Worker in `worker/` (`src/index.js`: documents in the `LINKS` KV namespace under `doc:<name>`, the studio page with the document inlined, `/resolve`, `/command`, feeds; `src/caldav.js`: CalDAV). `wrangler.jsonc` declares this folder as its static assets (`.assetsignore` keeps `worker/`, the README and the publish script out), so `cd worker && npx -y wrangler@latest deploy` ships the studio, the viewer, the renderer and the API together. Link names that would shadow a file or an endpoint (`view`, `themes`, `command`, …) are refused. The separate public repo `gparuthi/timeline-studio` (GitHub Pages from `main`) is a source mirror: `publish.sh` copies the web files and `worker/` over and pushes. It carries the same sample data as here, so keep the sample free of anything private.
+The app is served at https://tl.gaup.uk/ by the Worker in `worker/` (`src/index.js`: documents in the `LINKS` KV namespace under `doc:<name>`, the studio page with the document inlined, `/resolve`, `/command`, feeds; `src/caldav.js`: CalDAV). `wrangler.jsonc` declares this folder as its static assets (`.assetsignore` keeps `worker/`, `tests/`, `scripts/`, the README and the publish script out), so `cd worker && npx -y wrangler@latest deploy` ships the studio, the viewer, the renderer and the API together. `wrangler dev` run from `worker/` reloads in a loop, because its own `worker/.wrangler/tmp` writes land inside the assets folder it watches; run it from a copy of `wrangler.jsonc` in another folder with `main` and `assets.directory` rewritten to absolute paths, and its state stays out of the watched tree. Link names that would shadow a file or an endpoint (`view`, `themes`, `command`, …) are refused. The separate public repo `gparuthi/timeline-studio` (GitHub Pages from `main`) is a source mirror: `publish.sh` copies the web files and `worker/` over and pushes. It carries the same sample data as here, so keep the sample free of anything private.
 
 The editor uses the playground dark theme; rendered timelines retain their paper palette. Save studio downloads a new editable `.studio.html` copy.

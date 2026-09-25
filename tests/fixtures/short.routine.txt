@@ -1,0 +1,9 @@
+title: Quick test
+clock: relative
+theme: future
+
++5s | One | First step | | sky
++5s | Two | Second step | | sand
+- A note on two
+- Another note
++5s | Three | Last step | | sage

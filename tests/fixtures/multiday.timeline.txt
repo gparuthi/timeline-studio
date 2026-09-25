@@ -1,0 +1,21 @@
+title: Long Weekend
+theme: travel
+timezone: PT
+city: Los Angeles
+
+day: Saturday, Jun 6, 2026
+range: 08:00 - 16:00
+08:30 | Leave for the airport | Bags by the door | plane | sky
+10:00 - 11:30 | Flight lands | Terminal 4
+13:00 +1h30 | Lunch | Tacos @ Grand Central Market | | sand
+16:00 | Hotel check-in | Downtown | home | sage
+note: Check-in starts at 4 PM
+
+day: Sunday, Jun 7, 2026
+timezone: ET
+09:00 | Breakfast | Waterfront cafe | coffee | sand
+11:00 | Manhattan Beach | @
+3:00 - 5:00 PM | Beach | Bring towels https://maps.app.goo.gl/abc123 | palm | sage
+
+note: Sunscreen
+footer: See you there

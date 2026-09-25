@@ -512,7 +512,8 @@ async function places(request, env) {
     const model = TimelineText.parse(trimmed);
     const lines = trimmed.split("\n");
     const finish = (edited, added, note) => json({ text: edited + (assets.length ? "\n\n" + assets.join("\n") : "") + "\n", added, note, model: COMMAND_MODEL });
-    if (model.places === "off") return finish(trimmed, [], "");
+    // Steps in a routine (clock: relative) are not venues.
+    if (model.places === "off" || model.clock === "relative") return finish(trimmed, [], "");
     // The day's events, numbered by source line, with the candidates marked.
     const candidates = new Map();
     const listing = [];
@@ -702,7 +703,8 @@ function calendar(text, name, link) {
         `DTEND:${utcStamp(day.iso, end, zone)}`,
         `SUMMARY:${esc(event.title)}`,
       );
-      if (event.detail) lines.push(`DESCRIPTION:${esc(event.detail)}`);
+      const description = TimelineText.describe(event);
+      if (description) lines.push(`DESCRIPTION:${esc(description)}`);
       if (place) lines.push(`LOCATION:${esc(place)}`);
       lines.push(`URL:${url || link}`, "END:VEVENT");
     });
@@ -760,6 +762,15 @@ function title(text) {
 }
 
 function summary(text) {
+  // A routine (clock: relative) has no date: its length and step count.
+  if (/^[ \t]*clock:[ \t]*relative[ \t]*$/m.test(String(text))) {
+    try {
+      const model = TimelineText.parse(String(text));
+      return `${TimelineText.runCore().total(model.total)} · ${model.events.length} step${model.events.length === 1 ? "" : "s"}`;
+    } catch (error) {
+      /* fall through to the line count */
+    }
+  }
   const lines = String(text).split(/\r?\n/);
   const date = lines.find((line) => /^\s*date\s*:/.test(line));
   const events = lines.filter((line) => /^\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM)?\s*(?:[-–+][^|]*)?\|/i.test(line)).length;

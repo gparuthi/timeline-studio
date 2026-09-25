@@ -155,8 +155,31 @@
         cursor: pointer;
       }
       .workspace {
+        position: relative;
+        display: flex;
+        flex-direction: column;
         height: 100vh;
         height: 100dvh;
+      }
+      /* Run mode (relative timelines): the focus panel above the preview and
+         the control bar below it, both outside the scrolling panel so they
+         stay put on iOS, where the preview frame is as tall as its content. */
+      .workspace > .run-top,
+      .workspace > .run-bottom {
+        flex: none;
+      }
+      .workspace > .run-start-slot {
+        position: absolute;
+        left: 50%;
+        bottom: max(14px, env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        z-index: 27;
+      }
+      body.run-active .edit-toggle {
+        bottom: calc(var(--run-bar-h, 0px) + 10px);
+      }
+      body.run-active .toast {
+        bottom: calc(var(--run-bar-h, 0px) + 58px);
       }
       /* The editor lives in a slide-in pane; the timeline is the page. */
       .pane {
@@ -532,6 +555,8 @@
       .preview-panel {
         min-width: 0;
         height: 100%;
+        flex: 1 1 0;
+        min-height: 0;
         display: flex;
         flex-direction: column;
         overflow: auto;
@@ -911,6 +936,7 @@ footer: See you there ♡</pre>
       </section>
     </aside>
     <main class="workspace">
+      <div id="run-top" class="run-top" hidden></div>
       <section class="preview-panel" aria-label="Live preview">
         <iframe
           id="preview"
@@ -918,6 +944,8 @@ footer: See you there ♡</pre>
           sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
         ></iframe>
       </section>
+      <div id="run-bottom" class="run-bottom" hidden></div>
+      <div id="run-start" class="run-start-slot" hidden></div>
     </main>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <input
@@ -1040,6 +1068,55 @@ footer: See you there ♡</pre>
           }
           return { start: time(v, line), end: undefined };
         }
+        // Relative clock ("clock: relative"): times are seconds from Start.
+        // "5:30" is M:SS, "1:02:03" is H:MM:SS.
+        function relOffset(value, line) {
+          const m = value.trim().match(/^(\d{1,3}):(\d{2})(?::(\d{2}))?$/);
+          if (!m) throw new Error(`Line ${line}: use an elapsed time like 5:30 (M:SS) or 1:02:03 (H:MM:SS).`);
+          const [a, b, c] = [Number(m[1]), Number(m[2]), m[3] === undefined ? null : Number(m[3])];
+          if (b > 59 || (c !== null && c > 59)) throw new Error(`Line ${line}: invalid elapsed time “${value.trim()}”.`);
+          return c === null ? a * 60 + b : a * 3600 + b * 60 + c;
+        }
+        // "45s", "2m", "1m30s", "1m30", "1h30", "90m", "1.5h" -> seconds. A number
+        // without a unit continues the one before it (h -> minutes, m -> seconds).
+        function relDuration(text, line) {
+          const units = { h: 3600, hr: 3600, hrs: 3600, hour: 3600, hours: 3600, m: 60, min: 60, mins: 60, minute: 60, minutes: 60, s: 1, sec: 1, secs: 1, second: 1, seconds: 1 },
+            t = text.trim().toLowerCase(),
+            parts = [...t.matchAll(/(\d+(?:\.\d+)?)\s*([a-z]*)/g)],
+            fail = () => {
+              throw new Error(`Line ${line}: use a duration like +45s, +2m or +1m30s.`);
+            };
+          if (!parts.length || parts.map((p) => p[0]).join("").replace(/\s+/g, "") !== t.replace(/\s+/g, "")) fail();
+          let total = 0,
+            last = Infinity;
+          for (const [, number, unit] of parts) {
+            const size = unit ? units[unit] : last === 3600 ? 60 : last === 60 ? 1 : 0;
+            if (!size || size >= last) fail();
+            total += Number(number) * size;
+            last = size;
+          }
+          total = Math.round(total);
+          if (!(total > 0)) fail();
+          return total;
+        }
+        // "+45s" (a step after the previous line), "0:15 +25m", "0:00 - 15:00",
+        // or "5:30" (a moment). `prev` is where a "+duration" step starts.
+        function relSpan(value, line, prev) {
+          const v = value.trim();
+          let m = v.match(/^([^+]*?)\s*\+\s*(.+)$/);
+          if (m) {
+            const start = m[1] ? relOffset(m[1], line) : prev;
+            return { start, end: start + relDuration(m[2], line) };
+          }
+          m = v.match(/^(.+?)\s*[-–]\s*(.+)$/);
+          if (m) {
+            const start = relOffset(m[1], line),
+              end = relOffset(m[2], line);
+            if (end <= start) throw new Error(`Line ${line}: the end time must be after the start.`);
+            return { start, end };
+          }
+          return { start: relOffset(v, line), end: undefined };
+        }
         function spanLabel2(start, end) {
           const a = label(start),
             b = label(end);
@@ -1122,6 +1199,11 @@ footer: See you there ♡</pre>
           }
           return { place, url: url || (place ? mapSearchUrl(place, (day && day.city) || model.city) : "") };
         }
+        // An event's description for calendars (feed, CalDAV): the description,
+        // then its step notes as "- " lines.
+        function describe(event) {
+          return [event.detail, ...(event.notes || []).map((note) => "- " + note)].filter(Boolean).join("\n");
+        }
         function guessIcon(title, detail) {
           for (const text of [title, detail]) {
             const words = String(text || "").toLowerCase();
@@ -1142,12 +1224,23 @@ footer: See you there ♡</pre>
             linkKey: "",
             timezone: "",
             city: "",
+            clock: "day",
             notes: [],
             events: [],
             days: [],
             assets: Object.create(null),
           };
           const singleton = new Set();
+          // "clock: relative" changes how every event line reads, wherever it is
+          // written, so it is found before the lines are parsed. It is never
+          // guessed from the times: "0:30" could be either clock.
+          const relative = /^[ \t]*clock:[ \t]*relative[ \t]*$/m.test(text);
+          // Where the next "+duration" step starts: the end of the event line
+          // before it in the source (its start if it has no end), or 0:00.
+          let prevEnd = 0;
+          // The event that "- " step notes on the following lines belong to;
+          // any other line (blank lines and comments included) ends the run.
+          let noteOwner = null;
           // Days: a `day:` line starts a new one. Anything before the first `day:`
           // lands in an implicit day, so a one-day timeline needs no `day:` at all.
           const newDay = (label, line) => {
@@ -1159,9 +1252,22 @@ footer: See you there ♡</pre>
           text.split(/\r?\n/).forEach((raw, index) => {
             const line = index + 1,
               s = raw.trim();
+            // Step notes: "- Hips level" lines right under an event line.
+            const stepNote = s.match(/^-(?:\s+(.*))?$/);
+            if (stepNote) {
+              if (!noteOwner) throw new Error(`Line ${line}: step notes go right under a step (a “- ” line directly below an event line).`);
+              if (stepNote[1]) noteOwner.notes.push(stepNote[1].trim());
+              return;
+            }
+            noteOwner = null;
             if (!s || s.startsWith("#")) return;
-            // Event lines begin with a clock time followed by a pipe.
-            if (/^\d{1,2}(?::\d{2})?\s*(?:AM|PM)?\s*(?:[-–]\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM)?|\+[^|]*)?\s*\|/i.test(s)) {
+            // Event lines begin with a clock time followed by a pipe. On a
+            // relative clock that is an elapsed time or a "+duration".
+            if (
+              relative
+                ? /^(?:\+[^|]*|\d{1,3}:\d{2}(?::\d{2})?\s*(?:[-–]\s*\d{1,3}:\d{2}(?::\d{2})?|\+[^|]*)?)\s*\|/.test(s)
+                : /^\d{1,2}(?::\d{2})?\s*(?:AM|PM)?\s*(?:[-–]\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM)?|\+[^|]*)?\s*\|/i.test(s)
+            ) {
               const fields = s
                 .split(/(?<!\\)\|/)
                 .map((v) => v.trim().replace(/\\\|/g, "|"));
@@ -1174,17 +1280,26 @@ footer: See you there ♡</pre>
               if (!title) throw new Error(`Line ${line}: add an event title.`);
               if (!["sky", "sand", "sage"].includes(color || "sky"))
                 throw new Error(`Line ${line}: color must be sky, sand, or sage.`);
-              const { start, end } = timeSpan(clock, line);
-              currentDay(line).events.push({
-                minutes: start,
-                end,
+              let event;
+              if (relative) {
+                const { start, end } = relSpan(clock, line, prevEnd);
+                prevEnd = end ?? start;
+                event = { minutes: start / 60, end: end === undefined ? undefined : end / 60, at: start, until: end };
+              } else {
+                const { start, end } = timeSpan(clock, line);
+                event = { minutes: start, end };
+              }
+              Object.assign(event, {
                 title,
                 detail,
                 place,
                 icon: icon || guessIcon(title, written),
                 color: color || "sky",
                 line,
+                notes: [],
               });
+              currentDay(line).events.push(event);
+              noteOwner = event;
               return;
             }
             const asset = s.match(/^asset\s+([a-zA-Z][\w-]*):\s*(.+)$/);
@@ -1197,7 +1312,9 @@ footer: See you there ♡</pre>
             const directive = s.match(/^([a-z-]+):\s*(.*)$/);
             if (!directive)
               throw new Error(
-                `Line ${line}: expected “time | title” or a directive such as “title: My Trip”.`,
+                relative && s.includes("|")
+                  ? `Line ${line}: on a relative clock a step starts with an elapsed time like 5:30 or a duration like +45s.`
+                  : `Line ${line}: expected “time | title” or a directive such as “title: My Trip”.`,
               );
             const [, key, value] = directive;
             if (
@@ -1215,9 +1332,21 @@ footer: See you there ♡</pre>
                 "timezone",
                 "city",
                 "places",
+                "clock",
               ].includes(key)
             )
               throw new Error(`Line ${line}: unknown setting “${key}”.`);
+            if (key === "clock") {
+              if (!["relative", "day"].includes(value))
+                throw new Error(`Line ${line}: use “clock: relative” for a routine timed from Start.`);
+              if (singleton.has(key)) throw new Error(`Line ${line}: duplicate setting “${key}”.`);
+              singleton.add(key);
+              model.clock = value;
+              return;
+            }
+            // A relative clock has no dates, zones or hours of the day: these
+            // settings mean nothing there and are ignored without an error.
+            if (relative && ["timezone", "city", "range"].includes(key)) return;
             if (key === "link") {
               // "link: la-week" or "link: la-week <key>"; the key is the proof of
               // ownership the link server hands out on the first publish.
@@ -1292,25 +1421,39 @@ footer: See you there ♡</pre>
             model[key] = value;
           });
           if (!model.days.length)
-            throw new Error("Add an event, for example: 08:30 | Leave home");
+            throw new Error(relative ? "Add a step, for example: +45s | Plank" : "Add an event, for example: 08:30 | Leave home");
           if (!themeNames.includes(model.theme))
             throw new Error(`Theme must be one of ${themeNames.join(", ")}.`);
-          for (const day of model.days) {
+          model.days.forEach((day, index) => {
             if (!day.events.length)
               throw new Error(
                 day.label
-                  ? `Line ${day.line}: “day: ${day.label}” has no events. Add one, for example: 09:00 | Breakfast`
-                  : "Add an event, for example: 08:30 | Leave home",
+                  ? `Line ${day.line}: “day: ${day.label}” has no ${relative ? "steps. Add one, for example: +45s | Plank" : "events. Add one, for example: 09:00 | Breakfast"}`
+                  : relative
+                    ? "Add a step, for example: +45s | Plank"
+                    : "Add an event, for example: 08:30 | Leave home",
               );
-            day.events.sort((a, b) => a.minutes - b.minutes);
-            day.start = day.range?.[0] ?? Math.floor(day.events[0].minutes / 60) * 60;
-            day.end =
-              day.range?.[1] ??
-              Math.ceil(Math.max(...day.events.map((e) => e.end ?? e.minutes)) / 60) * 60;
-            if (day.end === day.start) day.end = day.start + 60;
-            day.iso = isoDate(day.label || model.date);
+            if (relative) {
+              // Sections share one clock that starts at 0:00 and never resets: the
+              // first section's axis starts at 0:00, a later one at its first step.
+              day.events.sort((a, b) => a.at - b.at);
+              day.startSec = index ? day.events[0].at : 0;
+              day.endSec = Math.max(...day.events.map((e) => e.until ?? e.at));
+              if (day.endSec === day.startSec) day.endSec = day.startSec + 60;
+              day.start = day.startSec / 60;
+              day.end = day.endSec / 60;
+              day.iso = "";
+            } else {
+              day.events.sort((a, b) => a.minutes - b.minutes);
+              day.start = day.range?.[0] ?? Math.floor(day.events[0].minutes / 60) * 60;
+              day.end =
+                day.range?.[1] ??
+                Math.ceil(Math.max(...day.events.map((e) => e.end ?? e.minutes)) / 60) * 60;
+              if (day.end === day.start) day.end = day.start + 60;
+              day.iso = isoDate(day.label || model.date);
+            }
             for (const event of day.events) {
-              if (event.minutes < day.start || (event.end ?? event.minutes) > day.end)
+              if (!relative && (event.minutes < day.start || (event.end ?? event.minutes) > day.end))
                 throw new Error(
                   `Line ${event.line}: event is outside the timeline range.`,
                 );
@@ -1324,10 +1467,12 @@ footer: See you there ♡</pre>
                   `Line ${event.line}: unknown icon “${event.icon}”. Use a built-in icon or @asset-name.`,
                 );
             }
-          }
+          });
           model.events = model.days.flatMap((day) => day.events);
           model.start = model.days[0].start;
           model.end = model.days[0].end;
+          // A routine's length in seconds: the end of its last step.
+          if (relative) model.total = Math.max(...model.events.map((e) => e.until ?? e.at));
           if (
             model["header-art"] &&
             !Object.hasOwn(model.assets, model["header-art"].replace(/^@/, ""))
@@ -1418,6 +1563,23 @@ footer: See you there ♡</pre>
             const axisLine = timeline.querySelector(".axis");
             axisLine.style.top = topPad + "px";
             axisLine.style.height = axisHeight + "px";
+            // A relative clock labels where each step starts; a label that would
+            // sit on a tick or on the label above it is hidden.
+            const labels = [...timeline.querySelectorAll(".offset")];
+            if (labels.length) {
+              const taken = hours.map((hour) => {
+                const box = hour.querySelector(".hour-label").getBoundingClientRect();
+                return [parseFloat(hour.style.top) - box.height / 2, parseFloat(hour.style.top) + box.height / 2];
+              });
+              labels.forEach((offset) => {
+                const y = topPad + (Number(offset.dataset.minute) / 60) * unit,
+                  half = offset.getBoundingClientRect().height / 2 + 2,
+                  covered = taken.some(([a, b]) => y + half > a && y - half < b);
+                offset.style.top = y + "px";
+                offset.style.visibility = covered ? "hidden" : "";
+                if (!covered) taken.push([y - half, y + half]);
+              });
+            }
             let spans = "",
               connectors = "";
             const barWidth = axis < 100 ? 8 : 12;
@@ -1449,22 +1611,36 @@ footer: See you there ♡</pre>
           // day, past cards fade, a slowly blinking marker sits at the current
           // minute, and the next card says how long until it. Later days and
           // undated timelines are left alone.
+          // A relative clock (a routine) has no date: it is live while a run is,
+          // with "now" at the run's elapsed time (window.__timelineRun, set by the
+          // run runtime or, in the studio's preview, sent in by the studio).
           function tickOne(timeline, ymd, minutesNow) {
             const cards = [...timeline.querySelectorAll(".event")],
+              relative = timeline.dataset.clock === "relative",
+              run = relative && window.__timelineRun && window.__timelineRun.active ? window.__timelineRun : null,
               date = timeline.dataset.date,
-              isToday = !!date && date === ymd,
-              isOver = !!date && date < ymd,
-              now = minutesNow - Number(timeline.dataset.start),
+              isToday = relative ? !!run : !!date && date === ymd,
+              isOver = !relative && !!date && date < ymd,
+              now = (relative ? (run ? run.elapsed / 60 : 0) : minutesNow) - Number(timeline.dataset.start),
               duration = Number(timeline.dataset.duration),
               connectors = timeline.querySelector(".connectors");
             let next = -1;
             cards.forEach((card, i) => {
               const minute = Number(card.dataset.minute),
                 finish = card.dataset.end ? Number(card.dataset.end) : minute,
-                past = isOver || (isToday && finish < now),
+                past = isOver || (isToday && (relative && card.dataset.end ? finish <= now : finish < now)),
                 live = isToday && !past && minute <= now && card.dataset.end && now < finish;
               card.classList.toggle("past", past);
               card.classList.toggle("live", !!live);
+              // The live step's notes open while it runs and fold when it ends.
+              const notes = relative && card.querySelector(".step-notes");
+              if (notes && live && !notes.open && !notes.dataset.auto) {
+                notes.dataset.auto = "1";
+                notes.open = true;
+              } else if (notes && !live && notes.dataset.auto) {
+                delete notes.dataset.auto;
+                notes.open = false;
+              }
               connectors
                 .querySelectorAll(`[data-i="${i}"]`)
                 .forEach((shape) => shape.classList.toggle("past", past));
@@ -1474,12 +1650,15 @@ footer: See you there ♡</pre>
               let until = card.querySelector(".until");
               if (i !== next) return until?.remove();
               const wait = Number(card.dataset.minute) - now,
+                secs = Math.ceil(wait * 60 - 1e-6),
                 text =
                   wait <= 0
                     ? "now"
-                    : wait < 60
-                      ? `in ${wait} min`
-                      : `in ${Math.floor(wait / 60)} h${wait % 60 ? ` ${wait % 60} min` : ""}`;
+                    : relative
+                      ? `in ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`
+                      : wait < 60
+                        ? `in ${wait} min`
+                        : `in ${Math.floor(wait / 60)} h${wait % 60 ? ` ${wait % 60} min` : ""}`;
               if (!until) {
                 until = document.createElement("span");
                 until.className = "until";
@@ -1551,9 +1730,32 @@ footer: See you there ♡</pre>
             collapsePast(ymd);
             timelines.forEach((timeline) => tickOne(timeline, ymd, minutesNow));
             settle(ymd, minutesNow);
+            followRun();
           }
+          // During a run, keep the current step in view: scroll once each time
+          // it changes, so the page can still be scrolled by hand in between.
+          // `inset` is the height of a panel pinned over the top of the page.
+          function followRun() {
+            const run = window.__timelineRun;
+            if (!run || !run.active) {
+              window.__timelineRunShown = null;
+              return;
+            }
+            const cards = [...document.querySelectorAll(".timeline.relative .event")],
+              card = cards.find((c) => c.classList.contains("live")) || cards.find((c) => !c.classList.contains("past"));
+            if (!card || window.__timelineRunShown === card.dataset.line) return;
+            window.__timelineRunShown = card.dataset.line;
+            const y = card.getBoundingClientRect().top + window.scrollY - (run.inset || 0) - 16;
+            window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+          }
+          window.__timelineSetRun = (run) => {
+            window.__timelineRun = run;
+            tick();
+          };
           const timer = setInterval(tick, 30000);
           document.addEventListener("visibilitychange", tick);
+          // Opening or folding a card's notes changes its height.
+          document.addEventListener("toggle", layout, true);
 
           const observer = new ResizeObserver((entries) => {
             const width = entries[0].contentRect.width;
@@ -1576,6 +1778,7 @@ footer: See you there ♡</pre>
             observer.disconnect();
             clearInterval(timer);
             document.removeEventListener("visibilitychange", tick);
+            document.removeEventListener("toggle", layout, true);
             window.removeEventListener("beforeprint", layout);
             window.removeEventListener("afterprint", layout);
             window.removeEventListener("load", layout);
@@ -1584,8 +1787,9 @@ footer: See you there ♡</pre>
         function previewRuntime(layout) {
           // In the studio's live preview a tap on a card (or a day heading) asks
           // the editor to open on that source line.
+          // A card's "3 notes" hint folds and unfolds its notes instead.
           document.addEventListener("click", (event) => {
-            if (event.target.closest("a")) return;
+            if (event.target.closest("a, summary")) return;
             const target = event.target.closest("[data-line]");
             if (!target) return;
             event.preventDefault();
@@ -1594,12 +1798,25 @@ footer: See you there ♡</pre>
           // iOS Safari sizes an iframe to its content, so scrolling inside the
           // preview does nothing there; tell the studio where "now" is instead.
           const scrollTo = window.scrollTo.bind(window);
-          window.scrollTo = (x, y) => {
-            scrollTo(x, y);
-            parent.postMessage({ type: "timeline:scroll", y: typeof y === "number" ? y : 0 }, "*");
+          // A smooth scroll here is made instant: the studio may replace this
+          // page's content (and restore its position) before one would finish.
+          // The studio's own panel still scrolls smoothly.
+          window.scrollTo = (...args) => {
+            const [x, y] = args,
+              options = x && typeof x === "object" ? x : null;
+            scrollTo(...(options ? [{ ...options, behavior: "instant" }] : args));
+            parent.postMessage(
+              { type: "timeline:scroll", y: options ? Number(options.top) || 0 : typeof y === "number" ? y : 0, smooth: !!options && options.behavior === "smooth" },
+              "*",
+            );
           };
           let cleanup = layout();
           window.addEventListener("message", (event) => {
+            // A run in the studio: where it is, so the sheet can follow.
+            if (event.source === parent && event.data?.type === "timeline:run") {
+              window.__timelineSetRun?.(event.data.run || null);
+              return;
+            }
             if (
               event.source !== parent ||
               event.data?.type !== "timeline:update" ||
@@ -1612,16 +1829,26 @@ footer: See you there ♡</pre>
             );
             // Only the fixed layout function runs; incoming rendered scripts stay inert.
             next.querySelectorAll("script").forEach((script) => script.remove());
-            const top = window.scrollY;
+            // A different document (the studio opened a link): start it afresh,
+            // at the top or, for a dated day, at "now", instead of keeping the
+            // previous one's scroll position.
+            const fresh = event.data.doc !== undefined && event.data.doc !== window.__timelineDoc;
+            window.__timelineDoc = event.data.doc;
+            const top = fresh ? 0 : window.scrollY;
             cleanup();
             document.head.replaceChildren(...next.head.childNodes);
             document.body.replaceChildren(...next.body.childNodes);
+            if (fresh) {
+              window.__timelineScrolled = false;
+              window.__timelineRunShown = null;
+              window.scrollTo(0, 0);
+            }
             cleanup = layout();
             // Restore this frame's own position only. On iOS the frame is sized
             // to its content and never scrolls, so top is 0 there; relaying it
             // through the patched scrollTo would send the studio's panel back to
             // the top after every keystroke.
-            scrollTo(0, top);
+            if (!fresh) scrollTo(0, top);
           });
         }
         // A time zone as written in the text -> IANA name, or "" if unknown.
@@ -1676,11 +1903,643 @@ footer: See you there ♡</pre>
             last = isos.at(-1);
           return first === last ? fmt(first, true) : `${fmt(first, first.slice(0, 4) !== last.slice(0, 4))} – ${fmt(last, true)}`;
         }
+        // Run mode's arithmetic: labels, the run state and where a run is. Self-
+        // contained (no outside references) because exported pages carry it as
+        // source; the studio and the tests call it directly.
+        //
+        // Run state: { runId, startedAt, pausedAt (ms or null), pausedMs, shiftMs,
+        // updatedAt }. Elapsed is always computed from it, never accumulated, so a
+        // suspended tab, a locked phone or a reload resumes at the right second.
+        // Skip and Back change only shiftMs; ops are the ones a server applies
+        // ({op: "start"|"pause"|"resume"|"seek"|"stop", shiftMs}).
+        function runCore() {
+          const pad = (n) => String(n).padStart(2, "0");
+          // 45 -> "0:45", 330 -> "5:30", 3723 -> "1:02:03"
+          const clock = (sec) => {
+            const t = Math.max(0, Math.round(sec)),
+              h = Math.floor(t / 3600),
+              m = Math.floor(t / 60) % 60,
+              s = t % 60;
+            return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+          };
+          // A step's length on its badge: "45s", "2m", "1:30", "1h", "1h 30m".
+          const length = (sec) => {
+            if (sec < 60) return `${sec}s`;
+            if (sec % 60) return clock(sec);
+            const min = sec / 60;
+            return min < 60 ? `${min}m` : `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ""}`;
+          };
+          // A routine's length in the masthead: "45 sec", "20 min", "1 h 5 min".
+          const total = (sec) => {
+            if (sec < 60) return `${sec} sec`;
+            const min = Math.floor(sec / 60),
+              rest = sec % 60;
+            if (min >= 60) return `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""}`;
+            return `${min} min${rest ? ` ${rest} sec` : ""}`;
+          };
+          // Said aloud: "45 seconds", "2 minutes", "1 minute 30 seconds".
+          const spoken = (sec) => {
+            const unit = (n, word) => (n ? `${n} ${word}${n === 1 ? "" : "s"}` : "");
+            const h = Math.floor(sec / 3600),
+              m = Math.floor(sec / 60) % 60,
+              s = sec % 60;
+            return [unit(h, "hour"), unit(m, "minute"), unit(s, "second")].filter(Boolean).join(" ");
+          };
+          const elapsedMs = (state, now) =>
+            state ? (state.pausedAt ?? now) - state.startedAt - state.pausedMs + state.shiftMs : 0;
+          function apply(state, op, now) {
+            const at = { updatedAt: now };
+            if (op.op === "start")
+              return { runId: Math.random().toString(36).slice(2, 10), startedAt: now, pausedAt: null, pausedMs: 0, shiftMs: 0, ...at };
+            if (!state || op.op === "stop") return null;
+            if (op.op === "pause") return state.pausedAt == null ? { ...state, pausedAt: now, ...at } : state;
+            if (op.op === "resume")
+              return state.pausedAt == null ? state : { ...state, pausedMs: state.pausedMs + now - state.pausedAt, pausedAt: null, ...at };
+            if (op.op === "seek") return { ...state, shiftMs: Math.round(Number(op.shiftMs) || 0), ...at };
+            return state;
+          }
+          // The end of the last step, in seconds.
+          const end = (steps) => Math.max(0, ...steps.map((s) => s.until ?? s.at));
+          // Where a run is at `e` seconds (steps sorted by start): the steps active
+          // now, most recently started first (of two started together, the one
+          // ending sooner); the one ending soonest (the countdown
+          // follows it); the next step to start; and whether it is over.
+          function position(steps, e) {
+            const active = steps
+                .filter((s) => s.until !== undefined && s.at <= e && e < s.until)
+                .sort((a, b) => b.at - a.at || a.until - b.until || a.line - b.line),
+              ending = active.reduce((a, b) => (!a || b.until < a.until ? b : a), null),
+              next = steps.find((s) => s.at > e) || null,
+              started = steps.filter((s) => s.at <= e),
+              current = active[0] || started.at(-1) || null;
+            return { active, ending, next, current, index: current ? steps.indexOf(current) : -1, done: e >= end(steps) };
+          }
+          // Skip jumps to the next step's start (or the end); Back to the start of
+          // the current step, or the previous step's within 3 s of that start.
+          function skipTo(steps, e) {
+            const next = steps.find((s) => s.at > e);
+            return next ? next.at : end(steps);
+          }
+          function backTo(steps, e) {
+            const { current } = position(steps, e);
+            if (!current) return 0;
+            if (e - current.at >= 3) return current.at;
+            const before = steps.filter((s) => s.at < current.at).at(-1);
+            return before ? before.at : 0;
+          }
+          // The seek op that puts the run at `target` seconds right now.
+          const seek = (state, now, target) => ({
+            op: "seek",
+            shiftMs: state.shiftMs + Math.round(target * 1000 - elapsedMs(state, now)),
+          });
+          return { clock, length, total, spoken, elapsedMs, apply, end, position, skipTo, backTo, seek };
+        }
+        // What the run runtime needs from a model: its steps in time order and a
+        // key for the run state in localStorage (a hash of the steps, so the same
+        // routine resumes in the studio, view.html and an exported copy alike).
+        function runConfig(model) {
+          const steps = model.events
+            .slice()
+            .sort((a, b) => a.at - b.at || a.line - b.line)
+            .map((e) => ({ line: e.line, at: e.at, until: e.until, title: e.title, detail: e.detail, place: e.place, notes: e.notes }));
+          const source = JSON.stringify([model.title, steps.map((s) => [s.at, s.until ?? null, s.title])]);
+          let h1 = 0xdeadbeef,
+            h2 = 0x41c6ce57;
+          for (let i = 0; i < source.length; i++) {
+            const c = source.charCodeAt(i);
+            h1 = Math.imul(h1 ^ c, 2654435761);
+            h2 = Math.imul(h2 ^ c, 1597334677);
+          }
+          h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+          h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+          const key = (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
+          return { title: model.title, steps, key };
+        }
+        // Run mode: the Start button, the focus panel pinned over the sheet, the
+        // control bar and the cues. Self-contained like the layout runtime:
+        // exported pages carry it as source and call it with their steps; the
+        // studio calls it with `host` (its own containers, and a `sheet` callback
+        // that forwards the run's position into the preview frame).
+        //
+        // The run state lives behind a transport: { now(), get(), send(op),
+        // subscribe(fn), rekey(from, to) }. The local one keeps it in
+        // localStorage under the routine's key, so a reload resumes; a synced
+        // transport can take its place (config.transport) without touching the
+        // UI.
+        function runRuntime(config, makeCore) {
+          if (window.__timelineStatic) return null;
+          const core = makeCore(),
+            doc = document,
+            host = config.host || null;
+          let steps = config.steps,
+            title = config.title,
+            key = config.key,
+            alive = true;
+          const css = `.run-top[hidden],.run-bottom[hidden],.run-start-slot[hidden],.run-panel [hidden],.run-bar [hidden]{display:none!important}
+      .run-doc.run-top{position:sticky;top:0;z-index:26}
+      .run-doc.run-bottom{position:fixed;left:0;right:0;bottom:0;z-index:27}
+      .run-doc.run-start-slot{position:fixed;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:27}
+      body.run-doc-host.run-active{padding-bottom:var(--run-bar-h,0px)}
+      body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
+      .run-panel,.run-bar,.run-start{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#e9f1f5;-webkit-font-smoothing:antialiased;letter-spacing:0;text-align:left}
+      .run-panel{max-height:62vh;max-height:62dvh;overflow:auto;padding:calc(10px + env(safe-area-inset-top)) 16px 12px;background:#11181df5;border-bottom:1px solid #2b3740;box-shadow:0 8px 28px #0005}
+      .run-inner{max-width:720px;margin:0 auto}
+      .run-head{display:flex;justify-content:space-between;gap:12px;font-size:13px;font-weight:600;color:#9fb3bf}
+      .run-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .run-count{flex:none;font-variant-numeric:tabular-nums}
+      .run-photo{margin:8px 0 0;border-radius:12px;overflow:hidden;background:#0b1013}
+      .run-step{margin:6px 0 8px;font-size:26px;font-weight:800;line-height:1.1;letter-spacing:-.3px;text-transform:uppercase;overflow-wrap:anywhere}
+      .run-meter{height:10px;border-radius:999px;background:#26323a;overflow:hidden}
+      .run-fill{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#3ecf8e,#8fe3b9);transition:width .25s linear}
+      .run-paused .run-fill{background:#6f8390}
+      .run-time{display:flex;align-items:baseline;gap:8px;margin-top:6px}
+      .run-secs{font-size:44px;font-weight:800;line-height:1;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+      .run-secs-label{min-width:0;font-size:14px;font-weight:600;color:#9fb3bf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .run-detail{margin:8px 0 0;font-size:15px;line-height:1.3;color:#cfdde5;overflow-wrap:anywhere}
+      .run-notes{margin:6px 0 0;padding-left:20px;font-size:15px;line-height:1.35}
+      .run-notes li{margin:2px 0}
+      .run-also{list-style:none;margin:8px 0 0;padding:0;font-size:14px;color:#cfdde5}
+      .run-also li{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-top:1px dashed #2b3740}
+      .run-also b{font-variant-numeric:tabular-nums;color:#e9f1f5}
+      .run-next{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:8px;border-top:1px solid #2b3740;font-size:14px;color:#9fb3bf}
+      .run-next-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .run-next b{color:#e9f1f5}
+      .run-done{padding:10px 0 4px;text-align:center}
+      .run-done-title{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}
+      .run-done-actions{display:flex;justify-content:center;gap:10px;margin-top:12px}
+      .run-bar{padding:8px 12px max(10px,env(safe-area-inset-bottom));background:#11181df5;border-top:1px solid #2b3740;box-shadow:0 -8px 28px #0004}
+      .run-status{display:flex;align-items:center;justify-content:center;gap:10px;min-height:28px;font-size:13px;color:#9fb3bf;font-variant-numeric:tabular-nums}
+      .run-controls,.run-confirm{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px}
+      .run-confirm{font-size:15px;font-weight:600}
+      .run-btn,.run-start,.run-done button,.run-confirm button,.run-chip{appearance:none;-webkit-appearance:none;border:0;margin:0;cursor:pointer;font:inherit;font-weight:700;color:#e9f1f5;background:#24313a;touch-action:manipulation}
+      .run-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;height:44px;padding:0 10px;border-radius:999px;font-size:15px}
+      .run-btn svg,.run-start svg{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+      .run-pause,.run-start{background:#3ecf8e;color:#08241a}
+      .run-pause{min-width:112px}
+      .run-start{display:inline-flex;align-items:center;gap:8px;height:46px;padding:0 20px;border-radius:999px;font-size:16px;white-space:nowrap;box-shadow:0 6px 22px #0005}
+      .run-chip{height:28px;padding:0 12px;border-radius:999px;background:#f0b45a;color:#2b1d05;font-size:12px}
+      .run-done button,.run-confirm button{height:44px;padding:0 18px;border-radius:999px}
+      .run-restart,.run-stop-yes{background:#3ecf8e!important;color:#08241a!important}
+      .run-stop-yes{background:#e0674f!important;color:#fff!important}
+      @media(max-width:420px){.run-step{font-size:22px}.run-secs{font-size:38px}.run-controls{gap:6px}.run-pause{min-width:100px}}`;
+          if (!doc.getElementById("run-css")) {
+            const style = doc.createElement("style");
+            style.id = "run-css";
+            style.textContent = css;
+            doc.head.append(style);
+          }
+          const make = (tag, className, parent) => {
+            const el = doc.createElement(tag);
+            el.className = className;
+            el.setAttribute("data-html2canvas-ignore", "");
+            if (parent) parent.append(el);
+            return el;
+          };
+          const top = host ? host.top : make("div", "run-top run-doc"),
+            bottom = host ? host.bottom : make("div", "run-bottom run-doc"),
+            startSlot = host ? host.start : make("div", "run-start-slot run-doc");
+          if (!host) {
+            doc.body.prepend(top);
+            doc.body.append(bottom, startSlot);
+            doc.body.classList.add("run-doc-host");
+          }
+          const icon = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`,
+            speaker = '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/>',
+            icons = {
+              back: icon('<path d="M6 5v14"/><path d="M19 5 9 12l10 7z"/>'),
+              skip: icon('<path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/>'),
+              pause: icon('<path d="M8 5v14M16 5v14"/>'),
+              play: icon('<path d="M7 4.5v15L19.5 12z"/>'),
+              stop: icon('<rect x="6" y="6" width="12" height="12" rx="1.5"/>'),
+              beep: icon(speaker + '<path d="M15.5 9a4 4 0 0 1 0 6"/>'),
+              voice: icon(speaker + '<path d="M15.5 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>'),
+              mute: icon(speaker + '<path d="m16 9.5 5 5M21 9.5l-5 5"/>'),
+            };
+          top.innerHTML =
+            '<section class="run-panel" aria-label="Current step"><div class="run-inner"><div class="run-live"><div class="run-head"><span class="run-name"></span><span class="run-count"></span></div><div class="run-photo" hidden></div><div class="run-step" role="status"></div><div class="run-meter"><span class="run-fill"></span></div><div class="run-time"><b class="run-secs"></b><span class="run-secs-label"></span></div><p class="run-detail" hidden></p><ul class="run-notes" hidden></ul><ul class="run-also" hidden></ul><div class="run-next"><span class="run-next-text"></span><span class="run-next-thumb" hidden></span></div></div><div class="run-done" hidden><div class="run-done-title"></div><div class="run-done-actions"><button type="button" class="run-restart">Restart</button><button type="button" class="run-close">Close</button></div></div></div></section>';
+          bottom.innerHTML = `<div class="run-bar"><div class="run-inner"><div class="run-status"><span class="run-elapsed"></span><button type="button" class="run-chip" hidden>Tap for sound</button></div><div class="run-controls"><button type="button" class="run-btn run-back" aria-label="Back" title="Back to the start of this step (or the previous one)">${icons.back}</button><button type="button" class="run-btn run-pause"></button><button type="button" class="run-btn run-skip" aria-label="Skip" title="Skip to the next step">${icons.skip}</button><button type="button" class="run-btn run-sound"></button><button type="button" class="run-btn run-stop" aria-label="Stop" title="Stop the run">${icons.stop}</button></div><div class="run-confirm" hidden><span>End this run?</span><button type="button" class="run-stop-yes">Stop</button><button type="button" class="run-stop-no">Keep going</button></div></div></div>`;
+          startSlot.innerHTML = `<button type="button" class="run-start">${icons.play}<span></span></button>`;
+          [top, bottom, startSlot].forEach((el) => el.setAttribute("data-html2canvas-ignore", ""));
+          const $ = (root, selector) => root.querySelector(selector),
+            ui = {
+              live: $(top, ".run-live"),
+              name: $(top, ".run-name"),
+              count: $(top, ".run-count"),
+              step: $(top, ".run-step"),
+              fill: $(top, ".run-fill"),
+              secs: $(top, ".run-secs"),
+              secsLabel: $(top, ".run-secs-label"),
+              detail: $(top, ".run-detail"),
+              notes: $(top, ".run-notes"),
+              also: $(top, ".run-also"),
+              next: $(top, ".run-next-text"),
+              done: $(top, ".run-done"),
+              doneTitle: $(top, ".run-done-title"),
+              elapsed: $(bottom, ".run-elapsed"),
+              chip: $(bottom, ".run-chip"),
+              controls: $(bottom, ".run-controls"),
+              confirm: $(bottom, ".run-confirm"),
+              pause: $(bottom, ".run-pause"),
+              sound: $(bottom, ".run-sound"),
+              start: $(startSlot, ".run-start"),
+            };
+
+          // The run state, locally: localStorage under the routine's key.
+          const storeKey = (k) => "timeline-run:" + k,
+            read = (k) => {
+              try {
+                const value = JSON.parse(localStorage.getItem(storeKey(k)) || "null");
+                return value && typeof value.startedAt === "number" ? value : null;
+              } catch (error) {
+                return null;
+              }
+            },
+            write = (k, value) => {
+              try {
+                if (value) localStorage.setItem(storeKey(k), JSON.stringify(value));
+                else localStorage.removeItem(storeKey(k));
+              } catch (error) {
+                /* private mode or a sandboxed frame: the run still works, unsaved */
+              }
+            };
+          function localTransport() {
+            let state = read(key),
+              listener = null;
+            const onStorage = (event) => {
+              if (event.key !== storeKey(key)) return;
+              state = read(key);
+              listener && listener(state);
+            };
+            window.addEventListener("storage", onStorage);
+            return {
+              now: () => Date.now(),
+              get: () => state,
+              send(op) {
+                state = core.apply(state, op, Date.now());
+                write(key, state);
+                listener && listener(state);
+              },
+              subscribe(fn) {
+                listener = fn;
+              },
+              // The steps changed (an edit during a run): the run keeps going
+              // under the new text's key.
+              rekey(from, to) {
+                if (from === to) return;
+                write(from, null);
+                if (state) write(to, state);
+                else state = read(to);
+              },
+              close() {
+                window.removeEventListener("storage", onStorage);
+              },
+            };
+          }
+          const transport = config.transport || localTransport();
+
+          // Sound: beeps, beeps + voice, or off; remembered per device.
+          const sounds = ["beep", "voice", "mute"],
+            soundNames = { beep: "beeps", voice: "beeps + voice", mute: "off" };
+          let sound = "beep";
+          try {
+            const saved = localStorage.getItem("timeline:sound");
+            if (sounds.includes(saved)) sound = saved;
+          } catch (error) {}
+          let audio = null;
+          // Audio has to be unlocked by a tap (iOS): Start, Resume, Restart, the
+          // sound button and the "Tap for sound" chip all do it.
+          function unlock() {
+            try {
+              const Context = window.AudioContext || window.webkitAudioContext;
+              if (Context && !audio) {
+                audio = new Context();
+                audio.onstatechange = () => render();
+              }
+              if (audio) {
+                if (audio.state !== "running") audio.resume().catch(() => {});
+                const buffer = audio.createBuffer(1, 1, 22050),
+                  source = audio.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audio.destination);
+                source.start(0);
+              }
+            } catch (error) {}
+            if (sound === "voice" && window.speechSynthesis)
+              try {
+                window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+              } catch (error) {}
+          }
+          function tone(frequency, seconds) {
+            if (sound === "mute" || !audio || audio.state !== "running") return;
+            try {
+              const t = audio.currentTime,
+                osc = audio.createOscillator(),
+                gain = audio.createGain();
+              osc.type = "sine";
+              osc.frequency.value = frequency;
+              gain.gain.setValueAtTime(0.0001, t);
+              gain.gain.exponentialRampToValueAtTime(0.35, t + 0.015);
+              gain.gain.exponentialRampToValueAtTime(0.0001, t + seconds);
+              osc.connect(gain);
+              gain.connect(audio.destination);
+              osc.start(t);
+              osc.stop(t + seconds + 0.05);
+            } catch (error) {}
+          }
+          function say(text) {
+            if (sound !== "voice" || !window.speechSynthesis || !text) return;
+            try {
+              window.speechSynthesis.cancel();
+              const utterance = new SpeechSynthesisUtterance(text);
+              utterance.rate = 1.05;
+              window.speechSynthesis.speak(utterance);
+            } catch (error) {}
+          }
+          function buzz(pattern) {
+            try {
+              if (navigator.vibrate) navigator.vibrate(pattern);
+            } catch (error) {}
+          }
+          // "Side plank L" is said "Side plank left, 45 seconds".
+          const spokenStep = (step) =>
+            step.title.replace(/\s+L$/, " left").replace(/\s+R$/, " right") +
+            (step.until !== undefined ? ", " + core.spoken(step.until - step.at) : "");
+
+          // Keep the screen on while running; the browser drops the lock when
+          // the page is hidden, so it is asked for again on the way back.
+          let lock = null,
+            locking = false,
+            wanted = false;
+          function wake(on) {
+            wanted = on;
+            if (on && !lock && !locking && !doc.hidden && navigator.wakeLock) {
+              locking = true;
+              navigator.wakeLock
+                .request("screen")
+                .then((sentinel) => {
+                  locking = false;
+                  lock = sentinel;
+                  sentinel.addEventListener("release", () => {
+                    if (lock === sentinel) lock = null;
+                  });
+                  if (!wanted) wake(false);
+                })
+                .catch(() => {
+                  locking = false;
+                });
+            } else if (!on && lock) {
+              const held = lock;
+              lock = null;
+              held.release().catch(() => {});
+            }
+          }
+
+          let sheetOn = false;
+          const sheet = (info) => {
+            if (!info.active && !sheetOn) return;
+            sheetOn = info.active;
+            if (host) host.sheet(info);
+            else if (window.__timelineSetRun) window.__timelineSetRun(info);
+          };
+          let done = null, // { wall } from the end of the last step until Restart or Close
+            lastKey = null,
+            lastCount = null,
+            announce = false,
+            confirming = false,
+            note = "",
+            noteUntil = 0;
+          const setText = (el, text) => {
+            if (el.textContent !== text) el.textContent = text;
+          };
+          const setList = (el, items) => {
+            const html = items.join("");
+            if (el.innerHTML !== html) el.innerHTML = html;
+            el.hidden = !items.length;
+          };
+          const esc = (text) =>
+            String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+          function show(mode) {
+            top.hidden = mode === "idle";
+            bottom.hidden = mode !== "run";
+            startSlot.hidden = mode !== "idle";
+            ui.live.hidden = mode !== "run";
+            ui.done.hidden = mode !== "done";
+            doc.body.classList.toggle("run-active", mode === "run");
+            if (mode === "run") doc.documentElement.style.setProperty("--run-bar-h", bottom.offsetHeight + "px");
+          }
+          function render() {
+            if (!alive) return;
+            const state = transport.get(),
+              now = transport.now(),
+              total = core.end(steps);
+            setText(ui.start.lastChild, `Start · ${core.total(total)}`);
+            if (state) {
+              const e = core.elapsedMs(state, now) / 1000;
+              if (e >= total) {
+                // Finished. Heard live when this page saw the run going.
+                if (lastKey !== null && state.pausedAt == null && !doc.hidden) {
+                  tone(660, 0.8);
+                  buzz([200, 100, 200]);
+                  say("Done");
+                }
+                done = { wall: Math.max(0, total * 1000 + state.pausedMs - state.shiftMs) };
+                lastKey = lastCount = null;
+                transport.send({ op: "stop" });
+                return;
+              }
+              return running(state, e, total);
+            }
+            lastKey = lastCount = null;
+            confirming = false;
+            wake(false);
+            sheet({ active: false });
+            if (done) {
+              setText(ui.doneTitle, `Done · ${core.clock(done.wall / 1000)}`);
+              return show("done");
+            }
+            show("idle");
+          }
+          function running(state, e, total) {
+            const paused = state.pausedAt != null,
+              pos = core.position(steps, e),
+              primary = pos.active[0] || null,
+              ending = pos.ending,
+              next = pos.next;
+            show("run");
+            top.classList.toggle("run-paused", paused);
+            setText(ui.name, title);
+            setText(ui.count, pos.index >= 0 ? `step ${pos.index + 1} of ${steps.length}` : `${steps.length} steps`);
+            // The countdown follows the active step that ends soonest; between
+            // steps it counts down to the next one.
+            const target = ending ? ending.until : next ? next.at : total,
+              from = ending
+                ? ending.at
+                : Math.max(0, ...steps.filter((s) => (s.until ?? s.at) <= e).map((s) => s.until ?? s.at)),
+              left = Math.max(0, target - e);
+            setText(ui.step, primary ? primary.title : next ? "Get ready" : "");
+            ui.fill.style.width = `${Math.min(100, Math.max(0, ((e - from) / Math.max(0.001, target - from)) * 100)).toFixed(2)}%`;
+            setText(ui.secs, core.clock(Math.ceil(left - 1e-6)));
+            setText(
+              ui.secsLabel,
+              paused ? "paused" : ending ? (ending === primary ? "left" : `left · ${ending.title}`) : next ? `until ${next.title}` : "left",
+            );
+            const detail = primary ? [primary.detail, primary.place && `@ ${primary.place}`].filter(Boolean).join(" ") : "";
+            setText(ui.detail, detail);
+            ui.detail.hidden = !detail;
+            setList(ui.notes, primary ? primary.notes.map((n) => `<li>${esc(n)}</li>`) : []);
+            setList(
+              ui.also,
+              pos.active.slice(1).map((s) => `<li><span>${esc(s.title)}</span><b>${core.clock(Math.ceil(s.until - e - 1e-6))} left</b></li>`),
+            );
+            const nextLength = next ? (next.until !== undefined ? core.clock(next.until - next.at) : `at ${core.clock(next.at)}`) : "";
+            if (ui.next.dataset.value !== (next ? next.title + nextLength : "")) {
+              ui.next.dataset.value = next ? next.title + nextLength : "";
+              ui.next.innerHTML = next ? `next ▸ <b>${esc(next.title)}</b> · ${nextLength}` : "last step";
+            }
+            setText(
+              ui.elapsed,
+              Date.now() < noteUntil ? note : `elapsed ${core.clock(Math.floor(e))} · left ${core.clock(Math.ceil(total - e - 1e-6))}${paused ? " · paused" : ""}`,
+            );
+            const pauseHtml = paused ? `${icons.play}<span>Resume</span>` : `${icons.pause}<span>Pause</span>`;
+            if (ui.pause.dataset.paused !== String(paused)) {
+              ui.pause.dataset.paused = String(paused);
+              ui.pause.innerHTML = pauseHtml;
+              ui.pause.setAttribute("aria-label", paused ? "Resume" : "Pause");
+            }
+            if (ui.sound.dataset.sound !== sound) {
+              ui.sound.dataset.sound = sound;
+              ui.sound.innerHTML = icons[sound];
+              ui.sound.setAttribute("aria-label", `Sound: ${soundNames[sound]}`);
+              ui.sound.title = `Sound: ${soundNames[sound]} (tap to change)`;
+            }
+            ui.controls.hidden = confirming;
+            ui.confirm.hidden = !confirming;
+            ui.chip.hidden = paused || sound === "mute" || !!(audio && audio.state === "running");
+            // Cues, only while running and in view: a long beep (and the step's
+            // name, with voice on) whenever a step starts, short beeps at 3, 2, 1.
+            const latest = steps.filter((s) => s.at <= e).at(-1),
+              cueKey = latest ? steps.indexOf(latest) : -1,
+              count = Math.ceil(left - 1e-6),
+              cue = !paused && !doc.hidden;
+            if (cue && cueKey >= 0 && (announce || (lastKey !== null && cueKey !== lastKey))) {
+              tone(660, 0.45);
+              buzz(200);
+              say(spokenStep(latest));
+            } else if (cue && lastCount === count + 1 && count >= 1 && count <= 3) {
+              tone(880, 0.14);
+              buzz(60);
+            }
+            announce = false;
+            lastKey = cueKey;
+            lastCount = count;
+            wake(!paused);
+            sheet({ active: true, elapsed: e, running: !paused, inset: host ? 0 : top.getBoundingClientRect().height });
+          }
+          const act = (op) => {
+            const state = transport.get();
+            if (op === "start") {
+              done = null;
+              announce = true;
+              return transport.send({ op: "start" });
+            }
+            if (!state) return;
+            const e = core.elapsedMs(state, transport.now()) / 1000;
+            if (op === "toggle") transport.send({ op: state.pausedAt == null ? "pause" : "resume" });
+            else if (op === "skip") transport.send(core.seek(state, transport.now(), core.skipTo(steps, e)));
+            else if (op === "back") transport.send(core.seek(state, transport.now(), core.backTo(steps, e)));
+            else if (op === "stop") {
+              confirming = false;
+              transport.send({ op: "stop" });
+            }
+          };
+          const on = (el, fn) =>
+            el.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              fn();
+            });
+          on(ui.start, () => {
+            unlock();
+            act("start");
+          });
+          on(ui.pause, () => {
+            unlock();
+            act("toggle");
+          });
+          on($(bottom, ".run-skip"), () => act("skip"));
+          on($(bottom, ".run-back"), () => act("back"));
+          on($(bottom, ".run-stop"), () => {
+            confirming = true;
+            render();
+          });
+          on($(bottom, ".run-stop-yes"), () => act("stop"));
+          on($(bottom, ".run-stop-no"), () => {
+            confirming = false;
+            render();
+          });
+          on(ui.sound, () => {
+            sound = sounds[(sounds.indexOf(sound) + 1) % sounds.length];
+            try {
+              localStorage.setItem("timeline:sound", sound);
+            } catch (error) {}
+            unlock();
+            note = `sound: ${soundNames[sound]}`;
+            noteUntil = Date.now() + 1800;
+            if (sound === "voice") say("Voice on");
+            render();
+          });
+          on(ui.chip, () => {
+            unlock();
+            render();
+          });
+          on($(top, ".run-restart"), () => {
+            unlock();
+            act("start");
+          });
+          on($(top, ".run-close"), () => {
+            done = null;
+            render();
+          });
+          transport.subscribe(() => render());
+          const timer = setInterval(render, 250);
+          doc.addEventListener("visibilitychange", render);
+          render();
+          return {
+            // New text: the steps come from it at once, elapsed time is kept.
+            update(next) {
+              steps = next.steps;
+              title = next.title;
+              if (next.key !== key) {
+                if (transport.rekey) transport.rekey(key, next.key);
+                key = next.key;
+              }
+              render();
+            },
+            state: () => transport.get(),
+            destroy() {
+              alive = false;
+              clearInterval(timer);
+              doc.removeEventListener("visibilitychange", render);
+              if (transport.close) transport.close();
+              wake(false);
+              sheet({ active: false });
+              doc.body.classList.remove("run-active");
+              if (host) [top, bottom, startSlot].forEach((el) => ((el.innerHTML = ""), (el.hidden = true)));
+              else [top, bottom, startSlot].forEach((el) => el.remove());
+            },
+          };
+        }
         function render(text, { live = false } = {}) {
+          const m = typeof text === "string" ? parse(text) : text;
+          const rel = m.clock === "relative",
+            core = runCore();
+          // A relative timeline carries run mode, except in the studio's preview,
+          // where the studio itself runs it (audio, wake lock and vibration need
+          // the top-level page) and sends the sheet its position.
           const runtime = live
             ? `(${previewRuntime.toString()})(${layoutRuntime.toString()});`
-            : `(${layoutRuntime.toString()})();`;
-          const m = typeof text === "string" ? parse(text) : text;
+            : `(${layoutRuntime.toString()})();` +
+              (rel ? `\n(${runRuntime.toString()})(${JSON.stringify(runConfig(m)).replace(/</g, "\\u003c")}, ${runCore.toString()});` : "");
           // URLs in a description or note become links. Map links (Google or
           // Apple Maps, including the short goo.gl form) render as a small pin
           // chip so the address text stays readable; other links show their host.
@@ -1708,8 +2567,53 @@ footer: See you there ♡</pre>
             notes.length
               ? `<aside class="notes"><div class="notes-heading">Helpful Notes</div><ul>${notes.map((note) => `<li><span class="check" aria-hidden="true">✓</span><span>${linkify(note)}</span></li>`).join("")}</ul></aside>`
               : "";
+          // Step notes fold under their card as "3 notes ▾"; run mode opens the
+          // live step's. A <details> needs no script, so exports keep it.
+          const stepNotes = (e) =>
+            e.notes && e.notes.length
+              ? `<details class="step-notes"><summary>${e.notes.length} note${e.notes.length === 1 ? "" : "s"}</summary><ul>${e.notes.map((note) => `<li>${linkify(note)}</li>`).join("")}</ul></details>`
+              : "";
+          const cardBody = (e, day) =>
+            `<div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail || e.place ? `<p>${[e.detail ? linkify(e.detail) : "", e.place ? `<a class="map-link" href="${escape(mapSearchUrl(e.place, day.city || m.city))}" target="_blank" rel="noopener" title="${escape(e.place)}"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg><span class="map-name">${escape(e.place)}</span></a>` : ""].filter(Boolean).join(" ")}</p>` : ""}${stepNotes(e)}</div></li>`;
+          // A relative clock is scaled so the whole routine has a readable height
+          // (about one card per step); ticks every 1, 5, 10 or 30 min by length.
+          const totalMin = rel ? Math.max(m.total, 1) / 60 : 0,
+            tickMin = totalMin <= 12 ? 1 : totalMin <= 50 ? 5 : totalMin <= 120 ? 10 : 30,
+            perMinute = rel ? Math.max(60 / tickMin, Math.min(200, (m.events.length * 90) / totalMin)) : 0;
+          const relativeDay = (day, heading) => {
+            const s0 = day.startSec,
+              s1 = day.endSec,
+              step = tickMin * 60,
+              marks = [s0];
+            for (let t = Math.ceil(s0 / step) * step; t < s1; t += step)
+              if (t - s0 >= step / 2 && s1 - t >= step / 2) marks.push(t);
+            marks.push(s1);
+            const min = (sec) => (sec - s0) / 60;
+            const hours = marks
+              .map(
+                (t) =>
+                  `<div class="hour" data-minute="${min(t)}" style="--i:${min(t) / 60}"><span class="hour-label">${core.clock(t)}</span><span class="hour-dot"></span></div>`,
+              )
+              .join("");
+            // Where each step starts, as a small label on the axis.
+            const offsets = [...new Set(day.events.map((e) => e.at))]
+              .map((t) => `<span class="offset" data-minute="${min(t)}" style="--m:${min(t)}">${core.clock(t)}</span>`)
+              .join("");
+            const events = day.events
+              .map(
+                (e) =>
+                  `<li class="event ${e.color}" data-line="${e.line}" data-minute="${min(e.at)}"${e.until !== undefined ? ` data-end="${min(e.until)}"` : ""} style="--m:${min(e.at)}"><time>${e.until !== undefined ? core.length(e.until - e.at) : core.clock(e.at)}</time>${cardBody(e, day)}`,
+              )
+              .join("");
+            return `<section class="day">${heading}<section class="timeline relative" data-clock="relative" data-duration="${min(s1)}" data-start="${s0 / 60}" data-date="" style="--hour-height:${perMinute * 60}px" aria-label="Timeline. Dots show when each step starts; cards are spaced for readability."><div class="axis" aria-hidden="true"></div><div class="hours" aria-hidden="true">${hours}</div><div class="offsets" aria-hidden="true">${offsets}</div><svg class="connectors" aria-hidden="true"></svg><ol class="events">${events}</ol></section>${notesHtml(day.notes)}</section>`;
+          };
           const days = m.days
             .map((day, index) => {
+              const heading =
+                m.days.length > 1
+                  ? `<div class="day-heading" role="heading" aria-level="2"${day.label ? ` data-line="${day.line}"` : ""}>${escape(day.label || day.iso || `${rel ? "Part" : "Day"} ${index + 1}`)}</div>`
+                  : "";
+              if (rel) return relativeDay(day, heading);
               const hours = Array.from(
                 { length: (day.end - day.start) / 60 + 1 },
                 (_, i) =>
@@ -1718,26 +2622,32 @@ footer: See you there ♡</pre>
               const events = day.events
                 .map(
                   (e) =>
-                    `<li class="event ${e.color}" data-line="${e.line}" data-minute="${e.minutes - day.start}"${e.end ? ` data-end="${e.end - day.start}"` : ""} style="--m:${e.minutes - day.start}"><time${e.end ? ' class="span"' : ""}>${e.end ? spanLabel2(e.minutes, e.end) : label(e.minutes)}</time><div class="event-body"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail || e.place ? `<p>${[e.detail ? linkify(e.detail) : "", e.place ? `<a class="map-link" href="${escape(mapSearchUrl(e.place, day.city || m.city))}" target="_blank" rel="noopener" title="${escape(e.place)}"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg><span class="map-name">${escape(e.place)}</span></a>` : ""].filter(Boolean).join(" ")}</p>` : ""}</div></li>`,
+                    `<li class="event ${e.color}" data-line="${e.line}" data-minute="${e.minutes - day.start}"${e.end ? ` data-end="${e.end - day.start}"` : ""} style="--m:${e.minutes - day.start}"><time${e.end ? ' class="span"' : ""}>${e.end ? spanLabel2(e.minutes, e.end) : label(e.minutes)}</time>${cardBody(e, day)}`,
                 )
                 .join("");
-              const heading =
-                m.days.length > 1
-                  ? `<div class="day-heading" role="heading" aria-level="2"${day.label ? ` data-line="${day.line}"` : ""}>${escape(day.label || day.iso || `Day ${index + 1}`)}</div>`
-                  : "";
               return `<section class="day">${heading}<section class="timeline" data-duration="${day.end - day.start}" data-start="${day.start}" data-date="${day.iso}" aria-label="Timeline. Dots show exact times; cards are spaced for readability."><div class="axis" aria-hidden="true"></div><div class="hours" aria-hidden="true">${hours}</div><svg class="connectors" aria-hidden="true"></svg><ol class="events">${events}</ol></section>${notesHtml(day.notes)}</section>`;
             })
             .join("");
-          const date =
-            m.date || (m.days.length > 1 ? spanLabel(m.days) : m.days[0].label);
+          // A routine's masthead gives its length and step count, not a date.
+          const date = rel
+            ? `${core.total(m.total)} · ${m.events.length} step${m.events.length === 1 ? "" : "s"}`
+            : m.date || (m.days.length > 1 ? spanLabel(m.days) : m.days[0].label);
           const decorations = m["header-art"]
             ? `<img class="la-art custom-art" alt="" src="${escape(m.assets[m["header-art"].replace(/^@/, "")])}">`
             : m.theme === "travel"
               ? art.flight + art.city
               : "";
           const extraCss = `html,body{touch-action:manipulation;} body.hide-past .day.past-day{display:none;} .show-past{display:block;margin:6px auto 4px;padding:8px 18px;border:1px solid var(--blue);border-radius:999px;background:transparent;color:var(--blue);font:inherit;font-size:13px;font-weight:700;letter-spacing:.3px;cursor:pointer;} @media print{.show-past{display:none;} body.hide-past .day.past-day{display:block;}} .event p a,.notes a{color:inherit;text-decoration:underline;text-decoration-color:#8fb4c8;text-underline-offset:2px;} .map-link{display:inline-flex;align-items:center;gap:4px;vertical-align:middle;margin:0 2px;padding:2px 9px 2px 6px;border-radius:999px;background:var(--blue);color:#fff!important;font-size:.72em;font-weight:700;letter-spacing:.3px;text-decoration:none!important;line-height:1.5;} .map-link svg{width:.95em;height:.95em;flex:none;fill:currentColor;} .map-link{max-width:100%;} .map-name{display:block;max-width:22ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} @media(max-width:580px){.map-name{max-width:18ch;}} .event{z-index:1;} .span{opacity:.45;} .span.sky{fill:#8fd0f0;} .span.sand{fill:#f2c37a;} .span.sage{fill:#9ec9a8;} .span.past{opacity:.2;} .event time.span{font-size:.72em;line-height:1.15;letter-spacing:0;white-space:normal;} @media(max-width:580px){.event time.span{font-size:12px;white-space:nowrap;}} .event.live .event-body{box-shadow:0 0 0 2px #e2573f66;} body.live .event,body.live .day-heading{cursor:pointer;} body.live .event:hover .event-body{outline:2px solid #8fc7dd88;outline-offset:2px;} .now{position:absolute;left:var(--axis);right:0;height:0;border-top:2px solid #e2573f;z-index:0;pointer-events:none;animation:now-blink 2.6s ease-in-out infinite;} .now-dot{position:absolute;left:0;top:-1px;width:14px;height:14px;border-radius:50%;background:#e2573f;transform:translate(-50%,-50%);box-shadow:0 0 0 4px #e2573f33;} @keyframes now-blink{0%,100%{opacity:1}50%{opacity:.3}} .event.past{opacity:.42;} .connector.past,.event-dot.past{opacity:.35;} .until{position:absolute;right:10px;top:6px;font-size:12px;font-weight:600;letter-spacing:.3px;color:var(--blue);opacity:.75;white-space:nowrap;} @media(max-width:580px){.until{right:8px;top:5px;font-size:11px;}} @media print{.now{display:none;}.event.past,.connector.past,.event-dot.past{opacity:1;}} .event{top:calc(var(--m) / 60 * var(--hour-height));} .masthead{height:auto;min-height:180px;padding-bottom:38px;}h1{overflow-wrap:anywhere;} .event-icon img{width:100%;height:100%;object-fit:cover;border-radius:50%;} .custom-art{object-fit:contain;} .event-body{overflow-wrap:anywhere;} .notes{grid-template-columns:230px 1fr;} .notes-heading{font-family:Georgia,serif;font-size:30px;font-weight:bold;} .notes:empty{display:none;} footer{height:auto;min-height:85px;padding:20px 0;overflow-wrap:anywhere;} footer:empty{display:none;}@media(max-width:850px){.notes{grid-template-columns:165px 1fr;}.notes-heading{font-size:25px;}} @media(max-width:580px){.masthead{min-height:160px;padding-bottom:28px;}.notes{display:block;}} .day-heading{display:flex;align-items:center;gap:14px;margin:36px 0 0;font-size:14px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--blue);} .day-heading::after{content:'';flex:1;height:1px;background:currentColor;opacity:.35;} .day:first-of-type .day-heading{margin-top:8px;} @media(max-width:580px){.day-heading{font-size:12px;letter-spacing:2px;margin-top:26px;}}`;
+          // Only timelines that use them carry these, so a day timeline's page is
+          // unchanged.
+          const relativeCss = rel
+            ? ` .offsets{position:absolute;inset:0;pointer-events:none;} .offset{position:absolute;left:0;width:calc(var(--axis) - 14px);top:calc(var(--m) / 60 * var(--hour-height));transform:translateY(-50%);text-align:right;font-size:12px;font-weight:700;line-height:1;letter-spacing:0;color:var(--blue);opacity:.85;font-variant-numeric:tabular-nums;white-space:nowrap;} .timeline.relative .hour-label,.timeline.relative .event time{font-variant-numeric:tabular-nums;} @media(max-width:580px){.timeline.relative .hour-label{font-size:13px;letter-spacing:-.3px;} .offset{width:calc(var(--axis) - 9px);font-size:10px;}}`
+            : "";
+          const notesCss = m.events.some((e) => e.notes && e.notes.length)
+            ? ` .step-notes{margin:5px 0 0;color:var(--blue);} .step-notes summary{display:inline-block;list-style:none;cursor:pointer;padding:3px 10px;border:1px solid currentColor;border-radius:999px;font-size:12px;font-weight:700;line-height:1.4;letter-spacing:.2px;opacity:.85;} .step-notes summary::-webkit-details-marker{display:none;} .step-notes summary::after{content:' ▾';} .step-notes[open] summary::after{content:' ▴';} .step-notes ul{margin:6px 0 2px;padding-left:18px;font-size:15px;line-height:1.3;color:var(--navy);} .step-notes li{margin:2px 0;} @media(max-width:580px){.step-notes ul{padding-left:16px;font-size:13px;}}`
+            : "";
           return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="${darkThemes[m.theme] ? "light dark" : m.theme === "future" || m.theme === "code" ? "dark" : "light"}"><title>${escape(m.title)}</title><style>${art.css}
-      ${extraCss}
+      ${extraCss}${relativeCss}${notesCss}
       ${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-scheme:dark){${darkThemes[m.theme]}}` : ""}</style></head><body class="theme-${m.theme}${live ? " live" : ""}">${art.symbols}<main class="sheet"><header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main><script>${runtime}<\/script></body></html>`;
         }
         // Shareable links: the whole timeline text travels in the URL fragment,
@@ -1782,7 +2692,7 @@ footer: See you there ♡</pre>
           return new TextDecoder().decode(await pipe(bytes, DecompressionStream));
         }
 
-        const api = { parse, render, icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl };
+        const api = { parse, render, icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl, describe, runCore, runConfig, runRuntime };
         if (typeof module !== "undefined" && module.exports) module.exports = api;
         else root.TimelineText = api;
       })(typeof globalThis !== "undefined" ? globalThis : this);
@@ -2118,7 +3028,8 @@ footer: See you there ♡</pre>
         } catch (error) {}
       }
       function placeCandidates(model) {
-        if (model.places === "off") return [];
+        // Steps in a routine are not venues; an explicit "@ place" still shows.
+        if (model.places === "off" || model.clock === "relative") return [];
         loadPlacesSeen();
         return model.events
           .filter((e) => !e.place && !/https?:\/\//.test(e.detail))
@@ -2353,6 +3264,7 @@ footer: See you there ♡</pre>
           })
           .catch((error) => toast(`Not saved: ${error.message}`, "error"));
       }
+      let previewDoc = 0;
       function update() {
         try {
           const model = TimelineText.parse(editor.value);
@@ -2367,9 +3279,12 @@ footer: See you there ♡</pre>
           }
           status.className = "status";
           status.textContent =
-            model.days.length > 1
-              ? `✓ ${model.events.length} events · ${model.days.length} days · up to date`
-              : `✓ ${model.events.length} events · ${(model.end - model.start) / 60} hours · up to date`;
+            model.clock === "relative"
+              ? `✓ ${model.events.length} steps · ${TimelineText.runCore().total(model.total)} · up to date`
+              : model.days.length > 1
+                ? `✓ ${model.events.length} events · ${model.days.length} days · up to date`
+                : `✓ ${model.events.length} events · ${(model.end - model.start) / 60} hours · up to date`;
+          syncRun(model);
           exportButton.disabled = false;
           refreshLink();
           queueSave();
@@ -2386,18 +3301,47 @@ footer: See you there ♡</pre>
       function sendPreview() {
         if (latestHTML)
           preview.contentWindow.postMessage(
-            { type: "timeline:update", html: latestHTML },
+            { type: "timeline:update", html: latestHTML, doc: previewDoc },
             "*",
           );
       }
       preview.addEventListener("load", sendPreview);
+      // Run mode for relative timelines (a workout, a recipe). The studio
+      // runs it here rather than in the preview frame: audio, the wake lock
+      // and vibration need the top-level page, and the focus panel and the
+      // controls must stay put while the preview scrolls. The frame gets
+      // the run's position and marks the sheet (past, live, the marker).
+      // Edits during a run take effect at once; elapsed time is kept.
+      let runner = null;
+      function syncRun(model) {
+        if (model.clock !== "relative") {
+          runner?.destroy();
+          runner = null;
+          return;
+        }
+        const config = TimelineText.runConfig(model);
+        if (runner) return runner.update(config);
+        runner = TimelineText.runRuntime(
+          {
+            ...config,
+            host: {
+              top: document.querySelector("#run-top"),
+              bottom: document.querySelector("#run-bottom"),
+              start: document.querySelector("#run-start"),
+              sheet: (run) => preview.contentWindow?.postMessage({ type: "timeline:run", run }, "*"),
+            },
+          },
+          TimelineText.runCore,
+        );
+      }
       // The preview asks the studio to scroll when the iframe itself can't
       // (iOS sizes iframes to their content; the panel scrolls instead).
       window.addEventListener("message", (event) => {
         if (event.source !== preview.contentWindow) return;
         if (event.data?.type === "timeline:scroll") {
           const panel = document.querySelector(".preview-panel");
-          if (panel.scrollHeight > panel.clientHeight + 1) panel.scrollTo(0, Number(event.data.y) || 0);
+          if (panel.scrollHeight > panel.clientHeight + 1)
+            panel.scrollTo({ top: Number(event.data.y) || 0, behavior: event.data.smooth ? "smooth" : "auto" });
         } else if (event.data?.type === "timeline:edit") editLine(Number(event.data.line));
       });
       // Keep the current-line highlight on the line the caret is on.
@@ -2470,6 +3414,14 @@ footer: See you there ♡</pre>
         copy.querySelector("#help").setAttribute("hidden", "");
         copy.querySelector("#help-toggle").setAttribute("aria-pressed", "false");
         copy.querySelector("#pane").classList.remove("help");
+        // The run chrome is rebuilt on load from the saved copy's own state.
+        copy.querySelector("body").classList.remove("run-active");
+        copy.querySelector("#run-css")?.remove();
+        copy.style.removeProperty("--run-bar-h");
+        for (const id of ["#run-top", "#run-bottom", "#run-start"]) {
+          copy.querySelector(id).textContent = "";
+          copy.querySelector(id).setAttribute("hidden", "");
+        }
         return "<!doctype html>\n" + copy.outerHTML;
       }
       function filename() {
@@ -2498,6 +3450,12 @@ footer: See you there ♡</pre>
             if (!text || text === editor.value) return;
             // Loaded, not edited: nothing saves until the user types.
             editor.value = text;
+            // A new document for the preview: it opens where the new
+            // timeline should (a routine at its top, a dated day at "now"),
+            // not where the example it replaces was scrolled to. The frame
+            // does that itself; a second srcdoc navigation here could leave
+            // the sandboxed frame unrendered after a reload.
+            previewDoc++;
             update();
             docBaseline = editor.value;
             // A shared view sends "?line=N" when a card was tapped there:
@@ -2780,7 +3738,7 @@ footer: See you there ♡</pre>
               // Not requestAnimationFrame: a backgrounded tab never fires it.
               await new Promise((tick) => setTimeout(tick, 0));
               const baked = new DOMParser().parseFromString(html, "text/html");
-              for (const selector of [".timeline", ".axis", ".hour", ".event"]) {
+              for (const selector of [".timeline", ".axis", ".hour", ".offset", ".event"]) {
                 const from = live.querySelectorAll(selector),
                   to = baked.querySelectorAll(selector);
                 if (from.length !== to.length) throw new Error("layout mismatch");
@@ -2797,7 +3755,8 @@ footer: See you there ♡</pre>
               done(html);
             }
           });
-          frame.srcdoc = html;
+          // A layout pass only: no run mode in this frame.
+          frame.srcdoc = html.replace("</head>", "<script>window.__timelineStatic = true<\/script></head>");
           document.body.append(frame);
         });
       }
@@ -2898,7 +3857,7 @@ footer: See you there ♡</pre>
             ".event-body{background:var(--wash);} .flight-art,.la-art{z-index:0;} .hour{z-index:0;} .events{position:relative;z-index:2;} .connectors{z-index:1;} .event.past,.connector.past,.event-dot.past{opacity:1;} .now{animation:none;} h1::after{animation:none;}";
           frame.srcdoc = html.replace(
             "</head>",
-            `<style>${captureCss}</style><script src="vendor/html2canvas.min.js"><\/script></head>`,
+            `<style>${captureCss}</style><script>window.__timelineStatic = true<\/script><script src="vendor/html2canvas.min.js"><\/script></head>`,
           );
           document.body.append(frame);
         });

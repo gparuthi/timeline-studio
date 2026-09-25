@@ -6,3 +6,6 @@ worker/
 .assetsignore
 README.md
 publish.sh
+docs/
+tests/
+scripts/

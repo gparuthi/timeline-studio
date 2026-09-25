@@ -209,7 +209,8 @@ export function eventObjects(model, name, calendarHref, hrefMap = {}) {
         `DTEND:${stamp(wallToUtc(day.iso, end, dayZone))}`,
         `SUMMARY:${esc(event.title)}`,
       ];
-      if (event.detail) lines.push(`DESCRIPTION:${esc(event.detail)}`);
+      const description = TimelineText.describe(event);
+      if (description) lines.push(`DESCRIPTION:${esc(description)}`);
       if (place) lines.push(`LOCATION:${esc(place)}`);
       if (url) lines.push(`URL:${url}`);
       lines.push(`X-TIMELINE-LINE:${event.line}`, "END:VEVENT", "END:VCALENDAR");
@@ -249,24 +250,33 @@ export function applyEvent(text, model, existing, incoming) {
     return lines.join("\n");
   }
   // Another day (or a new event): take the line out, drop it into the day.
+  // Its step notes ("- " lines under it) move with it.
   const cut = existing ? removeEvent(lines, existing) : null;
   const after = insertionPoint(lines, model, cut, start.iso, minutes);
-  lines.splice(after, 0, ...(typeof after === "number" ? [line] : []));
+  lines.splice(after, 0, ...(typeof after === "number" ? [line, ...(cut ? cut.notes : [])] : []));
   return tidy(lines).join("\n");
 }
 
-// Take an event's line out; when it was the day's last event, the day's
-// own line goes too (a day: with nothing under it does not parse), along
-// with a range: written just under it. Returns where the cut starts and
-// how many lines it took, for the index shifts that follow.
+// The "- " step-note lines right under line index `at` (0-based).
+function notesAfter(lines, at) {
+  let n = 0;
+  while (at + 1 + n < lines.length && /^\s*-(\s|$)/.test(lines[at + 1 + n])) n++;
+  return n;
+}
+
+// Take an event's line out, with its step notes; when it was the day's
+// last event, the day's own line goes too (a day: with nothing under it
+// does not parse), along with a range: written just under it. Returns
+// where the cut starts, how many lines it took (for the index shifts that
+// follow) and the step-note lines, which travel with a moved event.
 function removeEvent(lines, removed) {
-  lines.splice(removed.line - 1, 1);
+  const notes = lines.splice(removed.line - 1, 1 + notesAfter(lines, removed.line - 1)).slice(1);
   const day = removed.day;
-  if (!day.line || day.events.length > 1 || day.notes.length) return { line: removed.line, count: 1 };
+  if (!day.line || day.events.length > 1 || day.notes.length) return { line: removed.line, count: 1 + notes.length, notes };
   let count = 1;
   while (day.line - 1 + count < lines.length && /^\s*range\s*:/.test(lines[day.line - 1 + count])) count++;
   lines.splice(day.line - 1, count);
-  return { line: day.line, count: count + 1 };
+  return { line: day.line, count: count + 1 + notes.length, notes };
 }
 
 // Index in `lines` before which the new line goes. Appends a `day:` block
@@ -278,7 +288,8 @@ function insertionPoint(lines, model, removed, iso, minutes) {
   if (day) {
     const events = day.events.filter((e) => !removed || e.line < removed.line || e.line >= removed.line + removed.count);
     const before = events.filter((e) => e.minutes <= minutes).at(-1);
-    if (before) return shift(before.line); // after that event's line (1-based line == 0-based index + 1)
+    // After that event's line (1-based line == 0-based index + 1) and its step notes.
+    if (before) return shift(before.line) + notesAfter(lines, shift(before.line) - 1);
     const first = events[0];
     if (first) return shift(first.line) - 1;
     // No events: right after the day's own line (and a range: line under it).

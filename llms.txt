@@ -134,6 +134,36 @@ Start each day with `day: <label>`. Events, `range:`, `note:`, `city:` and
     12:00 | Lake Ashi cruise | @ | palm | sage
     16:00 | Onsen | Towels provided | bed | sand
 
+### Step notes
+
+Lines starting with `- ` directly under an event line are that event's notes
+(form cues, ingredients for a step). The card folds them behind "2 notes".
+
+    18:00 | Pier at sunset | Ferris wheel @ Santa Monica Pier | palm | sand
+    - Bring a jacket
+    - Cash for the arcade
+
+### Routines: workouts and recipes (`clock: relative`)
+
+For something you follow live from Start, write `clock: relative`. Times are
+then elapsed time, not time of day: `5:30` is 5 min 30 s after Start
+(`1:02:03` is H:MM:SS), and `+45s` alone is a step that starts when the line
+above it ends. Durations take `s`, `m`, `h`: `+45s`, `+2m`, `+1m30s`. Spans
+(`0:00 - 15:00`, `15:00 +25m`) can overlap for parallel recipe steps. `day:`
+lines become section labels on one continuous clock; `date:`, `range:`,
+`timezone:` and `city:` are ignored. Write repeated steps out in full. The
+page gets a Start button with a countdown, beeps and a voice.
+
+    title: 10-min Core
+    clock: relative
+    theme: future
+
+    +1m  | Jog in place | Easy pace | | sand
+    +45s | Plank | Elbows under shoulders | | sky
+    - Hips level with shoulders
+    +15s | Rest | | | sage
+    +45s | Side plank L | Stack your feet | | sky
+
 Write day labels as real dates with weekday, month, day and year
 (`Sunday, Jun 7, 2026`) whenever you know them: the masthead then shows the
 date span and calendar export works. Undated labels (`Day 1`) are allowed.
@@ -142,8 +172,9 @@ date span and calendar export works. Undated labels (`Day 1`) are allowed.
 
 - Output only the format above: no Markdown, bold or bullets inside the
   timeline text.
-- Every event line starts with a time. Do not write events without times; if
-  the person gave none, choose sensible ones and say so.
+- Every event line starts with a time (or, in a routine, a `+duration`). Do
+  not write events without times; if the person gave none, choose sensible
+  ones and say so.
 - Ask for missing essentials only when you truly cannot guess (usually the
   date). Otherwise make reasonable choices and mention them in one line.
 - Keep it to what fits on a phone: about 4 to 10 events a day, titles short,

@@ -1,0 +1,33 @@
+# A routine runs on elapsed time: press Start and follow along.
+title: 10-min Core
+clock: relative
+theme: future
+subtitle: No equipment, one mat
+
+day: Warm-up
++1m   | Jog in place | Easy pace, loose shoulders | | sand
+
+day: Main set
++45s  | Plank | Elbows under shoulders | | sky
+- Hips level with shoulders
+- Breathe out slowly, don't hold your breath
++15s  | Rest | | | sage
++45s  | Side plank L | Stack your feet | | sky
++15s  | Rest | | | sage
++45s  | Side plank R | Stack your feet | | sky
++15s  | Rest | | | sage
++45s  | Dead bug | Low back pressed into the mat | | sky
+- Opposite arm and leg, slowly
++15s  | Rest | | | sage
++45s  | Bicycle crunches | Elbow to opposite knee | | sky
++15s  | Rest | | | sage
++45s  | Glute bridge | Squeeze at the top | | sky
++15s  | Rest | | | sage
++45s  | Mountain climbers | Knees to chest, hips down | | sky
++15s  | Rest | | | sage
++45s  | Hollow hold | Arms by your ears | | sky
+
+day: Cool-down
++1m15s | Stretch | Child's pose, then cobra | | sand
+
+note: A mat and a bottle of water

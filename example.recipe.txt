@@ -1,0 +1,17 @@
+# Steps can overlap: the oven heats while you chop.
+title: Sheet-pan dinner
+clock: relative
+theme: minimal
+subtitle: Chicken thighs, peppers and onions for four
+
+0:00 - 15:00 | Preheat the oven | 220°C, rack in the middle | | sand
+0:00 +10m    | Chop | Onions and peppers in thick wedges | | sage
+- 2 red onions
+- 3 peppers, any colour
++5m          | Season the tray | Oil, salt and paprika; chicken skin side up | | sage
+15:00 +25m   | Roast | Until the chicken is golden | | sand
++5m          | Rest and plate | Spoon the juices over | | sky
+27:30        | Toss the vegetables | Leave the chicken where it is
+
+note: 8 chicken thighs, 2 red onions, 3 peppers
+note: Olive oil, salt, smoked paprika
