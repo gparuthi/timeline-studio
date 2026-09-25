@@ -70,7 +70,8 @@ test("only relative timelines carry run mode", () => {
   assert.doesNotMatch(fileCopy.render(samples["example.routine.txt"], { live: true }), /function runRuntime/);
 });
 
-test("the example files are in publish.sh's copy list", () => {
+// publish.sh lives only in the playground folder, not in the public mirror.
+test("the example files are in publish.sh's copy list", { skip: !fs.existsSync(path.join(root, "publish.sh")) && "no publish.sh here" }, () => {
   const publish = read("publish.sh");
   for (const file of ["example.timeline.txt", "example.routine.txt", "example.recipe.txt"]) assert.match(publish, new RegExp(file.replace(".", "\\.")));
 });
