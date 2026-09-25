@@ -28,7 +28,10 @@
   // 30 uploads a minute per client address.
   "ratelimits": [
     { "name": "COMMANDS", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
-    { "name": "IMAGES", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }
+    { "name": "IMAGES", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
+    // POST /mcp, the connector for ChatGPT and Claude (src/mcp.js): 60
+    // requests a minute per client address.
+    { "name": "MCP", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } }
   ],
   // A routine's live run, shared by every page open on its link: one
   // Durable Object per name (src/runroom.js), SQLite-backed so it runs on

@@ -144,6 +144,9 @@ test("a routine's page: the ready card and the elapsed lanes, no clock times", (
   assert.match(page, /<main class="sheet routine"><header class="ready"><div class="ready-card"><h1>T<\/h1><p class="ready-kv"><b>3 min<\/b> <span>4 moves · 1 rest<\/span><\/p>/);
   assert.match(page, /data-chip="Mat">.*Mat<\/button><button type="button" class="chip" aria-pressed="false" data-chip="water">.*Water<\/button>/);
   assert.match(page, /<button type="button" class="ready-go"[^>]*>.*Start <small>· 3 min<\/small><\/button>/);
+  // Edit beside Start, hidden until a page with an editor shows it (so the
+  // floating Edit button never has to sit on a step).
+  assert.match(page, /<\/button><button type="button" class="ready-edit" data-html2canvas-ignore hidden>✎ Edit<\/button><\/div>/);
   // Durations on chips, starts in the gutter, a rest as a slim row.
   assert.match(page, /<span class="dur">30s<\/span>.*<span class="dur">45s<\/span>.*<span class="dur">1½ min<\/span>/s);
   assert.match(page, /<span class="gl ly" data-t="0"[^>]*><b>start<\/b><\/span>/);

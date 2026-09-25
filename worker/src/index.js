@@ -15,6 +15,8 @@
 //   GET  /run/<name>      WebSocket: the live run of a routine, shared by every
 //                         page open on the link (runroom.js); .json polls it,
 //                         POST sends an op when the socket is down
+//   POST /mcp             the MCP connector for ChatGPT and Claude (mcp.js):
+//                         format_guide, create/get/update_timeline, control_run
 //   POST /img             image bytes (png/jpeg/webp/gif, <= 1.5 MB) -> { url }
 //   GET  /img/<hash>.<ext> the image, cached for a year (content-addressed)
 //   GET  /<id>            a snapshot from the earlier content-addressed
@@ -29,6 +31,7 @@
 import TimelineText from "../../timeline-renderer.js";
 import { isDavRequest, handleDav } from "./caldav.js";
 import { RunRoom } from "./runroom.js";
+import { handleMcp } from "./mcp.js";
 
 // The Durable Object class must be exported by the Worker's main module.
 export { RunRoom };
@@ -40,11 +43,12 @@ const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics|\.mobileconfig|\.
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
 const RUN = /^\/run\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.json)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
-const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version", "llms", "img", "run", "places"]);
+const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version", "llms", "img", "run", "places", "mcp"]);
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, PUT, GET, OPTIONS",
-  "access-control-allow-headers": "content-type, if-none-match",
+  // The mcp-* headers are the MCP clients' (a browser-based one preflights).
+  "access-control-allow-headers": "content-type, if-none-match, accept, authorization, mcp-protocol-version, mcp-session-id, mcp-method, mcp-name, last-event-id",
   "access-control-expose-headers": "etag",
   "access-control-max-age": "86400",
 };
@@ -65,6 +69,7 @@ export default {
       return json({ version: await appVersion(env, url) }, 200, { "cache-control": "no-store" });
     if (url.pathname === "/resolve" && request.method === "GET") return resolveMap(url.searchParams.get("u") || "");
     if (url.pathname === "/command" && request.method === "POST") return command(request, env);
+    if (url.pathname === "/mcp") return handleMcp(request, env, { loadDoc, saveDoc, encode, summary, reserved: RESERVED, cors: CORS });
     if (url.pathname === "/places" && request.method === "POST") return places(request, env);
     if (url.pathname === "/img" && request.method === "POST") return putImage(request, env, url);
     const run = url.pathname.match(RUN);

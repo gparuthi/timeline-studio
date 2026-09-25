@@ -14,6 +14,12 @@ You are reading this because a person wants you to write one. Follow this
 page: pick the kind, write the text, then give the person an "open" link and
 the text itself.
 
+If you have the Timeline Studio connector (tools named `create_timeline`,
+`get_timeline`, `update_timeline`, `format_guide`), use it instead of building
+a link: it checks the text, saves it and returns a short link to give the
+person, and it can change the same timeline later. Its address is
+https://tl.gaup.uk/mcp (no sign-in).
+
 ## Pick the kind first
 
 If the person will do it step by step from a start moment (cook it, train it,
@@ -50,6 +56,10 @@ with `"https://tl.gaup.uk/#text=" + encodeURIComponent(text)` rather than by han
 Opening the link loads the timeline without saving anything. The person's first
 edit gives it a permanent address that follows later edits. The text in the
 fragment never reaches a server until then.
+
+To change an existing timeline, the person can paste its text to you; edit it
+and send back the complete new text and link, keeping lines you did not need
+to change exactly as they were.
 
 ## The format
 
@@ -276,6 +286,3 @@ own photos in the studio (tap a card, then **Photo**).
   have 30 steps), titles short, descriptions under about 60 characters, a few
   notes at most.
 - Resolve relative dates ("next Saturday") to real dates.
-- To change an existing timeline, the person can paste its text to you; edit
-  it and send back the complete new text and link, keeping lines you did not
-  need to change exactly as they were.
