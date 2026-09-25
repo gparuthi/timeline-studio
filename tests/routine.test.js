@@ -201,14 +201,18 @@ test("the now line follows elapsed time through the drawn scale", () => {
   assert.equal(core.yAt(g.map, 99999), core.yAt(g.map, 2700));
 });
 
-test("run view: the header stays compact and the live card carries the notes, after its description", () => {
+test("run view: a one-row header with no footer, and the live card carries the notes, after its description", () => {
   const text = "title: Soup\n+10m | Prep | Chop the onion and the tomato | | sage\n- 1 onion\n- 1 tomato\n+8m | Saute | In oil | | sand\n- 1 tbsp oil";
   const page = render(text);
-  // The run header has no notes list and one line of description.
-  assert.doesNotMatch(page, /run-notes/);
-  assert.match(page, /\.run-detail\{[^}]*white-space:nowrap;[^}]*text-overflow:ellipsis/);
-  // Its big picture is for wide screens only.
-  assert.match(page, /@media\(max-width:699px\),\(max-height:699px\)\{\.run-photo\{display:none!important\}\}/);
+  // §7: one 56 px row (30 px tabular countdown), a 3 px progress line on
+  // its bottom edge, content clamped to the sheet's width, and no bottom bar.
+  assert.match(page, /\.rv-live,\.rv-done\{align-items:center;gap:8px;height:56px\}/);
+  assert.match(page, /\.rv-ct\{[^}]*font:800 30px\/1 [^}]*font-variant-numeric:tabular-nums\}/);
+  assert.match(page, /\.rv-pl\{position:absolute;left:0;bottom:-1px;height:3px;/);
+  assert.match(page, /\.rv-row\{position:relative;max-width:760px;margin:0 auto;/);
+  assert.doesNotMatch(page, /run-bottom|run-bar|run-controls/);
+  // The step's picture in the left column is for tall screens only.
+  assert.match(page, /@media\(max-height:699px\)\{\.rc-pic\{display:none!important\}\}/);
   // A full-width card: title, "2 notes", length and description in one
   // row, ordered so open notes come after the description.
   const prep = page.match(/<div class="cd w [^"]*"[^>]*data-line="2"[^>]*>(.*?)<\/div><span class="cd-th/)[1];
@@ -217,10 +221,10 @@ test("run view: the header stays compact and the live card carries the notes, af
   assert.match(page, /\.cd \.step-notes\[open\]\{order:4;flex-basis:100%;\}/);
   // The live card shows its whole description.
   assert.match(page, /\.lanes \.cd\.live \.cd-d\{display:block;-webkit-line-clamp:none;white-space:normal;\}/);
-  // The two sound switches share the row equally, and it stays compact on a wide screen.
-  assert.match(page, /\.run-toggles\{display:flex;gap:8px;max-width:440px;margin:6px auto 8px\}/);
-  assert.match(page, /\.run-tg\{display:flex;flex:1 1 0;/);
-  assert.doesNotMatch(page, /\.run-tg\.run-announce\{flex:1/);
+  // Tap targets are at least 40 px.
+  assert.match(page, /\.rv-pz\{flex:none;width:44px;height:44px;/);
+  assert.match(page, /\.rv-more,\.rv-ib\{flex:none;width:40px;height:40px;/);
+  assert.match(page, /\.run-tg\{display:flex;flex:1 1 0;min-width:0;align-items:center;gap:8px;height:40px;/);
 });
 
 test("run view: the page follows the run to the top of the live steps", () => {

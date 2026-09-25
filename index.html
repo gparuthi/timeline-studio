@@ -265,12 +265,21 @@
         height: 100vh;
         height: 100dvh;
       }
-      /* Run mode (relative timelines): the focus panel above the preview and
-         the control bar below it, both outside the scrolling panel so they
-         stay put on iOS, where the preview frame is as tall as its content. */
-      .workspace > .run-top,
-      .workspace > .run-bottom {
+      /* Run mode (relative timelines, docs/routines.md §7): a one-row
+         header above the preview, outside the scrolling panel so it stays
+         put on iOS, where the preview frame is as tall as its content. On a
+         wide workspace it is a left column beside the preview instead. */
+      .workspace > .run-top {
+        position: relative;
+        z-index: 26;
         flex: none;
+      }
+      body.run-cols .workspace {
+        flex-direction: row;
+      }
+      body.run-cols .workspace > .run-top {
+        width: var(--run-col, 360px);
+        height: 100%;
       }
       /* The docked Start: a full-width bar once the sheet's own Start has
          scrolled away, with room on the right for the Edit button. */
@@ -288,13 +297,13 @@
       }
       /* A routine never has the Edit button floating over its steps: the
          ready card carries its own Edit while it is on screen, the docked
-         Start has Edit beside it, and a run puts it in the run bar (the
-         run runtime moves it there, and beside Restart when done). */
-      body.run-routine:not(.run-docked):not(.run-active) > .edit-toggle {
+         Start has Edit beside it, and the run view has its own (in ⋯, the
+         done row, the left column), which presses this one. */
+      body.run-routine:not(.run-docked) > .edit-toggle,
+      body.run-active > .edit-toggle,
+      body.run-done > .edit-toggle,
+      body.run-cols > .edit-toggle {
         display: none;
-      }
-      body.run-active .toast {
-        bottom: calc(var(--run-bar-h, 0px) + 58px);
       }
       /* The editor lives in a slide-in pane; the timeline is the page. */
       .pane {
@@ -1224,7 +1233,6 @@ title: 5-min Core
           sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
         ></iframe>
       </section>
-      <div id="run-bottom" class="run-bottom" hidden></div>
       <div id="run-start" class="run-start-slot" hidden></div>
     </main>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
@@ -2153,8 +2161,9 @@ title: 5-min Core
         // says when that Start has scrolled away so a docked one can show. In
         // the studio's preview (body.live) Start, ticks and docking go to the
         // studio by message: that frame has no storage and no audio of its own.
-        function routineRuntime(makeCore) {
+        function routineRuntime(makeCore, makeRunCore) {
           const core = makeCore(),
+            runCore = makeRunCore(),
             doc = document,
             lanes = doc.querySelector(".lanes");
           if (!lanes) return () => {};
@@ -2165,6 +2174,7 @@ title: 5-min Core
             map = null,
             liveRest = null,
             followed = null,
+            nextKey = "",
             lastWidth = -1;
           const num = (v) => (v === undefined || v === "" ? undefined : Number(v));
           const all = () => [...lanes.querySelectorAll("[data-i]")];
@@ -2207,13 +2217,43 @@ title: 5-min Core
             map = g.map;
             tick(true);
           }
-          // The run, as the run runtime (or the studio) reports it.
+          // The run, as the run runtime (or the studio) reports it: where it is,
+          // whether the two-column view is showing (the ready card is then in the
+          // left column, so the sheet's own hides, and the live step's notes are
+          // there too), and the sound switches.
           function tick(fromLayout) {
             if (!active) return;
-            const run = window.__timelineRun && window.__timelineRun.active ? window.__timelineRun : null,
+            const info = window.__timelineRun || null,
+              run = info && info.active ? info : null,
+              cols = !!(info && info.cols),
               e = run ? run.elapsed : -1,
               els = all();
             doc.body.classList.toggle("run-on", !!run);
+            doc.body.classList.toggle("run-cols", cols);
+            const fin = !run && info && info.finished ? info.finished : null,
+              dn = lanes.querySelector(".dn");
+            doc.body.classList.toggle("run-fin", !!fin);
+            if (dn) {
+              const words = [...dn.childNodes].find((n) => n.nodeType === 3);
+              if (!dn.dataset.text) dn.dataset.text = words.textContent;
+              const text = fin ? fin.title + " " : dn.dataset.text;
+              if (words.textContent !== text) words.textContent = text;
+              let small = dn.querySelector("small");
+              if (fin && !small) dn.append((small = doc.createElement("small")));
+              if (small) {
+                if (fin) small.textContent = fin.sub;
+                else small.remove();
+              }
+            }
+            // During a run the sheet ends with room enough for its last steps to
+            // scroll up under the header (from the view's height as the run
+            // reports it: in the studio's iOS preview, sized to its content, a
+            // height of the frame's own would only grow it).
+            const sheetEl = doc.querySelector(".sheet.routine"),
+              room = run ? Math.max(120, Math.round((run.view || window.innerHeight) - 240)) + "px" : "";
+            if (sheetEl && sheetEl.style.paddingBottom !== room) sheetEl.style.paddingBottom = room;
+            if (info && info.sound)
+              doc.querySelectorAll(".ready-sound [data-sound]").forEach((el) => el.setAttribute("aria-pressed", String(!!info.sound[el.dataset.sound === "beeps" ? "beeps" : "voice"])));
             let rest = null,
               reflow = false,
               liveSteps = [];
@@ -2228,13 +2268,15 @@ title: 5-min Core
               el.classList.toggle("done", isDone);
               if (isLive && el.dataset.k === "rest") rest = el.dataset.i;
               if (isLive && el.dataset.k !== "mini") liveSteps.push(el);
-              // The live step's notes open while it runs and fold when it ends.
-              const notes = el.dataset.k === "card" && el.querySelector(".step-notes");
-              if (notes && isLive && !notes.open && !notes.dataset.auto) {
+              // The live step's notes open while it runs and fold when it ends
+              // (in two columns they are in the left column instead).
+              const notes = el.dataset.k === "card" && el.querySelector(".step-notes"),
+                want = isLive && !cols;
+              if (notes && want && !notes.open && !notes.dataset.auto) {
                 notes.dataset.auto = "1";
                 notes.open = true;
                 reflow = true;
-              } else if (notes && !isLive && notes.dataset.auto) {
+              } else if (notes && !want && notes.dataset.auto) {
                 delete notes.dataset.auto;
                 notes.open = false;
                 reflow = true;
@@ -2246,16 +2288,38 @@ title: 5-min Core
                 el.querySelector(".rs-len").hidden = isLive;
               }
             }
-            // Up next: during a rest (or a gap), the next move is outlined.
-            const moving = liveSteps.some((el) => el.dataset.k === "card");
-            const upcoming = run && !moving ? els.filter((el) => el.dataset.k === "card" && Number(el.dataset.at) > e).sort((a, b) => a.dataset.at - b.dataset.at)[0] : null;
-            els.forEach((el) => el.classList.toggle("upnext", el === upcoming));
+            // Up next: the next move is outlined with a tag; during a rest (or a
+            // gap) on a phone it grows to show the move's picture.
+            const cards = els.filter((el) => el.dataset.k === "card"),
+              moving = liveSteps.some((el) => el.dataset.k === "card"),
+              pick = run ? runCore.upNext(cards.map((el) => ({ el, at: Number(el.dataset.at), until: num(el.dataset.until), line: Number(el.dataset.line), rest: false })), e) : null,
+              upcoming = pick ? pick.el : null,
+              grow = !!upcoming && !moving && !cols,
+              key = upcoming ? upcoming.dataset.i + (grow ? "+" : "") : "";
+            if (key !== nextKey) {
+              nextKey = key;
+              reflow = true;
+              for (const el of cards) {
+                const mine = el === upcoming;
+                el.classList.toggle("upnext", mine);
+                el.classList.toggle("grow", mine && grow);
+                el.querySelector(":scope .upk")?.remove();
+                if (!mine) continue;
+                // The tag sits by the length chip; grown, it heads the card.
+                const t = doc.createElement("span");
+                t.className = "upk";
+                t.innerHTML = `up next<span class="upk-len"> · ${core.chip(Number(el.dataset.until) - Number(el.dataset.at))}</span>`;
+                const box = el.querySelector(".cd-row") || (grow ? el : el.querySelector(".cd-ft") || el);
+                if (grow) box.prepend(t);
+                else box.append(t);
+              }
+            }
             // Cards changed height (a live rest grows, notes open or fold, a
-            // live card shows its whole description): lay out again now, before
-            // following the run, so the scroll below uses the new positions. (The
-            // toggle event lays out too, but only after this has scrolled; the
-            // card that just finished folding its notes would then pull the new
-            // live card up under the header.)
+            // live card shows its whole description, up next moved): lay out
+            // again now, before following the run, so the scroll below uses the
+            // new positions. (The toggle event lays out too, but only after this
+            // has scrolled; the card that just finished folding its notes would
+            // then pull the new live card up under the header.)
             if ((rest !== liveRest || reflow) && !fromLayout) {
               liveRest = rest;
               return layout();
@@ -2263,7 +2327,7 @@ title: 5-min Core
             liveRest = rest;
             // "Now": a line across the lanes, behind the cards, so it shows in
             // the gutter and between cards but never through a card's text; a
-            // live card fills up to it.
+            // live card fills up to it. Grey, and "paused", while paused.
             let line = lanes.querySelector(".nowh"),
               label = lanes.querySelector(".gnow");
             if (!run) {
@@ -2283,21 +2347,26 @@ title: 5-min Core
               label.innerHTML = "<b>now</b>";
               lanes.append(line, label);
             }
+            const paused = run.running === false;
+            line.classList.toggle("pz", paused);
+            if (label.textContent !== (paused ? "paused" : "now")) label.innerHTML = paused ? "<b>paused</b>" : "<b>now</b>";
             line.style.top = y - 1 + "px";
             label.style.top = y - 5 + "px";
             lanes.querySelectorAll(".gl[data-t]").forEach((el) => (el.hidden = el.dataset.hidden === "1" || Math.abs(parseFloat(el.style.top) - (y - 5)) < 13));
             for (const el of liveSteps) if (el.dataset.k === "card") el.style.setProperty("--fy", Math.max(0, y - parseFloat(el.style.top)) + "px");
             // Keep the live steps in view: scroll once each time they change,
-            // so the page can still be scrolled by hand in between. The top live
-            // card (or, in a rest or a gap, the rest and the move up next) sits
-            // just under the run header; with nothing live, the now line does.
-            const key = liveSteps.map((el) => el.dataset.i).join(",") || "next:" + (upcoming ? upcoming.dataset.i : "");
-            if (key === followed) return;
-            followed = key;
+            // so the page can still be scrolled by hand in between. On a phone
+            // the top live card (or, in a rest or a gap, the rest and the move up
+            // next) sits just under the run header; with nothing live, the now
+            // line does. In two columns the now line goes a third of the way
+            // down the lanes.
+            const key2 = (cols ? "c:" : "") + (liveSteps.map((el) => el.dataset.i).join(",") || "next:" + (upcoming ? upcoming.dataset.i : ""));
+            if (key2 === followed) return;
+            followed = key2;
             const tops = liveSteps.map((el) => parseFloat(el.style.top)).concat(upcoming ? [parseFloat(upcoming.style.top)] : []),
-              target = core.followTop(tops, y),
+              target = cols ? y - (run.view || window.innerHeight) / 3 : core.followTop(tops, y) - headerInset(run) - 12,
               base = lanes.getBoundingClientRect().top + window.scrollY;
-            window.scrollTo({ top: Math.max(0, base + target - headerInset(run) - 12), behavior: "smooth" });
+            window.scrollTo({ top: Math.max(0, base + target), behavior: "smooth" });
           }
           // How much of the top of this page the run header covers, measured now
           // (its height changes with the step: a second live row, a rest's up
@@ -2305,6 +2374,7 @@ title: 5-min Core
           // pinned inside the page; in the studio it sits above the preview
           // frame, so it covers none of it (run.inset is 0 there).
           function headerInset(run) {
+            if (run.cols) return 0;
             const header = doc.querySelector(".run-doc.run-top");
             if (header && !header.hidden) return header.getBoundingClientRect().height;
             return run.inset || 0;
@@ -2348,6 +2418,20 @@ title: 5-min Core
           const onMessage = (event) => {
             if (event.source === parent && event.data?.type === "timeline:ticks" && event.data.key === tickKey) showTicks(event.data.ticks || []);
           };
+          // The sound switches in the ready card act on the run runtime's (the
+          // studio's, from its preview), which reports them back in the run.
+          const sounds = doc.querySelector(".ready-sound");
+          const onSound = (event) => {
+            const el = event.target.closest("[data-sound]");
+            if (!el) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (inPreview) post({ type: "timeline:sound", which: el.dataset.sound });
+            else window.__timelineRunApi?.sound(el.dataset.sound);
+          };
+          // In the studio's preview a tap is the first tap on the page for sound
+          // (the studio unlocks its audio on it where the browser allows).
+          const onTap = () => post({ type: "timeline:tap" });
           // Start in the card; once it has scrolled away, a docked Start shows
           // at the bottom (the run runtime's, or the studio's).
           const go = doc.querySelector(".ready-go");
@@ -2377,6 +2461,12 @@ title: 5-min Core
               edit.addEventListener("click", onEdit);
             }
             window.addEventListener("message", onMessage);
+            if (sounds) {
+              sounds.hidden = false;
+              sounds.addEventListener("click", onSound);
+            }
+            if (inPreview) doc.addEventListener("pointerdown", onTap, true);
+            else window.__timelineTicks = showTicks;
             if (inPreview) tickKey && post({ type: "timeline:ticks?", key: tickKey });
             else showTicks(readTicks());
             if (go && typeof IntersectionObserver === "function") {
@@ -2413,6 +2503,9 @@ title: 5-min Core
             go?.removeEventListener("click", onGo);
             edit?.removeEventListener("click", onEdit);
             window.removeEventListener("message", onMessage);
+            sounds?.removeEventListener("click", onSound);
+            doc.removeEventListener("pointerdown", onTap, true);
+            if (window.__timelineTicks === showTicks) window.__timelineTicks = null;
             doc.removeEventListener("toggle", onToggle, true);
             window.removeEventListener("load", layout);
             if (window.__timelineSetRun === onRun) window.__timelineSetRun = null;
@@ -2671,7 +2764,83 @@ title: 5-min Core
             op: "seek",
             shiftMs: state.shiftMs + Math.round(target * 1000 - elapsedMs(state, now)),
           });
-          return { clock, length, total, spoken, elapsedMs, apply, end, position, skipTo, backTo, seek };
+          // Which run view a screen gets (docs/routines.md §7): two columns at
+          // 800 px wide and 560 px tall (an upright iPad gets them, a phone on
+          // its side does not), otherwise the one-row header ("bar").
+          const layoutFor = (width, height) => (width >= 800 && height >= 560 ? "cols" : "bar");
+          // Up next: the next move to start after `e`, a step that is not a rest
+          // (the sheet outlines it; the two-column view shows it under the live
+          // step). A moment is not a move.
+          const upNext = (steps, e) =>
+            steps
+              .filter((s) => s.until !== undefined && !s.rest && s.at > e)
+              .sort((a, b) => a.at - b.at || a.line - b.line)[0] || null;
+          // What the run header says at `e` seconds. The step ending soonest
+          // drives it (its countdown, its progress line); a rest reads "Rest →
+          // Side plank L"; the subline is, in order, "Paused · 1:20 of 10:00",
+          // the other live step as a chip with its own countdown, "move 2 of 10
+          // done" for a routine with rests, or "6:03 of 45:00".
+          function header(steps, e, { paused = false } = {}) {
+            const last = end(steps),
+              pos = position(steps, e),
+              lead = pos.ending,
+              others = pos.active.filter((s) => s !== lead).sort((a, b) => a.until - b.until || a.line - b.line),
+              next = pos.next,
+              rest = !!(lead && lead.rest),
+              coming = rest ? upNext(steps, e) : lead ? null : next,
+              target = lead ? lead.until : next ? next.at : last,
+              from = lead ? lead.at : Math.max(0, ...steps.filter((s) => (s.until ?? s.at) <= e).map((s) => s.until ?? s.at)),
+              remaining = Math.max(0, target - e),
+              moves = steps.filter((s) => !s.rest),
+              of = `${clock(Math.floor(e))} of ${clock(last)}`;
+            const sub = paused
+              ? { kind: "paused", text: `Paused · ${of}` }
+              : others.length
+                ? { kind: "also", step: others[0], left: clock(Math.ceil(others[0].until - e - 1e-6)), pct: Math.min(100, Math.max(0, ((e - others[0].at) / Math.max(0.001, others[0].until - others[0].at)) * 100)), more: others.length - 1 }
+                : steps.some((s) => s.rest)
+                  ? { kind: "moves", text: `move ${moves.filter((s) => (s.until ?? s.at) <= e).length} of ${moves.length} done` }
+                  : { kind: "elapsed", text: of };
+            return {
+              lead,
+              others,
+              next,
+              rest,
+              // The big title: the lead step, "Rest", or "Get ready" in a gap;
+              // `then` is what follows the arrow.
+              title: lead ? lead.title : next ? "Get ready" : "",
+              then: coming ? coming.title : null,
+              remaining,
+              countdown: clock(Math.ceil(remaining - 1e-6)),
+              pct: Math.min(100, Math.max(0, ((e - from) / Math.max(0.001, target - from)) * 100)),
+              // The progress line and countdown go grey in a rest or a pause.
+              grey: paused || rest || !lead,
+              label: paused ? "paused" : rest || !lead ? (coming ? `then ${coming.title}` : "left") : `left of ${total(lead.until - lead.at)}`,
+              of,
+              sub,
+            };
+          }
+          // The ⋯ menu on a phone, in order: the status line, Back / Skip / Stop
+          // (Stop asks first), the two sound switches, Edit. Back, Skip and Edit
+          // close the menu; the switches leave it open.
+          const menu = () => [
+            { id: "status" },
+            { id: "back", label: "Back", closes: true },
+            { id: "skip", label: "Skip", closes: true },
+            { id: "stop", label: "Stop", confirm: true },
+            { id: "beeps", label: "Beeps", toggle: true },
+            { id: "announce", label: "Announce steps", toggle: true },
+            { id: "edit", label: "Edit the text", closes: true },
+          ];
+          // "elapsed 6:03 · left 38:57 · done ≈ <the time it ends>" as [label, value] pairs
+          // (the one clock time, and only during a run; "paused" instead).
+          const status = (e, last, paused, ends) => [
+            ["elapsed", clock(Math.floor(e))],
+            ["left", clock(Math.ceil(last - e - 1e-6))],
+            paused ? ["paused", ""] : ["done ≈", ends],
+          ];
+          // The finished run: "Done · 10:14" (what it really took) over "planned 10 min".
+          const finished = (wallMs, last) => ({ title: `Done · ${clock(wallMs / 1000)}`, sub: `planned ${total(last)}` });
+          return { clock, length, total, spoken, elapsedMs, apply, end, position, skipTo, backTo, seek, layoutFor, upNext, header, menu, status, finished };
         }
         // The routine sheet's geometry: elapsed lanes under the ready card. It
         // places every step, rest, moment and section header in px from the
@@ -2963,13 +3132,34 @@ title: 5-min Core
           h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
           h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
           const key = (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
-          return { title: model.title, steps, key };
+          // The two-column view shows the ready card itself (the sheet's is
+          // hidden there), and labels steps the way the sheet does.
+          const rc = routineCore(),
+            items = model.events.map((e, i) => ({ id: String(i), at: e.at, until: e.until, rest: isRest(e), line: e.line })),
+            notes = [...(model.notes || []), ...(model.days || []).flatMap((day) => day.notes || [])];
+          steps.forEach((s) => {
+            s.atText = rc.atLabel(s.at);
+            if (s.until !== undefined) s.lenText = rc.chip(s.until - s.at);
+          });
+          return {
+            title: model.title,
+            steps,
+            key,
+            subtitle: model.subtitle || "",
+            cover: pictureUrl(model, model.cover) || "",
+            summary: model.events.length ? rc.summary(items) : "",
+            chips: rc.chips(notes.filter((n) => !/https?:\/\//.test(n))),
+          };
         }
-        // Run mode: the Start button, the focus panel pinned over the sheet, the
-        // control bar and the cues. Self-contained like the layout runtime:
-        // exported pages carry it as source and call it with their steps; the
-        // studio calls it with `host` (its own containers, and a `sheet` callback
-        // that forwards the run's position into the preview frame).
+        // Run mode (docs/routines.md §7): the docked Start, the run view and the
+        // cues. On a phone (and anything under 800 x 560) the run view is one
+        // 56 px header row with a ⋯ menu and no bottom bar; on a wide screen it
+        // is a left column beside the lanes, which is also the ready card before
+        // Start. Self-contained like the layout runtime: exported pages carry it
+        // as source and call it with their steps; the studio calls it with
+        // `host` (its own containers: `top`, `start`, `edit`, `area` to
+        // measure, `view` for the preview height, a `sheet` callback that
+        // forwards the run into the preview frame, and `ticks`).
         //
         // The run state lives behind a transport: { now(), get(), send(op),
         // subscribe(fn), rekey(from, to) }. The local one keeps it in
@@ -2981,152 +3171,261 @@ title: 5-min Core
           const core = makeCore(),
             doc = document,
             host = config.host || null;
-          let steps = config.steps,
+          let info = config,
+            steps = config.steps,
             title = config.title,
             key = config.key,
             alive = true;
-          const css = `.run-top[hidden],.run-bottom[hidden],.run-start-slot[hidden],.run-panel [hidden],.run-bar [hidden]{display:none!important}
+          const css = `.run-top[hidden],.run-start-slot[hidden],.run-top [hidden]{display:none!important}
       .run-doc.run-top{position:sticky;top:0;z-index:26}
-      .run-doc.run-bottom{position:fixed;left:0;right:0;bottom:0;z-index:27}
       .run-doc.run-start-slot{position:fixed;left:0;right:0;bottom:0;z-index:27}
       .run-start-slot{display:flex;padding:30px 16px max(16px,env(safe-area-inset-bottom));background:linear-gradient(to bottom,transparent,var(--dock-bg,transparent) 42%);pointer-events:none}
       body:has(.edit-pill) .run-doc.run-start-slot{padding-right:96px}
-      body.run-doc-host.run-active{padding-bottom:var(--run-bar-h,0px)}
       body.run-docked:not(.run-active)>.edit-pill{bottom:calc(max(16px,env(safe-area-inset-bottom)) + 10px)!important}
-      .run-controls>.edit-pill,.run-controls>.edit-toggle,.run-done-actions>.edit-pill,.run-done-actions>.edit-toggle{position:static!important;display:inline-flex!important;align-items:center;justify-content:center;flex:none;height:44px;margin:0!important;padding:0 14px!important;border:0!important;border-radius:999px!important;background:#24313a!important;color:#e9f1f5!important;font:700 14px/1 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif!important;opacity:1!important;box-shadow:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;text-decoration:none!important;white-space:nowrap;cursor:pointer}
-      .run-panel,.run-bar,.run-start{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#e9f1f5;-webkit-font-smoothing:antialiased;letter-spacing:0;text-align:left}
-      .run-panel{max-height:62vh;max-height:62dvh;overflow:auto;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;background:#11181d;border-bottom:1px solid #2b3740;box-shadow:0 8px 28px #0005}
-      .run-inner{max-width:720px;margin:0 auto}
-      .run-head{display:flex;justify-content:space-between;gap:12px;font-size:13px;font-weight:600;color:#9fb3bf}
-      .run-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .run-count{flex:none;font-variant-numeric:tabular-nums}
-      .run-photo{margin:8px 0 0;border-radius:12px;overflow:hidden;background:#0b1013}
-      @media(max-width:699px),(max-height:699px){.run-photo{display:none!important}}
-      .run-photo img{display:block;width:100%;height:min(26vh,240px);height:min(26dvh,240px);object-fit:contain}
-      .run-next-thumb{flex:none;margin-left:auto;width:44px;height:44px;border-radius:8px;overflow:hidden;background:#0b1013}
-      .run-next-thumb img,.run-up-pic img{display:block;width:100%;height:100%;object-fit:cover}
-      .run-step{margin:8px 0 8px;font-size:24px;font-weight:800;line-height:1.1;letter-spacing:-.3px;text-transform:uppercase;overflow-wrap:anywhere}
-      .run-resting .run-step{color:#9fb3bf}
-      .run-meter{height:10px;border-radius:999px;background:#26323a;overflow:hidden}
-      .run-fill{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#3ecf8e,#8fe3b9);transition:width .25s linear}
-      .run-paused .run-fill,.run-resting .run-fill{background:#6f8390}
-      .run-time{display:flex;align-items:baseline;gap:8px;margin-top:6px}
-      .run-secs{font-size:40px;font-weight:800;line-height:1;letter-spacing:-1px;font-variant-numeric:tabular-nums}
-      .run-secs-label{min-width:0;font-size:14px;font-weight:600;color:#9fb3bf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .run-detail{margin:8px 0 0;font-size:15px;line-height:1.3;color:#cfdde5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .run-also{list-style:none;margin:10px 0 0;padding:0}
-      .run-also li{display:flex;align-items:center;gap:10px;margin-top:6px;padding:8px 10px;border-radius:10px;background:#1b262e;border:1px solid #2b3740;font-size:14px;font-weight:700}
-      .run-dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--c,#5f8fb0)}
-      .run-also .run-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .run-mm{flex:1;min-width:24px;height:6px;border-radius:999px;background:#26323a;overflow:hidden}
-      .run-mm i{display:block;height:100%;background:var(--c,#5f8fb0)}
-      .run-also b{flex:none;font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
-      .run-upnext{display:flex;gap:12px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid #2b3740}
-      .run-up-pic{flex:none;width:96px;height:96px;border-radius:12px;overflow:hidden;background:#0b1013}
-      .run-up-text{min-width:0}
-      .run-up-kicker{font-size:12px;color:#9fb3bf;text-transform:uppercase;letter-spacing:1.5px}
-      .run-up-title{font-size:20px;font-weight:800;line-height:1.15;text-transform:uppercase;overflow-wrap:anywhere}
-      .run-up-detail{font-size:14px;color:#cfdde5}
-      .run-next{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:8px;border-top:1px solid #2b3740;font-size:14px;color:#9fb3bf}
-      .run-next-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .run-next b{color:#e9f1f5}
-      .run-done{padding:10px 0 4px;text-align:center}
-      .run-done-title{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}
-      .run-done-actions{display:flex;justify-content:center;gap:10px;margin-top:12px}
-      .run-bar{padding:8px 12px max(10px,env(safe-area-inset-bottom));background:#11181df5;border-top:1px solid #2b3740;box-shadow:0 -8px 28px #0004}
-      .run-status{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 10px;min-height:26px;font-size:13px;color:#9fb3bf;font-variant-numeric:tabular-nums;text-align:center}
-      .run-toggles{display:flex;gap:8px;max-width:440px;margin:6px auto 8px}
-      .run-tg{display:flex;flex:1 1 0;align-items:center;gap:8px;height:40px;padding:0 8px 0 10px;border:1px solid #2b3740!important;border-radius:12px;background:#1c2830;font-size:14px;white-space:nowrap}
-      .run-tg svg{width:19px;height:19px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+      body.run-routine:not(.run-docked)>.edit-pill,body.run-active>.edit-pill,body.run-done>.edit-pill,body.run-cols>.edit-pill{display:none!important}
+      body.run-doc-host.run-cols{padding-left:var(--run-col,360px)}
+      body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--run-col,360px)}
+      .run-top,.run-start{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#e9f1f5;-webkit-font-smoothing:antialiased;letter-spacing:0;text-align:left;line-height:1.3}
+      .run-top button,.run-start{appearance:none;-webkit-appearance:none;border:0;margin:0;padding:0;font:inherit;color:inherit;background:none;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+      .run-top svg,.run-start svg{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+      .run-top svg.solid,.run-start svg{fill:currentColor;stroke:none}
+      .rv,.rc,.rv-live,.rv-done,.rc-ready,.rc-live,.rc-done{display:none}
+      .run-top[data-view^="bar"] .rv{display:block}
+      .run-top[data-view="bar-run"] .rv-live,.run-top[data-view="bar-done"] .rv-done{display:flex}
+      .run-top[data-view^="cols"] .rc{display:flex}
+      .run-top[data-view="cols-ready"] .rc-ready,.run-top[data-view="cols-run"] .rc-live,.run-top[data-view="cols-done"] .rc-done{display:flex}
+      .rv{position:relative;padding-top:env(safe-area-inset-top);background:#11181d;border-bottom:1px solid #2b3740;box-shadow:0 6px 20px #0006}
+      .rv-row{position:relative;max-width:760px;margin:0 auto;padding:0 max(6px,env(safe-area-inset-right)) 0 max(14px,env(safe-area-inset-left));box-sizing:border-box}
+      .rv-live,.rv-done{align-items:center;gap:8px;height:56px}
+      .rv-done{gap:6px}
+      .rv-ct{flex:none;min-width:66px;font:800 30px/1 system-ui,-apple-system,sans-serif;letter-spacing:-.8px;font-variant-numeric:tabular-nums}
+      .rv-ct.pz{color:#9fb3bf}
+      .rv-ct.isrest{color:#cfdde5}
+      .rv-hk{flex:1;min-width:0}
+      .rv-ti{font:800 16px/19px system-ui,-apple-system,sans-serif;text-transform:uppercase;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .rv-dim{color:#9fb3bf;font-weight:700}
+      .rv-sub{display:flex;align-items:center;gap:6px;margin-top:2px;font:600 12px/16px system-ui,sans-serif;color:#9fb3bf;white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
+      .rv-amb{color:#f0b45a}
+      .rv-lchip{flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px 0 6px;border-radius:999px;background:linear-gradient(90deg,color-mix(in srgb,var(--c) 30%,#1b262e) var(--p),#1b262e var(--p));color:#e9f1f5;font:700 12px/1 system-ui,sans-serif;white-space:nowrap;overflow:hidden}
+      .rv-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--c)}
+      .rv-nm{min-width:0;overflow:hidden;text-overflow:ellipsis}
+      .rv-lchip b{flex:none;font-variant-numeric:tabular-nums}
+      .rv-pz{flex:none;width:44px;height:44px;border-radius:50%!important;background:#3ecf8e!important;color:#08241a!important;display:grid;place-items:center}
+      .rv-pz svg{width:22px;height:22px;stroke-width:2.6}
+      .rv-more,.rv-ib{flex:none;width:40px;height:40px;border-radius:50%!important;display:grid;place-items:center;color:#cfdde5!important}
+      .rv-more[aria-expanded="true"]{background:#24313a!important}
+      .rv-amber{flex:none;display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 12px 0 10px!important;border-radius:999px!important;background:#f0b45a!important;color:#2b1d05!important;font:700 13px/1 system-ui,sans-serif!important;white-space:nowrap}
+      .rv-amber svg{width:18px;height:18px}
+      .rv-pl{position:absolute;left:0;bottom:-1px;height:3px;width:0;background:#3ecf8e;border-radius:0 2px 2px 0;transition:width .25s linear}
+      .rv-pl.grey{background:#6f8390}
+      .run-top[data-view="bar-done"] .rv-pl{width:100%!important;border-radius:0;background:#3ecf8e}
+      .rv-ok{flex:none;display:grid;place-items:center;width:24px;color:#3ecf8e}
+      .rv-ok svg{stroke-width:2.6}
+      .rv-rst{flex:none;display:inline-flex;align-items:center;gap:6px;height:44px;padding:0 14px 0 10px!important;border-radius:999px!important;background:#3ecf8e!important;color:#08241a!important;font:800 15px/1 system-ui,sans-serif!important}
+      .rv-rst svg{width:18px;height:18px;stroke-width:2.6}
+      .rv-txb{flex:none;height:40px;padding:0 11px!important;border-radius:999px!important;background:#24313a!important;font:700 14px/1 system-ui,sans-serif!important}
+      .rv-menu{position:absolute;z-index:30;top:calc(100% + 4px);right:6px;display:grid;gap:8px;width:300px;max-width:calc(100vw - 12px);box-sizing:border-box;padding:10px;border-radius:16px;background:#1b2530;border:1px solid #34495a;box-shadow:0 16px 48px #000c}
+      .rv-st{padding:2px 0;font:600 12.5px/1.3 system-ui,sans-serif;color:#9fb3bf;text-align:center;font-variant-numeric:tabular-nums}
+      .rv-st b{color:#e9f1f5}
+      .rv-trio{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+      .rv-trio button,.rv-mrow{display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:12px!important;background:#24313a!important;font:700 14px/1 system-ui,sans-serif!important}
+      .rv-trio svg,.rv-mrow svg{width:19px;height:19px}
+      .rv-mrow{justify-content:flex-start;gap:10px;padding:0 12px!important}
+      .run-tg{display:flex;flex:1 1 0;min-width:0;align-items:center;gap:8px;height:40px;padding:0 8px 0 10px!important;border:1px solid #2b3740!important;border-radius:12px!important;background:#1c2830!important;font:700 14px/1 system-ui,sans-serif!important;white-space:nowrap}
+      .run-tg svg{width:19px;height:19px}
+      .rv-menu .run-tg{height:44px}
       .run-sw{position:relative;flex:none;width:34px;height:20px;margin-left:auto;border-radius:10px;background:#3a4a55}
       .run-sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#9fb3bf;transition:left .15s}
       .run-tg[aria-pressed="true"] .run-sw{background:#3ecf8e}
       .run-tg[aria-pressed="true"] .run-sw::after{left:16px;background:#fff}
-      .run-controls,.run-confirm{display:flex;align-items:center;justify-content:center;gap:10px}
-      .run-confirm{min-height:44px;font-size:15px;font-weight:600}
-      .run-btn,.run-start,.run-done button,.run-confirm button,.run-chip,.run-tg{appearance:none;-webkit-appearance:none;border:0;margin:0;cursor:pointer;font:inherit;font-weight:700;color:#e9f1f5;background:#24313a;touch-action:manipulation}
-      .run-tg{background:#1c2830}
-      .run-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;height:44px;padding:0 10px;border-radius:999px;font-size:15px}
-      .run-btn svg,.run-start svg{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-      .run-start svg{fill:currentColor;stroke:none;width:20px;height:20px}
-      .run-pause,.run-start{background:#3ecf8e;color:#08241a}
-      .run-pause{min-width:112px}
-      .run-start{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:10px;height:56px;padding:0 20px;border-radius:999px;font-size:18px;font-weight:800;white-space:nowrap;box-shadow:0 6px 22px #0006;pointer-events:auto}
+      .run-confirm{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;min-height:44px;font-size:14px;font-weight:600}
+      .run-confirm button{height:44px;padding:0 16px!important;border-radius:999px!important;background:#24313a!important;font-weight:700!important}
+      .run-confirm .run-stop-yes{background:#e0674f!important;color:#fff!important}
+      .rc{flex-direction:column;box-sizing:border-box;height:100%;overflow-y:auto;overscroll-behavior:contain;background:#11181d;border-right:1px solid #2b3740}
+      .rc-ready,.rc-live,.rc-done{flex:1 0 auto;flex-direction:column;gap:12px;box-sizing:border-box;padding:max(20px,env(safe-area-inset-top)) 22px max(18px,env(safe-area-inset-bottom)) max(22px,env(safe-area-inset-left))}
+      .rc-top{display:flex;justify-content:space-between;gap:10px;font:600 13px/1.2 system-ui,sans-serif;color:#9fb3bf;font-variant-numeric:tabular-nums}
+      .rc-top b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e9f1f5;font-weight:700}
+      .rc-top span{flex:none}
+      .rc-pic{flex:none;aspect-ratio:21/10;max-height:30vh;border-radius:14px;overflow:hidden;background:#0b1013}
+      .rc-pic img,.rc-nx-th img,.rc-hero img{display:block;width:100%;height:100%;object-fit:cover}
+      @media(max-height:699px){.rc-pic{display:none!important}}
+      .rc-stp{font:800 30px/1.05 system-ui,sans-serif;text-transform:uppercase;letter-spacing:-.4px;overflow-wrap:anywhere}
+      .rc-stp.isrest{color:#9fb3bf}
+      .rc-meter{flex:none;height:10px;border-radius:999px;background:#26323a;overflow:hidden}
+      .rc-meter i{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#3ecf8e,#8fe3b9);transition:width .25s linear}
+      .rc-meter.grey i{background:#6f8390}
+      .rc-tm{display:flex;align-items:baseline;gap:10px;margin-top:-4px}
+      .rc-tm b{flex:none;font:800 58px/1 system-ui,sans-serif;letter-spacing:-2px;font-variant-numeric:tabular-nums}
+      .rc-tm b.pz{color:#9fb3bf}
+      .rc-tm span{min-width:0;font:600 15px/1.2 system-ui,sans-serif;color:#9fb3bf;overflow-wrap:anywhere}
+      .rc-desc{margin:0;font-size:16px;line-height:1.35;color:#cfdde5;overflow-wrap:anywhere}
+      .rc-nts{margin:-4px 0 0;padding-left:20px;font-size:15px;line-height:1.45}
+      .rc-nts li::marker{color:#9fb3bf}
+      .rc-also{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+      .rc-also li{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:#1b262e;border:1px solid #2b3740;font:700 15px/1.2 system-ui,sans-serif}
+      .rc-also .rv-dot{width:10px;height:10px}
+      .rc-also .nm{flex:0 1 auto;min-width:0}
+      .rc-also .nm span,.rc-also small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .rc-also small{font-weight:500;font-size:13px;color:#9fb3bf}
+      .rc-mm{flex:1;min-width:24px;height:6px;border-radius:999px;background:#26323a;overflow:hidden}
+      .rc-mm i{display:block;height:100%;background:var(--c)}
+      .rc-also b{flex:none;font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+      .rc-nx{display:grid;grid-template-columns:52px 1fr;grid-template-areas:"th k" "th t" "th d";column-gap:12px;align-items:center;padding-top:12px;border-top:1px solid #2b3740}
+      .rc-nx.nopic{grid-template-columns:1fr;grid-template-areas:"k" "t" "d"}
+      .rc-nx .rc-kick{grid-area:k;align-self:end}
+      .rc-nx-th{grid-area:th;width:52px;height:52px;border-radius:10px;overflow:hidden;background:#0b1013}
+      .rc-nx-t{grid-area:t;margin-top:4px;font:800 17px/1.2 system-ui,sans-serif;overflow-wrap:anywhere}
+      .rc-nx-d{grid-area:d;align-self:start;margin-top:2px;font-size:13.5px;color:#cfdde5}
+      .rc-nx.big{grid-template-columns:1fr;grid-template-areas:"k" "th" "t" "d";row-gap:8px;padding-top:4px;border-top:0}
+      .rc-nx.big .rc-nx-th{width:100%;height:auto;aspect-ratio:16/9;max-height:32vh;border-radius:14px}
+      .rc-nx.big .rc-nx-t{font-size:22px;text-transform:uppercase}
+      .rc-kick{font:600 11.5px/1 system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#9fb3bf}
+      .rc-grow{flex:1 1 0;min-height:4px}
+      .rc-ctl{display:flex;justify-content:center;gap:10px}
+      .rc-ctl button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:52px;height:52px;border-radius:999px!important;background:#24313a!important;font:700 17px/1 system-ui,sans-serif!important}
+      .rc-ctl svg{width:22px;height:22px}
+      .rc-ctl .rc-pz{flex:0 1 150px;min-width:110px;background:#3ecf8e!important;color:#08241a!important}
+      .rc-tgs{display:flex;gap:8px}
+      .rc-tgs .run-tg{flex:1 1 auto;gap:6px;padding:0 6px 0 8px!important;font-size:13.5px!important}
+      .rc-foot{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+      .rc-fst{flex:1 1 auto;font:600 12.5px/1.2 system-ui,sans-serif;color:#9fb3bf;font-variant-numeric:tabular-nums}
+      .rc-txb{display:inline-flex;align-items:center;gap:6px;height:40px;margin-left:auto!important;padding:0 12px!important;border-radius:999px!important;background:#24313a!important;font:700 14px/1 system-ui,sans-serif!important}
+      .rc-txb svg{width:17px;height:17px}
+      .rc-hero{position:relative;flex:none;height:230px;border-radius:14px;overflow:hidden;background:#0b1013}
+      .rc-scrim{position:absolute;left:0;right:0;bottom:0;padding:60px 16px 14px;background:linear-gradient(transparent,#000d)}
+      .rc-h{margin:0;font:800 32px/1.05 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;letter-spacing:-1.5px;color:#fff;overflow-wrap:anywhere}
+      .rc-tag{margin:6px 0 0;font-size:14px;color:#fffb}
+      .rc-plain .rc-tag{color:#9fb3bf}
+      .rc-kv{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0;font-size:14px;color:#9fb3bf}
+      .rc-kv b{font-size:24px;color:#fff;letter-spacing:-.5px}
+      .rc-need .rc-kick{margin:4px 0 10px}
+      .rc-chips{display:flex;flex-wrap:wrap;gap:6px}
+      .rc-chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px 0 7px!important;border-radius:999px!important;background:#262624!important;color:#ededea!important;font-size:13px!important;line-height:1.2!important;text-align:left}
+      .rc-ck{display:grid;place-items:center;flex:none;width:16px;height:16px;border-radius:50%;border:1.5px solid #8a8a86;box-sizing:border-box}
+      .rc-ck svg{width:11px;height:11px;stroke-width:3;visibility:hidden}
+      .rc-chip[aria-pressed="true"] .rc-ck{background:#3ecf8e;border-color:#3ecf8e;color:#08241a}
+      .rc-chip[aria-pressed="true"] .rc-ck svg{visibility:visible}
+      .rc-gorow{display:flex;align-items:center;gap:10px}
+      .rc-go{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;gap:10px;height:56px;border-radius:999px!important;background:#3ecf8e!important;color:#08241a!important;font:800 18px/1 system-ui,sans-serif!important;box-shadow:0 6px 22px #0006}
+      .rc-go small{font-weight:600;font-size:15px;opacity:.8}
+      .rc-ed{flex:none;display:grid;place-items:center;width:48px;height:48px;border-radius:50%!important;background:#262624!important;box-shadow:0 4px 14px #0006}
+      .rc-dn{display:flex;align-items:center;gap:14px;margin-top:10px}
+      .rc-dn .rv-ok{width:44px;height:44px;border-radius:50%;background:#3ecf8e;color:#08241a}
+      .rc-dn-t{font:800 30px/1.1 system-ui,sans-serif;font-variant-numeric:tabular-nums}
+      .rc-dn-s{margin-top:2px;font-size:14px;color:#9fb3bf}
+      .rc-dn-act{display:flex;gap:10px}
+      .rc-dn-act button{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:52px;padding:0 22px!important;border-radius:999px!important;background:#24313a!important;font:700 16px/1 system-ui,sans-serif!important}
+      .rc-dn-act .run-restart{flex:1;background:#3ecf8e!important;color:#08241a!important}
+      .run-start{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:10px;height:56px;padding:0 20px;border-radius:999px;background:#3ecf8e;color:#08241a;font-size:18px;font-weight:800;white-space:nowrap;box-shadow:0 6px 22px #0006;pointer-events:auto}
       .run-start small{font-weight:600;font-size:15px;opacity:.8}
-      .run-elapsed{white-space:nowrap}
-      .run-chip{height:26px;padding:0 12px;border-radius:999px;background:#f0b45a;color:#2b1d05;font-size:12px;white-space:nowrap}
-      .run-done button,.run-confirm button{height:44px;padding:0 18px;border-radius:999px}
-      .run-restart,.run-stop-yes{background:#3ecf8e!important;color:#08241a!important}
-      .run-stop-yes{background:#e0674f!important;color:#fff!important}
-      @media(max-width:420px){.run-step{font-size:22px}.run-secs{font-size:38px}.run-controls{gap:8px}.run-pause{min-width:100px}.run-tg{font-size:13px;gap:6px}}`;
+      @media(max-width:359px){.rv-ct{min-width:56px;font-size:26px}.rv-live,.rv-done{gap:6px}}`;
           if (!doc.getElementById("run-css")) {
             const style = doc.createElement("style");
             style.id = "run-css";
             style.textContent = css;
             doc.head.append(style);
           }
-          const make = (tag, className, parent) => {
+          const make = (tag, className) => {
             const el = doc.createElement(tag);
             el.className = className;
-            el.setAttribute("data-html2canvas-ignore", "");
-            if (parent) parent.append(el);
             return el;
           };
           const top = host ? host.top : make("div", "run-top run-doc"),
-            bottom = host ? host.bottom : make("div", "run-bottom run-doc"),
             startSlot = host ? host.start : make("div", "run-start-slot run-doc");
           if (!host) {
             doc.body.prepend(top);
-            doc.body.append(bottom, startSlot);
+            doc.body.append(startSlot);
             doc.body.classList.add("run-doc-host");
           }
           doc.body.classList.add("run-routine");
-          const icon = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`,
+          const icon = (d, cls) => `<svg viewBox="0 0 24 24"${cls ? ` class="${cls}"` : ""} aria-hidden="true">${d}</svg>`,
             icons = {
               back: icon('<path d="M6 5v14"/><path d="M19 5 9 12l10 7z"/>'),
               skip: icon('<path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/>'),
               pause: icon('<path d="M8 5v14M16 5v14"/>'),
-              play: icon('<path d="M7 4.5v15L19.5 12z"/>'),
+              play: icon('<path d="M7 4.5v15L19.5 12z"/>', "solid"),
               stop: icon('<rect x="6" y="6" width="12" height="12" rx="1.5"/>'),
               beep: icon('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/>'),
               voice: icon('<path d="M9 21v-3h2a1.5 1.5 0 0 0 1.5-1.5V14l1.4-.6-1.4-3A5.3 5.3 0 1 0 2.5 14.3V21"/><path d="M16.8 9.2a3.8 3.8 0 0 1 0 5.6"/><path d="M19.8 6.3a8 8 0 0 1 0 11.4"/>'),
+              more: icon('<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>', "solid"),
+              mute: icon('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/>'),
+              restart: icon('<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/>'),
+              pencil: icon('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'),
+              check: icon('<path d="m5 12.5 4.5 4.5L19 7"/>'),
             };
+          const toggles = `<button type="button" class="run-tg run-beeps" aria-pressed="true">${icons.beep}<span>Beeps</span><span class="run-sw" aria-hidden="true"></span></button><button type="button" class="run-tg run-announce" aria-pressed="false">${icons.voice}<span>Announce steps</span><span class="run-sw" aria-hidden="true"></span></button>`,
+            confirm = '<div class="run-confirm" hidden><span>End this run?</span><button type="button" class="run-stop-yes">Stop</button><button type="button" class="run-stop-no">Keep going</button></div>',
+            amber = `<button type="button" class="run-chip rv-amber" hidden>${icons.mute}<span>Tap for sound</span></button>`;
+          // The ⋯ menu, from core.menu(): the status line, Back / Skip / Stop in
+          // one row, the switches, Edit.
+          const menuHtml = core
+            .menu()
+            .map((item) => {
+              if (item.id === "status") return '<div class="rv-st"></div>';
+              if (item.id === "back" || item.id === "skip" || item.id === "stop")
+                return `<button type="button" class="run-${item.id}">${icons[item.id]}<span>${item.label}</span></button>`;
+              if (item.id === "beeps") return toggles.split("</button>")[0] + "</button>";
+              if (item.id === "announce") return toggles.split("</button>")[1] + "</button>";
+              return `<button type="button" class="rv-mrow run-edit">${icons.pencil}<span>${item.label}</span></button>`;
+            })
+            .join("")
+            .replace(/(<button type="button" class="run-back">[\s\S]*?class="run-stop">[\s\S]*?<\/button>)/, `<div class="rv-trio">$1</div>${confirm}`);
           top.innerHTML =
-            '<section class="run-panel" aria-label="Current step"><div class="run-inner"><div class="run-live"><div class="run-head"><span class="run-name"></span><span class="run-count"></span></div><div class="run-photo" hidden></div><div class="run-step" role="status"></div><div class="run-meter"><span class="run-fill"></span></div><div class="run-time"><b class="run-secs"></b><span class="run-secs-label"></span></div><p class="run-detail" hidden></p><ul class="run-also" hidden></ul><div class="run-upnext" hidden><span class="run-up-pic" hidden></span><div class="run-up-text"><div class="run-up-kicker"></div><div class="run-up-title"></div><div class="run-up-detail"></div></div></div><div class="run-next"><span class="run-next-text"></span><span class="run-next-thumb" hidden></span></div></div><div class="run-done" hidden><div class="run-done-title"></div><div class="run-done-actions"><button type="button" class="run-restart">Restart</button><button type="button" class="run-close">Close</button></div></div></div></section>';
-          bottom.innerHTML = `<div class="run-bar"><div class="run-inner"><div class="run-status"><span class="run-elapsed"></span><button type="button" class="run-chip" hidden>Tap for sound</button></div><div class="run-toggles"><button type="button" class="run-tg run-beeps" aria-pressed="true">${icons.beep}<span>Beeps</span><span class="run-sw" aria-hidden="true"></span></button><button type="button" class="run-tg run-announce" aria-pressed="false">${icons.voice}<span>Announce steps</span><span class="run-sw" aria-hidden="true"></span></button></div><div class="run-controls"><button type="button" class="run-btn run-back" aria-label="Back" title="Back to the start of this step (or the previous one)">${icons.back}</button><button type="button" class="run-btn run-pause"></button><button type="button" class="run-btn run-skip" aria-label="Skip" title="Skip to the next step">${icons.skip}</button><button type="button" class="run-btn run-stop" aria-label="Stop" title="Stop the run">${icons.stop}</button></div><div class="run-confirm" hidden><span>End this run?</span><button type="button" class="run-stop-yes">Stop</button><button type="button" class="run-stop-no">Keep going</button></div></div></div>`;
+            // Phones: one 56 px row.
+            `<div class="rv" role="region" aria-label="Run"><div class="rv-row">` +
+            `<div class="rv-live"><b class="rv-ct" role="timer"></b><div class="rv-hk"><div class="rv-ti" role="status"></div><div class="rv-sub"></div></div><button type="button" class="rv-pz run-pause"></button><button type="button" class="rv-more" aria-label="More" aria-haspopup="true" aria-expanded="false">${icons.more}</button>${amber}</div>` +
+            `<div class="rv-done"><span class="rv-ok" aria-hidden="true">${icons.check}</span><div class="rv-hk"><div class="rv-ti rv-dn-t"></div><div class="rv-sub rv-dn-s"></div></div><button type="button" class="rv-rst run-restart">${icons.restart}<span>Restart</span></button><button type="button" class="rv-ib run-edit" aria-label="Edit">${icons.pencil}</button><button type="button" class="rv-txb run-close">Close</button></div>` +
+            `<div class="rv-menu" role="menu" hidden>${menuHtml}</div></div><i class="rv-pl" aria-hidden="true"></i></div>` +
+            // Wide screens: the left column.
+            `<div class="rc">` +
+            `<div class="rc-ready"><div class="rc-hero" hidden><span class="rc-hero-img"></span><div class="rc-scrim"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div></div><div class="rc-plain"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div><p class="rc-kv"><b></b><span></span></p><div class="rc-need" hidden><div class="rc-kick">What you need</div><div class="rc-chips"></div></div><div class="rc-grow"></div><div class="rc-tgs">${toggles}</div><div class="rc-gorow"><button type="button" class="rc-go">${icons.play}<span>Start</span><small></small></button><button type="button" class="rc-ed run-edit" aria-label="Edit">${icons.pencil}</button></div></div>` +
+            `<div class="rc-live"><div class="rc-top"><b class="rc-name"></b><span class="rc-of"></span></div><div class="rc-pic" hidden></div><div class="rc-stp" role="status"></div><div class="rc-meter"><i></i></div><div class="rc-tm"><b role="timer"></b><span></span></div><p class="rc-desc" hidden></p><ul class="rc-nts" hidden></ul><ul class="rc-also" hidden></ul><div class="rc-nx" hidden><div class="rc-kick"></div><span class="rc-nx-th" hidden></span><div class="rc-nx-t"></div><div class="rc-nx-d"></div></div><div class="rc-grow"></div><div class="rc-ctl"><button type="button" class="run-back" aria-label="Back" title="Back to the start of this step (or the previous one)">${icons.back}</button><button type="button" class="rc-pz run-pause"></button><button type="button" class="run-skip" aria-label="Skip" title="Skip to the next step">${icons.skip}</button><button type="button" class="run-stop" aria-label="Stop" title="Stop the run">${icons.stop}</button></div>${confirm}<div class="rc-tgs">${toggles}</div><div class="rc-foot"><span class="rc-fst"></span>${amber}<button type="button" class="rc-txb run-edit">${icons.pencil}<span>Edit</span></button></div></div>` +
+            `<div class="rc-done"><div class="rc-top"><b class="rc-name"></b></div><div class="rc-dn"><span class="rv-ok" aria-hidden="true">${icons.check}</span><div><div class="rc-dn-t"></div><div class="rc-dn-s"></div></div></div><div class="rc-grow"></div><div class="rc-dn-act"><button type="button" class="run-restart">${icons.restart}<span>Restart</span></button><button type="button" class="run-close">Close</button></div><div class="rc-foot"><span class="rc-fst"></span><button type="button" class="rc-txb run-edit">${icons.pencil}<span>Edit</span></button></div></div>` +
+            `</div>`;
           startSlot.innerHTML = `<button type="button" class="run-start">${icons.play}<span>Start</span><small></small></button>`;
-          [top, bottom, startSlot].forEach((el) => el.setAttribute("data-html2canvas-ignore", ""));
-          const $ = (root, selector) => root.querySelector(selector),
+          [top, startSlot].forEach((el) => el.setAttribute("data-html2canvas-ignore", ""));
+          const $ = (selector) => top.querySelector(selector),
+            $$ = (selector) => [...top.querySelectorAll(selector)],
             ui = {
-              live: $(top, ".run-live"),
-              name: $(top, ".run-name"),
-              count: $(top, ".run-count"),
-              step: $(top, ".run-step"),
-              fill: $(top, ".run-fill"),
-              secs: $(top, ".run-secs"),
-              secsLabel: $(top, ".run-secs-label"),
-              detail: $(top, ".run-detail"),
-              also: $(top, ".run-also"),
-              upnext: $(top, ".run-upnext"),
-              upPic: $(top, ".run-up-pic"),
-              upKicker: $(top, ".run-up-kicker"),
-              upTitle: $(top, ".run-up-title"),
-              upDetail: $(top, ".run-up-detail"),
-              nextRow: $(top, ".run-next"),
-              next: $(top, ".run-next-text"),
-              photo: $(top, ".run-photo"),
-              nextThumb: $(top, ".run-next-thumb"),
-              done: $(top, ".run-done"),
-              doneTitle: $(top, ".run-done-title"),
-              doneActions: $(top, ".run-done-actions"),
-              elapsed: $(bottom, ".run-elapsed"),
-              chip: $(bottom, ".run-chip"),
-              controls: $(bottom, ".run-controls"),
-              confirm: $(bottom, ".run-confirm"),
-              pause: $(bottom, ".run-pause"),
-              beeps: $(bottom, ".run-beeps"),
-              announce: $(bottom, ".run-announce"),
-              start: $(startSlot, ".run-start"),
+              ct: $(".rv-ct"),
+              ti: $(".rv-live .rv-ti"),
+              sub: $(".rv-live .rv-sub"),
+              more: $(".rv-more"),
+              menu: $(".rv-menu"),
+              st: $(".rv-st"),
+              pl: $(".rv-pl"),
+              barDoneTitle: $(".rv-dn-t"),
+              barDoneSub: $(".rv-dn-s"),
+              heroBox: $(".rc-hero"),
+              hero: $(".rc-hero-img"),
+              plain: $(".rc-plain"),
+              kv: $(".rc-kv b"),
+              kvText: $(".rc-kv span"),
+              need: $(".rc-need"),
+              chips: $(".rc-chips"),
+              go: $(".rc-go"),
+              name: $(".rc-live .rc-name"),
+              of: $(".rc-of"),
+              pic: $(".rc-pic"),
+              stp: $(".rc-stp"),
+              meter: $(".rc-meter"),
+              fill: $(".rc-meter i"),
+              secs: $(".rc-tm b"),
+              secsLabel: $(".rc-tm span"),
+              desc: $(".rc-desc"),
+              notes: $(".rc-nts"),
+              also: $(".rc-also"),
+              nx: $(".rc-nx"),
+              nxKick: $(".rc-nx .rc-kick"),
+              nxPic: $(".rc-nx-th"),
+              nxTitle: $(".rc-nx-t"),
+              nxDetail: $(".rc-nx-d"),
+              liveFoot: $(".rc-live .rc-fst"),
+              colEdit: $(".rc-live .rc-txb"),
+              colDoneName: $(".rc-done .rc-name"),
+              colDoneTitle: $(".rc-dn-t"),
+              colDoneSub: $(".rc-dn-s"),
+              start: startSlot.querySelector(".run-start"),
             };
 
           // The run state, locally: localStorage under the routine's key.
@@ -3206,18 +3505,26 @@ title: 5-min Core
               localStorage.setItem("timeline:announce", voice ? "on" : "off");
             } catch (error) {}
           };
-          let audio = null;
-          // Audio has to be unlocked by a tap (iOS): Start, Resume, Restart, the
-          // sound switches and the "Tap for sound" chip all do it.
+          let audio = null,
+            primed = false,
+            // A tap or a key on this page: audio is unlocked by it (iOS), so
+            // "Tap for sound" is not needed after one.
+            tapped = false,
+            pressing = false;
           function unlock() {
             try {
               const Context = window.AudioContext || window.webkitAudioContext;
               if (Context && !audio) {
                 audio = new Context();
-                audio.onstatechange = () => render();
+                audio.onstatechange = () => {
+                  // Unlocked some other way (a tap in the studio's preview, where
+                  // the browser counts it): no chip, unless a finger is down.
+                  if (audio.state === "running" && !pressing) tapped = true;
+                  render();
+                };
               }
-              if (audio) {
-                if (audio.state !== "running") audio.resume().catch(() => {});
+              if (audio && audio.state !== "running") {
+                audio.resume().catch(() => {});
                 const buffer = audio.createBuffer(1, 1, 22050),
                   source = audio.createBufferSource();
                 source.buffer = buffer;
@@ -3225,11 +3532,46 @@ title: 5-min Core
                 source.start(0);
               }
             } catch (error) {}
-            if (voice && window.speechSynthesis)
+            if (!primed && window.speechSynthesis)
               try {
                 window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+                primed = true;
               } catch (error) {}
           }
+          // The first tap anywhere on the page unlocks sound (§7): every event
+          // a browser counts as the user's (pointerdown, pointerup and touchend
+          // on a touch screen, keydown) tries. "Tap for sound" goes only once the
+          // tap's click is over, so nothing moves under the finger mid-tap.
+          const onPress = () => {
+            pressing = true;
+            unlock();
+          };
+          const onRelease = () => {
+            unlock();
+            setTimeout(() => {
+              pressing = false;
+              if (!tapped && audio && audio.state === "running") {
+                tapped = true;
+                render();
+              }
+            }, 400);
+          };
+          const onTapped = () => {
+            pressing = false;
+            unlock();
+            if (tapped) return;
+            tapped = true;
+            setTimeout(render, 0);
+          };
+          const gestures = [
+            ["pointerdown", onPress],
+            ["keydown", onPress],
+            ["pointerup", onRelease],
+            ["touchend", onRelease],
+            ["click", onTapped],
+            ["keyup", onTapped],
+          ];
+          gestures.forEach(([type, fn]) => doc.addEventListener(type, fn, true));
           function tone(frequency, seconds) {
             if (!beeps || !audio || audio.state !== "running") return;
             try {
@@ -3294,29 +3636,57 @@ title: 5-min Core
             }
           }
 
-          let sheetOn = false;
-          const sheet = (info) => {
-            if (!info.active && !sheetOn) return;
-            sheetOn = info.active;
-            if (host) host.sheet(info);
-            else if (window.__timelineSetRun) window.__timelineSetRun(info);
+          // Which view this screen gets: two columns on a wide screen (the
+          // studio measures its workspace, which the editor pane may narrow),
+          // else the one-row header.
+          let cols = false;
+          const measure = () => {
+            const area = host && host.area,
+              width = area ? area.clientWidth : window.innerWidth,
+              height = area ? area.clientHeight : window.innerHeight,
+              next = core.layoutFor(width, height) === "cols";
+            doc.documentElement.style.setProperty("--run-col", width > 1100 ? "400px" : "360px");
+            if (next !== cols) {
+              cols = next;
+              if (alive) render();
+            }
           };
+          const viewHeight = () => (host ? (host.view ? host.view() : 0) : window.innerHeight);
+          // The sheet (this page's, or the studio's preview frame) is told where
+          // the run is and which view is showing; while no run is going, only
+          // when that changes.
+          let sheetSig = "";
+          const sheet = (next) => {
+            next.cols = cols;
+            next.view = viewHeight();
+            next.sound = { beeps, voice };
+            const sig = next.active ? "" : JSON.stringify([next.cols, next.view, beeps, voice, next.finished || null]);
+            if (!next.active && sig === sheetSig) return;
+            sheetSig = sig;
+            if (host) host.sheet(next);
+            else if (window.__timelineSetRun) window.__timelineSetRun(next);
+          };
+          // A finished run: the sheet fades every step and its last row reads
+          // "Done · 10:14 planned 10 min".
+          const sheetDone = (f) => sheet({ active: false, finished: f });
           let done = null, // { wall } from the end of the last step until Restart or Close
             lastRun = null, // { state, e } as last shown, to tell a finish from a stop
             lastKey = null,
             lastCount = null,
             announce = false,
             confirming = false,
+            menuOpen = false,
             // The sheet's own Start is on screen: no docked one. The page says
             // when it scrolls away (routineRuntime, or the studio's preview).
             docked = !host && window.__timelineDocked === true;
           const setText = (el, text) => {
             if (el.textContent !== text) el.textContent = text;
           };
-          const setList = (el, items) => {
-            const html = items.join("");
-            if (el.innerHTML !== html) el.innerHTML = html;
-            el.hidden = !items.length;
+          const setHtml = (el, html) => {
+            if (el.dataset.html !== html) {
+              el.dataset.html = html;
+              el.innerHTML = html;
+            }
           };
           const setPicture = (el, url) => {
             url = url || "";
@@ -3335,35 +3705,67 @@ title: 5-min Core
           const esc = (text) =>
             String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
           const colors = { sky: "#5f8fb0", sand: "#b98a4a", sage: "#7f9a6e" };
-          // The page's ✎ Edit button (the studio passes its own; view.html adds
-          // an .edit-pill) never floats over the steps: in the run bar while a
-          // run shows, beside Restart and Close when it is done, and back where
-          // the page put it otherwise (the page hides it while the ready card's
-          // own Edit is on screen, and tucks it beside the docked Start).
-          let pillHome = null;
-          function placePill(mode) {
-            const pill = host ? host.edit : doc.querySelector(".edit-pill");
-            if (!pill) return;
-            const slot = mode === "run" ? ui.controls : mode === "done" ? ui.doneActions : null;
-            if (slot) {
-              if (pill.parentNode === slot) return;
-              if (!pillHome) pillHome = { parent: pill.parentNode, next: pill.nextSibling };
-              slot.append(pill);
-            } else if (pillHome) {
-              const { parent, next } = pillHome;
-              pillHome = null;
-              if (parent) parent.insertBefore(pill, next && next.parentNode === parent ? next : null);
-            }
-          }
+          // Edit opens the page's editor: the studio's ✎ Edit, or view.html's
+          // pill (which links to the studio). Neither floats over a routine's
+          // steps: the run view carries its own Edit (in ⋯, the done row, the
+          // left column), and presses theirs.
+          const editor = () => (host ? host.edit : doc.querySelector(".edit-pill"));
+          const openMenu = (open) => {
+            menuOpen = !!open;
+            ui.menu.hidden = !menuOpen;
+            ui.more.setAttribute("aria-expanded", String(menuOpen));
+            if (!menuOpen && confirming) confirming = false;
+          };
           function show(mode) {
-            placePill(mode);
-            top.hidden = mode === "idle";
-            bottom.hidden = mode !== "run";
-            startSlot.hidden = mode !== "idle" || !docked;
-            ui.live.hidden = mode !== "run";
-            ui.done.hidden = mode !== "done";
+            const view = mode === "idle" ? (cols ? "cols-ready" : "") : (cols ? "cols-" : "bar-") + mode;
+            if ((top.dataset.view || "") !== view) top.dataset.view = view;
+            top.hidden = !view;
+            startSlot.hidden = mode !== "idle" || !docked || cols;
             doc.body.classList.toggle("run-active", mode === "run");
-            if (mode === "run") doc.documentElement.style.setProperty("--run-bar-h", bottom.offsetHeight + "px");
+            doc.body.classList.toggle("run-done", mode === "done");
+            doc.body.classList.toggle("run-cols", cols);
+            if (menuOpen && view !== "bar-run") openMenu(false);
+            const canEdit = !!editor();
+            $$(".run-edit").forEach((el) => (el.hidden = !canEdit));
+            $$(".run-beeps").forEach((el) => el.setAttribute("aria-pressed", String(beeps)));
+            $$(".run-announce").forEach((el) => el.setAttribute("aria-pressed", String(voice)));
+            $$(".run-confirm").forEach((el) => (el.hidden = !confirming));
+            $$(".rv-trio, .rc-ctl").forEach((el) => (el.hidden = confirming));
+            if (view === "cols-ready") ready();
+          }
+          // What you need, ticked per device (never written into the text); the
+          // sheet's own chips share the same ticks.
+          const tickKey = () => "timeline-ticks:" + title;
+          const readTicks = () => {
+            try {
+              return JSON.parse(localStorage.getItem(tickKey()) || "[]");
+            } catch (error) {
+              return [];
+            }
+          };
+          // The ready card, in the left column (the sheet's is hidden there).
+          function ready() {
+            const total = core.end(steps);
+            setPicture(ui.hero, info.cover);
+            ui.heroBox.hidden = !info.cover;
+            ui.plain.hidden = !!info.cover;
+            $$(".rc-ready .rc-h").forEach((el) => setText(el, title));
+            $$(".rc-ready .rc-tag").forEach((el) => {
+              setText(el, info.subtitle || "");
+              el.hidden = !info.subtitle;
+            });
+            setText(ui.kv, core.total(total));
+            setText(ui.kvText, info.summary || "");
+            const chips = info.chips || [],
+              ticked = readTicks(),
+              show = (text) => (/^[a-z][a-z]/.test(text) ? text[0].toUpperCase() + text.slice(1) : text);
+            setHtml(
+              ui.chips,
+              chips.map((c) => `<button type="button" class="rc-chip" data-chip="${esc(c)}" aria-pressed="false"><span class="rc-ck" aria-hidden="true">${icons.check}</span>${esc(show(c))}</button>`).join(""),
+            );
+            ui.chips.querySelectorAll(".rc-chip").forEach((chip) => chip.setAttribute("aria-pressed", String(ticked.includes(chip.dataset.chip))));
+            ui.need.hidden = !chips.length;
+            setText(ui.go.lastChild, `· ${core.total(total)}`);
           }
           function render() {
             if (!alive) return;
@@ -3396,9 +3798,13 @@ title: 5-min Core
             lastKey = lastCount = null;
             confirming = false;
             wake(false);
-            sheet({ active: false });
+            if (!done) sheet({ active: false });
             if (done) {
-              setText(ui.doneTitle, `Done · ${core.clock(done.wall / 1000)}`);
+              const f = core.finished(done.wall, total);
+              sheetDone(f);
+              [ui.barDoneTitle, ui.colDoneTitle].forEach((el) => setText(el, f.title));
+              [ui.barDoneSub, ui.colDoneSub].forEach((el) => setText(el, f.sub));
+              setText(ui.colDoneName, title);
               return show("done");
             }
             show("idle");
@@ -3410,99 +3816,93 @@ title: 5-min Core
             buzz([200, 100, 200]);
             say("Done");
           }
-          const bar = (s, e) => `${Math.min(100, Math.max(0, ((e - s.at) / Math.max(0.001, s.until - s.at)) * 100)).toFixed(1)}%`;
+          const pct = (s, e) => Math.min(100, Math.max(0, ((e - s.at) / Math.max(0.001, s.until - s.at)) * 100)).toFixed(1) + "%";
           const left = (until, e) => core.clock(Math.ceil(until - e - 1e-6));
+          const statusHtml = (parts) => parts.map(([k, v]) => (v ? `${k} <b>${esc(v)}</b>` : k)).join(" · ");
           function running(state, e, total) {
             const paused = state.pausedAt != null,
-              pos = core.position(steps, e),
-              // The step ending soonest drives the header: its title, bar and
-              // countdown. Any other live step gets a smaller row of its own.
-              lead = pos.ending,
-              others = pos.active.filter((s) => s !== lead).sort((a, b) => a.until - b.until),
-              next = pos.next,
-              resting = !!(lead && lead.rest),
-              // During a rest (or a gap), the move that follows, large.
-              coming = (lead ? steps.filter((s) => s.at >= lead.until && !s.rest)[0] : next) || null,
-              moves = steps.filter((s) => !s.rest);
+              h = core.header(steps, e, { paused }),
+              lead = h.lead,
+              up = core.upNext(steps, e),
+              ends = new Date(Date.now() + (total - e) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+              status = core.status(e, total, paused, ends);
             show("run");
-            top.classList.toggle("run-paused", paused);
-            top.classList.toggle("run-resting", resting);
-            setText(ui.name, title);
-            setText(
-              ui.count,
-              steps.some((s) => s.rest)
-                ? `move ${moves.filter((s) => (s.until ?? s.at) <= e).length} of ${moves.length} done`
-                : `${core.clock(Math.floor(e))} of ${core.clock(total)}`,
-            );
-            // The countdown follows the live step that ends soonest; between
-            // steps it counts down to the next one.
-            const target = lead ? lead.until : next ? next.at : total,
-              from = lead ? lead.at : Math.max(0, ...steps.filter((s) => (s.until ?? s.at) <= e).map((s) => s.until ?? s.at)),
-              remaining = Math.max(0, target - e);
-            setText(ui.step, lead ? lead.title : next ? "Get ready" : "");
-            ui.fill.style.width = `${Math.min(100, Math.max(0, ((e - from) / Math.max(0.001, target - from)) * 100)).toFixed(2)}%`;
-            setText(ui.secs, core.clock(Math.ceil(remaining - 1e-6)));
-            setText(
-              ui.secsLabel,
-              paused
-                ? "paused"
-                : resting || !lead
-                  ? coming
-                    ? `then ${coming.title}`
-                    : "left"
-                  : `left of ${core.total(lead.until - lead.at)}`,
-            );
-            // The header stays compact: one line of the lead step's description.
-            // Its notes and the whole description are in the live card on the
-            // sheet, which opens while it runs, so nothing is shown twice.
-            const detail = lead && !resting ? [lead.detail, lead.place && `@ ${lead.place}`].filter(Boolean).join(" ") : "";
-            setText(ui.detail, detail);
-            ui.detail.hidden = !detail;
-            // The lead step's picture, large where there is room (a wide screen;
-            // CSS hides it on a phone); the next step's as a thumbnail.
-            setPicture(ui.photo, lead && !resting && lead.picture);
-            setList(
-              ui.also,
-              others.map(
-                (s) =>
-                  `<li style="--c:${colors[s.color] || colors.sky}"><i class="run-dot"></i><span class="run-nm">${esc(s.title)}</span><span class="run-mm"><i style="width:${bar(s, e)}"></i></span><b>${left(s.until, e)}</b></li>`,
-              ),
-            );
-            const showComing = (resting || !lead) && !!coming;
-            ui.upnext.hidden = !showComing;
-            if (showComing) {
-              setPicture(ui.upPic, coming.picture);
-              setText(ui.upKicker, `Up next${coming.until !== undefined ? ` · ${core.length(coming.until - coming.at)}` : ""}`);
-              setText(ui.upTitle, coming.title);
-              setText(ui.upDetail, coming.detail || "");
+            const chipOn = !paused && (beeps || voice) && !tapped;
+            $$(".run-chip").forEach((el) => (el.hidden = !chipOn));
+            // It takes the ⋯ slot on a phone, Edit's in the left column.
+            ui.more.hidden = chipOn;
+            ui.colEdit.hidden = chipOn || !editor();
+            if (chipOn && menuOpen) openMenu(false);
+            $$(".run-pause").forEach((el) => {
+              const key = `${paused}`;
+              if (el.dataset.paused === key) return;
+              el.dataset.paused = key;
+              el.innerHTML = (paused ? icons.play : icons.pause) + (el.classList.contains("rc-pz") ? `<span>${paused ? "Resume" : "Pause"}</span>` : "");
+              el.setAttribute("aria-label", paused ? "Resume" : "Pause");
+            });
+            if (cols) {
+              // The left column: the lead step whole (picture, bar, countdown,
+              // description and notes), the other live steps, up next.
+              setText(ui.name, title);
+              setText(ui.of, h.of);
+              setPicture(ui.pic, lead && !h.rest && lead.picture);
+              setText(ui.stp, h.title);
+              ui.stp.classList.toggle("isrest", h.rest || !lead);
+              ui.meter.classList.toggle("grey", h.grey);
+              ui.fill.style.width = h.pct.toFixed(2) + "%";
+              setText(ui.secs, h.countdown);
+              ui.secs.classList.toggle("pz", paused);
+              setText(ui.secsLabel, h.label);
+              const detail = lead && !h.rest ? [lead.detail, lead.place && `@ ${lead.place}`].filter(Boolean).join(" ") : "";
+              setText(ui.desc, detail);
+              ui.desc.hidden = !detail;
+              const notes = lead && !h.rest && lead.notes ? lead.notes : [];
+              setHtml(ui.notes, notes.map((n) => `<li>${esc(n)}</li>`).join(""));
+              ui.notes.hidden = !notes.length;
+              setHtml(
+                ui.also,
+                h.others
+                  .map((s) => `<li style="--c:${colors[s.color] || colors.sky}"><i class="rv-dot"></i><span class="nm"><span>${esc(s.title)}</span>${s.detail ? `<small>${esc(s.detail)}</small>` : ""}</span><span class="rc-mm"><i style="width:${pct(s, e)}"></i></span><b>${left(s.until, e)}</b></li>`)
+                  .join(""),
+              );
+              ui.also.hidden = !h.others.length;
+              ui.nx.hidden = !up;
+              if (up) {
+                // In a rest (or a gap) the move that follows is shown large.
+                const big = h.rest || !lead;
+                ui.nx.classList.toggle("big", big);
+                setText(ui.nxKick, big ? `Up next${up.lenText ? ` · ${up.lenText}` : ""}` : ["Up next", up.atText, up.lenText].filter(Boolean).join(" · "));
+                setPicture(ui.nxPic, up.picture);
+                ui.nx.classList.toggle("nopic", !up.picture);
+                setText(ui.nxTitle, up.title);
+                setText(ui.nxDetail, up.detail || "");
+              }
+              setText(ui.liveFoot, status.slice(1).map(([k, v]) => (v ? `${k} ${v}` : k)).join(" · "));
+            } else {
+              // The one-row header.
+              setText(ui.ct, h.countdown);
+              ui.ct.classList.toggle("pz", paused);
+              ui.ct.classList.toggle("isrest", !paused && (h.rest || !lead));
+              setHtml(ui.ti, h.then ? `<span class="rv-dim">${esc(h.title)} →</span> ${esc(h.then)}` : esc(h.title));
+              const sub = h.sub;
+              setHtml(
+                ui.sub,
+                sub.kind === "paused"
+                  ? `<span class="rv-amb">Paused</span>${esc(sub.text.slice(6))}`
+                  : sub.kind === "also"
+                    ? `<span class="rv-lchip" style="--c:${colors[sub.step.color] || colors.sky};--p:${sub.pct.toFixed(1)}%"><i class="rv-dot"></i><span class="rv-nm">${esc(sub.step.title)}</span><b>${sub.left}</b></span>${sub.more ? `<span>+${sub.more}</span>` : ""}`
+                    : esc(sub.text),
+              );
+              ui.pl.style.width = h.pct.toFixed(2) + "%";
+              ui.pl.classList.toggle("grey", h.grey);
+              if (menuOpen) setHtml(ui.st, statusHtml(status));
             }
-            ui.nextRow.hidden = showComing;
-            setPicture(ui.nextThumb, !showComing && next && next.picture);
-            const nextLength = next ? (next.until !== undefined ? core.total(next.until - next.at) : `at ${core.clock(next.at)}`) : "";
-            if (ui.next.dataset.value !== (next ? next.title + nextLength : "")) {
-              ui.next.dataset.value = next ? next.title + nextLength : "";
-              ui.next.innerHTML = next ? `next · <b>${esc(next.title)}</b> · ${nextLength}` : "last step";
-            }
-            // One real clock time, and only once a run is going: when it ends.
-            const ends = new Date(Date.now() + (total - e) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-            setText(ui.elapsed, `elapsed ${core.clock(Math.floor(e))} · left ${core.clock(Math.ceil(total - e - 1e-6))} · ${paused ? "paused" : `done ≈ ${ends}`}`);
-            const pauseHtml = paused ? `${icons.play}<span>Resume</span>` : `${icons.pause}<span>Pause</span>`;
-            if (ui.pause.dataset.paused !== String(paused)) {
-              ui.pause.dataset.paused = String(paused);
-              ui.pause.innerHTML = pauseHtml;
-              ui.pause.setAttribute("aria-label", paused ? "Resume" : "Pause");
-            }
-            ui.beeps.setAttribute("aria-pressed", String(beeps));
-            ui.announce.setAttribute("aria-pressed", String(voice));
-            ui.controls.hidden = confirming;
-            ui.confirm.hidden = !confirming;
-            ui.chip.hidden = paused || (!beeps && !voice) || !!(audio && audio.state === "running");
             // Cues, only while running and in view: a long beep whenever a step
             // starts, and with Announce the step that started (all of them when
             // two start together); short beeps at 3, 2, 1.
             const latest = steps.filter((s) => s.at <= e).at(-1),
               cueKey = latest ? steps.indexOf(latest) : -1,
-              count = Math.ceil(remaining - 1e-6),
+              count = Math.ceil(h.remaining - 1e-6),
               cue = !paused && !doc.hidden;
             if (cue && cueKey >= 0 && (announce || (lastKey !== null && cueKey !== lastKey))) {
               tone(660, 0.45);
@@ -3521,7 +3921,7 @@ title: 5-min Core
             lastKey = cueKey;
             lastCount = count;
             wake(!paused);
-            sheet({ active: true, elapsed: e, running: !paused, inset: host ? 0 : top.getBoundingClientRect().height });
+            sheet({ active: true, elapsed: e, running: !paused, inset: host || cols ? 0 : top.getBoundingClientRect().height });
           }
           const act = (op) => {
             const state = transport.get();
@@ -3540,56 +3940,82 @@ title: 5-min Core
               transport.send({ op: "stop" });
             }
           };
-          const on = (el, fn) =>
-            el.addEventListener("click", (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              fn();
-            });
           const start = () => {
             unlock();
             act("start");
           };
-          on(ui.start, start);
-          on(ui.pause, () => {
-            unlock();
-            act("toggle");
-          });
-          on($(bottom, ".run-skip"), () => act("skip"));
-          on($(bottom, ".run-back"), () => act("back"));
-          on($(bottom, ".run-stop"), () => {
-            confirming = true;
-            render();
-          });
-          on($(bottom, ".run-stop-yes"), () => act("stop"));
-          on($(bottom, ".run-stop-no"), () => {
-            confirming = false;
-            render();
-          });
-          on(ui.beeps, () => {
-            beeps = !beeps;
+          function sound(which) {
+            if (which === "beeps") beeps = !beeps;
+            else voice = !voice;
             saveSound();
             unlock();
-            if (beeps) tone(880, 0.14);
+            if (which === "beeps" && beeps) tone(880, 0.14);
+            if (which !== "beeps") {
+              if (voice) say("Announcing steps");
+              else window.speechSynthesis?.cancel();
+            }
             render();
-          });
-          on(ui.announce, () => {
-            voice = !voice;
-            saveSound();
-            unlock();
-            if (voice) say("Announcing steps");
-            else window.speechSynthesis?.cancel();
-            render();
-          });
-          on(ui.chip, () => {
-            unlock();
-            render();
-          });
-          on($(top, ".run-restart"), start);
-          on($(top, ".run-close"), () => {
-            done = null;
-            render();
-          });
+          }
+          // One click handler for the whole run view.
+          const actions = [
+            [".run-pause", () => (unlock(), act("toggle"))],
+            [".run-back", () => (act("back"), openMenu(false))],
+            [".run-skip", () => (act("skip"), openMenu(false))],
+            [".run-stop", () => ((confirming = true), render())],
+            [".run-stop-yes", () => (act("stop"), openMenu(false))],
+            [".run-stop-no", () => ((confirming = false), render())],
+            [".run-beeps", () => sound("beeps")],
+            [".run-announce", () => sound("announce")],
+            [".run-edit", () => (openMenu(false), editor()?.click())],
+            [".run-chip", () => ((tapped = true), unlock(), render())],
+            [".run-restart", start],
+            [".run-close", () => ((done = null), render())],
+            [".rv-more", () => (openMenu(!menuOpen), render())],
+            [".rc-go", start],
+            [
+              ".rc-chip",
+              (chip) => {
+                const on = chip.getAttribute("aria-pressed") !== "true",
+                  ticked = readTicks().filter((c) => c !== chip.dataset.chip).concat(on ? [chip.dataset.chip] : []);
+                chip.setAttribute("aria-pressed", String(on));
+                try {
+                  localStorage.setItem(tickKey(), JSON.stringify(ticked));
+                } catch (error) {}
+                if (host) host.ticks?.(tickKey(), ticked);
+                else window.__timelineTicks?.(ticked);
+              },
+            ],
+          ];
+          const onClick = (event) => {
+            for (const [selector, fn] of actions) {
+              const el = event.target.closest(selector);
+              if (el && top.contains(el)) {
+                event.preventDefault();
+                event.stopPropagation();
+                fn(el);
+                return;
+              }
+            }
+          };
+          top.addEventListener("click", onClick);
+          const onStart = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            start();
+          };
+          ui.start.addEventListener("click", onStart);
+          // The menu closes on a tap outside it, Escape, or a tap in the
+          // studio's preview (this page loses focus).
+          const onOutside = (event) => {
+            if (menuOpen && !event.target.closest?.(".rv-menu, .rv-more")) openMenu(false);
+          };
+          const onKey = (event) => {
+            if (menuOpen && event.key === "Escape") openMenu(false);
+          };
+          const onBlur = () => menuOpen && openMenu(false);
+          doc.addEventListener("pointerdown", onOutside);
+          doc.addEventListener("keydown", onKey);
+          window.addEventListener("blur", onBlur);
           // The sheet's own Start scrolled out of view (or back): dock ours.
           // `bg` is the sheet's colour, for the fade behind the docked bar.
           const dock = (on, bg) => {
@@ -3598,14 +4024,19 @@ title: 5-min Core
             doc.body.classList.toggle("run-docked", docked);
             render();
           };
-          if (!host) window.__timelineRunApi = { start, dock };
+          if (!host) window.__timelineRunApi = { start, dock, sound };
           transport.subscribe(() => render());
+          const resized = typeof ResizeObserver === "function" && host && host.area ? new ResizeObserver(measure) : null;
+          resized?.observe(host.area);
+          window.addEventListener("resize", measure);
+          measure();
           const timer = setInterval(render, 250);
           doc.addEventListener("visibilitychange", render);
           render();
           return {
             // New text: the steps come from it at once, elapsed time is kept.
             update(next) {
+              info = next;
               steps = next.steps;
               title = next.title;
               if (next.key !== key) {
@@ -3616,21 +4047,38 @@ title: 5-min Core
             },
             start,
             dock,
+            sound,
+            unlock,
+            // The preview frame loaded afresh: tell it again.
+            resync() {
+              sheetSig = "";
+              render();
+            },
             state: () => transport.get(),
             // The run's clock (the server's, for a synced run).
             now: () => transport.now(),
             destroy() {
               alive = false;
               clearInterval(timer);
+              resized?.disconnect();
+              window.removeEventListener("resize", measure);
               doc.removeEventListener("visibilitychange", render);
+              gestures.forEach(([type, fn]) => doc.removeEventListener(type, fn, true));
+              doc.removeEventListener("pointerdown", onOutside);
+              doc.removeEventListener("keydown", onKey);
+              window.removeEventListener("blur", onBlur);
               if (transport.close) transport.close();
               wake(false);
+              cols = false;
+              sheetSig = "";
               sheet({ active: false });
-              placePill("idle");
-              doc.body.classList.remove("run-active", "run-docked", "run-routine");
+              doc.documentElement.style.removeProperty("--run-col");
+              doc.body.classList.remove("run-active", "run-done", "run-docked", "run-routine", "run-cols");
               if (!host && window.__timelineRunApi && window.__timelineRunApi.start === start) window.__timelineRunApi = null;
-              if (host) [top, bottom, startSlot].forEach((el) => ((el.innerHTML = ""), (el.hidden = true)));
-              else [top, bottom, startSlot].forEach((el) => el.remove());
+              if (host) {
+                top.removeEventListener("click", onClick);
+                [top, startSlot].forEach((el) => ((el.innerHTML = ""), (el.hidden = true), el.removeAttribute("data-view")));
+              } else [top, startSlot].forEach((el) => el.remove());
             },
           };
         }
@@ -3647,8 +4095,8 @@ title: 5-min Core
           // The preview keeps one runtime while the text changes kind, so it
           // carries both layouts and picks by the page it is given.
           const runtime = live
-            ? `(${previewRuntime.toString()})(function () { return document.querySelector(".lanes") ? (${routineRuntime.toString()})(${routineCore.toString()}) : (${layoutRuntime.toString()})(); });`
-            : (rel ? `(${routineRuntime.toString()})(${routineCore.toString()});` : `(${layoutRuntime.toString()})();`) +
+            ? `(${previewRuntime.toString()})(function () { return document.querySelector(".lanes") ? (${routineRuntime.toString()})(${routineCore.toString()}, ${runCore.toString()}) : (${layoutRuntime.toString()})(); });`
+            : (rel ? `(${routineRuntime.toString()})(${routineCore.toString()}, ${runCore.toString()});` : `(${layoutRuntime.toString()})();`) +
               (pictured ? `\n(${pictureRuntime.toString()})();` : "") +
               (rel ? `\n(${runRuntime.toString()})(${JSON.stringify(runConfig(m)).replace(/</g, "\\u003c")}, ${runCore.toString()});` : "");
           // URLs in a description or note become links. Map links (Google or
@@ -3777,6 +4225,7 @@ title: 5-min Core
               (chips.length
                 ? `<div class="chips" data-key="${escape(m.title)}">${chips.map((c) => `<button type="button" class="chip" aria-pressed="false" data-chip="${escape(c)}"><span class="ck" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span>${escape(show(c))}</button>`).join("")}</div>`
                 : "") +
+              `<div class="ready-sound" hidden data-html2canvas-ignore><button type="button" class="ready-tg" data-sound="beeps" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/></svg><span>Beeps</span><span class="ready-sw" aria-hidden="true"></span></button><button type="button" class="ready-tg" data-sound="announce" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21v-3h2a1.5 1.5 0 0 0 1.5-1.5V14l1.4-.6-1.4-3A5.3 5.3 0 1 0 2.5 14.3V21"/><path d="M16.8 9.2a3.8 3.8 0 0 1 0 5.6"/><path d="M19.8 6.3a8 8 0 0 1 0 11.4"/></svg><span>Announce steps</span><span class="ready-sw" aria-hidden="true"></span></button></div>` +
               (linked.length ? `<ul class="ready-notes">${linked.map((n) => `<li>${linkify(n)}</li>`).join("")}</ul>` : "") +
               `<div class="ready-row"><button type="button" class="ready-go" data-html2canvas-ignore>${play}Start <small>· ${core.total(m.total)}</small></button><button type="button" class="ready-edit" data-html2canvas-ignore hidden>✎ Edit</button></div></div></header>`;
             return `${ready}<section class="lanes" style="height:${px(g.height)}" aria-label="Steps, from Start"><div class="rail" aria-hidden="true"></div>${html.join("")}</section>`;
@@ -3813,7 +4262,7 @@ title: 5-min Core
           // Only timelines that use them carry these, so a day timeline's page is
           // unchanged.
           const relativeCss = rel
-            ? ` .sheet.routine{max-width:760px;padding:0 0 120px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;--ln:#8080803d;--chipbg:#80808024;--wash:#8080800d;--go:#3ecf8e;--go-ink:#08241a;} .sheet.routine *{box-sizing:border-box;} .ready{margin:0 0 4px;} .ready h1{margin:0;padding:0;max-width:none;text-align:left;font-size:32px;line-height:1.05;letter-spacing:-1.2px;} .ready .tagline{margin:6px 0 0;text-align:left;font-size:15px;line-height:1.3;} .hero{position:relative;height:232px;overflow:hidden;background:var(--chipbg);} .hero .pic.cover{position:absolute;inset:0;margin:0;height:100%;max-height:none;aspect-ratio:auto;} .hero .scrim{position:absolute;left:0;right:0;bottom:0;padding:70px 16px 14px;background:linear-gradient(transparent,#000d);pointer-events:none;} .hero .scrim h1{color:#fff;pointer-events:auto;text-shadow:0 1px 12px #0008;} .hero .scrim .tagline{color:#fffc;} .ready-card{margin:16px 16px 0;} .ready:not(.has-cover) .ready-card{margin:16px;padding:18px 16px 16px;border-radius:14px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));} .ready-kv{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:12px 0 0;font-size:14px;color:var(--blue);} .has-cover .ready-kv{margin-top:0;} .ready-kv b{font-size:22px;color:var(--navy);letter-spacing:-.5px;} .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0;} .chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;margin:0;padding:0 11px 0 7px;border:0;border-radius:999px;background:var(--chipbg);color:var(--navy);font:inherit;font-size:13px;line-height:1.2;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ck{display:grid;place-items:center;width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--blue);} .ck svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;visibility:hidden;} .chip.on .ck{background:var(--go);border-color:var(--go);color:var(--go-ink);} .chip.on .ck svg{visibility:visible;} .ready-notes{margin:10px 0 0;padding-left:18px;font-size:13px;color:var(--blue);} .ready-row{display:flex;gap:10px;margin:16px 0 2px;} .ready-go{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;gap:10px;height:56px;margin:0;border:0;border-radius:999px;background:var(--go);color:var(--go-ink);font:800 18px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;box-shadow:0 6px 22px #0003;-webkit-tap-highlight-color:transparent;} .ready-go svg{width:20px;height:20px;fill:currentColor;} .ready-go small{font-weight:600;font-size:15px;opacity:.8;} body.run-on .ready-go,body.run-on .ready-edit{visibility:hidden;} .ready-edit{flex:none;height:56px;margin:0;padding:0 18px;border:1px solid var(--ln);border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 15px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-edit[hidden]{display:none;} .lanes{position:relative;display:block;margin:18px 16px 0 0;} .lanes .rail{position:absolute;left:70px;top:0;bottom:0;width:2px;background:var(--ln);} .ly{position:absolute;} .w{left:80px;right:0;} .l0{left:80px;width:calc((100% - 86px) / 2);} .l1{left:calc(80px + (100% - 86px) / 2 + 6px);right:0;} .gl{left:0;width:64px;text-align:right;font:600 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:-.3px;color:var(--blue);white-space:nowrap;} .gl b{color:var(--navy);font-weight:700;} .gl[hidden]{display:none;} .cd{z-index:1;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));padding:8px 9px 8px 12px;overflow:hidden;color:var(--navy);text-align:left;--c:#5f8fb0;} .cd::before,.mini::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);} .sky{--c:#5f8fb0;} .sand{--c:#c08a44;} .sage{--c:#6f9a5e;} .cd-t{margin:0;padding-right:46px;font-size:14px;font-weight:700;line-height:1.2;letter-spacing:-.1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-d{margin:2px 0 0;padding-right:46px;font-size:12px;line-height:1.25;color:var(--blue);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-ft{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:auto;padding-top:6px;} .dur{flex:none;padding:4px 6px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:0;white-space:nowrap;} .cd-th{position:absolute;right:8px;top:8px;width:40px;height:40px;border-radius:8px;overflow:hidden;} .cd-th.icon,.mo-i,.rs-i{display:grid;place-items:center;color:var(--blue);} .cd-th.icon{background:var(--chipbg);} .cd-th.icon svg{width:22px;height:22px;fill:currentColor;} .icon img{width:100%;height:100%;object-fit:cover;} .cd.w{padding-top:7px;} .cd-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding-right:48px;min-width:0;} .cd.w .cd-t{flex:0 1 auto;min-width:0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd.w .dur{margin-left:auto;} .cd.w .cd-d{order:3;flex-basis:100%;min-width:0;margin:-2px 0 0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd .step-notes{margin:0;flex:none;order:1;} .cd.w .dur{order:2;} .cd .step-notes summary{padding:2px 7px;border-color:var(--ln);font-size:11px;font-weight:500;line-height:16px;letter-spacing:0;opacity:1;} .cd .step-notes[open]{order:4;flex-basis:100%;} .cd .step-notes ul{margin:4px 0 2px;padding-left:16px;font-size:13px;line-height:1.3;} .cd .map-link{font-size:10px;} .brk{position:absolute;left:-2px;right:-2px;height:34px;display:grid;place-items:center;background:var(--paper);z-index:1;} .brk::before,.brk::after{content:'';position:absolute;left:0;right:0;height:8px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M0 6.5 6 1.5 12 6.5' fill='none' stroke='%238a8a86' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x;} .brk::before{top:-4px;} .brk::after{bottom:-4px;} .brk span{padding:5px 9px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 12px/1 ui-monospace,Menlo,monospace;} .mini{position:relative;display:flex;align-items:center;gap:4px;flex:none;height:30px;margin:6px -5px 0 -8px;padding:0 4px 0 8px;border-radius:8px;border:1px solid var(--blue);background:var(--paper);font-size:11.5px;white-space:nowrap;overflow:hidden;box-shadow:0 -5px 0 -2px var(--ln),0 6px 14px #0003;cursor:pointer;} .mini b{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:600;} .mini .dur{margin-left:auto;padding:3px 4px;font-size:10px;} .mark{z-index:2;height:0;border-top:1px dashed var(--navy);cursor:pointer;} .mark span{position:absolute;right:6px;top:-10px;max-width:calc(100% - 12px);padding:1px 6px;border-radius:6px;border:1px solid var(--ln);background:var(--paper);color:var(--navy);font-size:12px;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .rs,.mo{z-index:1;display:flex;align-items:center;gap:8px;height:28px;padding:0 10px 0 12px;border-radius:7px;border:1px dashed var(--ln);background-color:var(--paper);color:var(--blue);font:600 12px/1 ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;cursor:pointer;} .rs-i svg,.mo-i svg{width:14px;height:14px;fill:currentColor;} .rs-i,.mo-i{width:14px;height:14px;flex:none;} .rs-t{text-transform:lowercase;} .rs-left:empty{display:none;} .mo{border-style:solid;color:var(--navy);font-family:inherit;font-size:13px;} .mo span{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--blue);font-weight:400;} .lsec{left:80px;right:0;display:flex;align-items:center;gap:8px;height:24px;color:var(--blue);font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;} .lsec em{font-style:normal;font-weight:600;letter-spacing:0;text-transform:none;font-family:ui-monospace,Menlo,monospace;} .lsec::after{content:'';flex:1;border-top:1px solid var(--ln);} .dn{left:80px;right:0;display:flex;align-items:center;gap:10px;height:28px;color:var(--blue);font-size:14px;font-weight:600;} .dn-ck{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:1px dashed var(--ln);} .dn-ck svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.live .cd,body.live .lsec[data-line]{cursor:pointer;} .run-on .cd.done,.run-on .rs.done,.run-on .mo.done,.run-on .mark.done{opacity:.42;} .lanes .cd.live{border:2px solid #3ecf8e99;padding:7px 8px 7px 11px;background-image:linear-gradient(#3ecf8e24 0 var(--fy,0px),var(--wash) var(--fy,0px));} .lanes .cd.live .cd-d{display:block;-webkit-line-clamp:none;white-space:normal;} .lanes .cd.upnext{border-style:dashed;border-color:var(--c);} .lanes .rs.live{align-items:flex-end;padding-bottom:8px;border:2px solid #3ecf8e;background-color:var(--paper);background-image:linear-gradient(#3ecf8e1c,#3ecf8e1c);color:var(--navy);} .nowh{position:absolute;left:66px;right:-8px;height:2px;z-index:0;background:var(--navy);box-shadow:0 0 6px var(--navy);pointer-events:none;} .nowh::before{content:'';position:absolute;left:0;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--navy);} .gl.gnow{color:var(--navy);font-weight:700;} .sheet.routine footer{margin-top:10px;} body.theme-future .sheet.routine{--ln:#29e2ff2e;--chipbg:#0f2a4a;--wash:#ffffff06;} body.theme-future .sky{--c:#29e2ff;} body.theme-future .sand{--c:#ff4fd8;} body.theme-future .sage{--c:#5dffb8;} body.theme-future .ready:not(.has-cover) .ready-card{border-color:#29e2ff55;background:linear-gradient(160deg,#12305a88,#0a0f1c);box-shadow:0 0 30px -12px #29e2ff;} body.theme-future .ready h1{font-size:27px;letter-spacing:4px;line-height:1.1;} body.theme-future .ready .tagline{font-size:11px;letter-spacing:2px;} body.theme-future .ready-kv{color:#8fb8d8;font-size:13px;} body.theme-future .ready-kv b{color:#fff;} body.theme-future .chip{background:#ffffff0a;border:1px solid #29e2ff44;} body.theme-future .lanes .rail{background:linear-gradient(#29e2ff,#ff4fd8);box-shadow:0 0 10px #29e2ff66;} body.theme-future .cd{border-color:var(--c);background-color:#0c1322;box-shadow:0 0 14px -8px var(--c);} body.theme-future .cd-t{color:#fff;} body.theme-future .dur{background:transparent;border:1px solid var(--c);color:#fff;} body.theme-future .cd-th.icon{background:#ffffff0a;border:1px solid var(--c);color:#fff;} body.theme-future .rs{border-color:#5dffb855;color:#9fd8c0;} body.theme-future .gl{color:#8fb8d8;} body.theme-code .sheet.routine{font-family:inherit;--ln:#30363d;--chipbg:#161b22;--wash:#161b22;} body.theme-code .sky{--c:#79c0ff;} body.theme-code .sand{--c:#ffa657;} body.theme-code .sage{--c:#7ee787;} body.theme-code .cd{border-radius:6px;} body.theme-code .cd-t{color:var(--c);} body.theme-code .ready h1{font-size:26px;letter-spacing:-.5px;} body.theme-retro .sheet.routine{--ln:#3b241699;--chipbg:#f0b45a55;--wash:#fbf1de00;} body.theme-retro .sky{--c:#e9a15a;} body.theme-retro .sand{--c:#c9512c;} body.theme-retro .sage{--c:#5f8a63;} body.theme-retro .cd,body.theme-retro .ready:not(.has-cover) .ready-card{border:2px solid #3b2416;box-shadow:3px 3px 0 #3b2416;} body.theme-retro .ready h1{font-size:30px;letter-spacing:-.5px;} body.theme-travel .ready h1{font-size:34px;letter-spacing:-1px;} body.theme-travel .sky{--c:#4f9fd0;} body.theme-travel .sand{--c:#e0a13a;} body.theme-travel .sage{--c:#5f9a6e;} body.theme-minimal .ready h1{letter-spacing:-1.5px;} @media(min-width:700px){.lanes{margin-right:24px;} .ready-card{margin-left:24px;margin-right:24px;} .ready:not(.has-cover) .ready-card{margin:24px;} .ready h1{font-size:40px;} .hero{height:300px;}} @media print{.ready-go,.ready-edit{display:none;} .sheet.routine{padding-bottom:0;}}`
+            ? ` .sheet.routine{max-width:760px;padding:0 0 120px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;--ln:#8080803d;--chipbg:#80808024;--wash:#8080800d;--go:#3ecf8e;--go-ink:#08241a;} .sheet.routine *{box-sizing:border-box;} .ready{margin:0 0 4px;} .ready h1{margin:0;padding:0;max-width:none;text-align:left;font-size:32px;line-height:1.05;letter-spacing:-1.2px;} .ready .tagline{margin:6px 0 0;text-align:left;font-size:15px;line-height:1.3;} .hero{position:relative;height:232px;overflow:hidden;background:var(--chipbg);} .hero .pic.cover{position:absolute;inset:0;margin:0;height:100%;max-height:none;aspect-ratio:auto;} .hero .scrim{position:absolute;left:0;right:0;bottom:0;padding:70px 16px 14px;background:linear-gradient(transparent,#000d);pointer-events:none;} .hero .scrim h1{color:#fff;pointer-events:auto;text-shadow:0 1px 12px #0008;} .hero .scrim .tagline{color:#fffc;} .ready-card{margin:16px 16px 0;} .ready:not(.has-cover) .ready-card{margin:16px;padding:18px 16px 16px;border-radius:14px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));} .ready-kv{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:12px 0 0;font-size:14px;color:var(--blue);} .has-cover .ready-kv{margin-top:0;} .ready-kv b{font-size:22px;color:var(--navy);letter-spacing:-.5px;} .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0;} .chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;margin:0;padding:0 11px 0 7px;border:0;border-radius:999px;background:var(--chipbg);color:var(--navy);font:inherit;font-size:13px;line-height:1.2;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ck{display:grid;place-items:center;width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--blue);} .ck svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;visibility:hidden;} .chip.on .ck{background:var(--go);border-color:var(--go);color:var(--go-ink);} .chip.on .ck svg{visibility:visible;} .ready-notes{margin:10px 0 0;padding-left:18px;font-size:13px;color:var(--blue);} .ready-row{display:flex;gap:10px;margin:16px 0 2px;} .ready-go{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;gap:10px;height:56px;margin:0;border:0;border-radius:999px;background:var(--go);color:var(--go-ink);font:800 18px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;box-shadow:0 6px 22px #0003;-webkit-tap-highlight-color:transparent;} .ready-go svg{width:20px;height:20px;fill:currentColor;} .ready-go small{font-weight:600;font-size:15px;opacity:.8;} body.run-on .ready-go,body.run-on .ready-edit{visibility:hidden;} .ready-edit{flex:none;height:56px;margin:0;padding:0 18px;border:1px solid var(--ln);border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 15px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-edit[hidden]{display:none;} .lanes{position:relative;display:block;margin:18px 16px 0 0;} .lanes .rail{position:absolute;left:70px;top:0;bottom:0;width:2px;background:var(--ln);} .ly{position:absolute;} .w{left:80px;right:0;} .l0{left:80px;width:calc((100% - 86px) / 2);} .l1{left:calc(80px + (100% - 86px) / 2 + 6px);right:0;} .gl{left:0;width:64px;text-align:right;font:600 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:-.3px;color:var(--blue);white-space:nowrap;} .gl b{color:var(--navy);font-weight:700;} .gl[hidden]{display:none;} .cd{z-index:1;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));padding:8px 9px 8px 12px;overflow:hidden;color:var(--navy);text-align:left;--c:#5f8fb0;} .cd::before,.mini::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);} .sky{--c:#5f8fb0;} .sand{--c:#c08a44;} .sage{--c:#6f9a5e;} .cd-t{margin:0;padding-right:46px;font-size:14px;font-weight:700;line-height:1.2;letter-spacing:-.1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-d{margin:2px 0 0;padding-right:46px;font-size:12px;line-height:1.25;color:var(--blue);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-ft{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:auto;padding-top:6px;} .dur{flex:none;padding:4px 6px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:0;white-space:nowrap;} .cd-th{position:absolute;right:8px;top:8px;width:40px;height:40px;border-radius:8px;overflow:hidden;} .cd-th.icon,.mo-i,.rs-i{display:grid;place-items:center;color:var(--blue);} .cd-th.icon{background:var(--chipbg);} .cd-th.icon svg{width:22px;height:22px;fill:currentColor;} .icon img{width:100%;height:100%;object-fit:cover;} .cd.w{padding-top:7px;} .cd-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding-right:48px;min-width:0;} .cd.w .cd-t{flex:0 1 auto;min-width:0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd.w .dur{margin-left:auto;} .cd.w .cd-d{order:3;flex-basis:100%;min-width:0;margin:-2px 0 0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd .step-notes{margin:0;flex:none;order:1;} .cd.w .dur{order:2;} .cd .step-notes summary{padding:2px 7px;border-color:var(--ln);font-size:11px;font-weight:500;line-height:16px;letter-spacing:0;opacity:1;} .cd .step-notes[open]{order:4;flex-basis:100%;} .cd .step-notes ul{margin:4px 0 2px;padding-left:16px;font-size:13px;line-height:1.3;} .cd .map-link{font-size:10px;} .brk{position:absolute;left:-2px;right:-2px;height:34px;display:grid;place-items:center;background:var(--paper);z-index:1;} .brk::before,.brk::after{content:'';position:absolute;left:0;right:0;height:8px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M0 6.5 6 1.5 12 6.5' fill='none' stroke='%238a8a86' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x;} .brk::before{top:-4px;} .brk::after{bottom:-4px;} .brk span{padding:5px 9px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 12px/1 ui-monospace,Menlo,monospace;} .mini{position:relative;display:flex;align-items:center;gap:4px;flex:none;height:30px;margin:6px -5px 0 -8px;padding:0 4px 0 8px;border-radius:8px;border:1px solid var(--blue);background:var(--paper);font-size:11.5px;white-space:nowrap;overflow:hidden;box-shadow:0 -5px 0 -2px var(--ln),0 6px 14px #0003;cursor:pointer;} .mini b{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:600;} .mini .dur{margin-left:auto;padding:3px 4px;font-size:10px;} .mark{z-index:2;height:0;border-top:1px dashed var(--navy);cursor:pointer;} .mark span{position:absolute;right:6px;top:-10px;max-width:calc(100% - 12px);padding:1px 6px;border-radius:6px;border:1px solid var(--ln);background:var(--paper);color:var(--navy);font-size:12px;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .rs,.mo{z-index:1;display:flex;align-items:center;gap:8px;height:28px;padding:0 10px 0 12px;border-radius:7px;border:1px dashed var(--ln);background-color:var(--paper);color:var(--blue);font:600 12px/1 ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;cursor:pointer;} .rs-i svg,.mo-i svg{width:14px;height:14px;fill:currentColor;} .rs-i,.mo-i{width:14px;height:14px;flex:none;} .rs-t{text-transform:lowercase;} .rs-left:empty{display:none;} .mo{border-style:solid;color:var(--navy);font-family:inherit;font-size:13px;} .mo span{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--blue);font-weight:400;} .lsec{left:80px;right:0;display:flex;align-items:center;gap:8px;height:24px;color:var(--blue);font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;} .lsec em{font-style:normal;font-weight:600;letter-spacing:0;text-transform:none;font-family:ui-monospace,Menlo,monospace;} .lsec::after{content:'';flex:1;border-top:1px solid var(--ln);} .dn{left:80px;right:0;display:flex;align-items:center;gap:10px;height:28px;color:var(--blue);font-size:14px;font-weight:600;} .dn-ck{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:1px dashed var(--ln);} .dn-ck svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.live .cd,body.live .lsec[data-line]{cursor:pointer;} .run-on .cd.done,.run-on .rs.done,.run-on .mo.done,.run-on .mark.done{opacity:.42;} .lanes .cd.live{border:2px solid #3ecf8e99;padding:7px 8px 7px 11px;background-image:linear-gradient(#3ecf8e24 0 var(--fy,0px),var(--wash) var(--fy,0px));} .lanes .cd.live .cd-d{display:block;-webkit-line-clamp:none;white-space:normal;} .lanes .cd.upnext{border-style:dashed;border-color:var(--c);} .lanes .rs.live{align-items:flex-end;padding-bottom:8px;border:2px solid #3ecf8e;background-color:var(--paper);background-image:linear-gradient(#3ecf8e1c,#3ecf8e1c);color:var(--navy);} .nowh{position:absolute;left:66px;right:-8px;height:2px;z-index:0;background:var(--navy);box-shadow:0 0 6px var(--navy);pointer-events:none;} .nowh::before{content:'';position:absolute;left:0;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--navy);} .gl.gnow{color:var(--navy);font-weight:700;} .nowh.pz{background:#9fb3bf;box-shadow:none;} .run-fin .cd,.run-fin .rs,.run-fin .mo,.run-fin .mark,.run-fin .lsec{opacity:.42;} .run-fin .dn{color:var(--navy);font-weight:700;} .run-fin .dn small{font-size:13px;font-weight:500;color:var(--blue);} .run-fin .dn-ck{background:#3ecf8e;border:0;color:#08241a;} .nowh.pz::before{background:#9fb3bf;} .upk{flex:none;order:2;align-self:center;padding:3px 5px;border:1px solid var(--ln);border-radius:5px;color:var(--navy);font:700 9.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;} .upk-len{display:none;} .lanes .cd.grow{min-height:128px;} .cd.grow .upk{display:inline-block;align-self:flex-start;margin:2px 0 8px;} .cd.grow .upk-len{display:inline;} .cd.grow .cd-row{display:block;padding-right:118px;} .cd.grow .dur{display:none;} .cd.grow .cd-t{padding-right:118px;font-size:17px;white-space:normal;} .cd.grow .cd-row .cd-t{padding-right:0;} .cd.grow .cd-d{padding-right:118px;white-space:normal;} .cd.grow .cd-row .cd-d{padding-right:0;margin-top:2px;} .cd.grow .cd-th{width:110px;height:110px;border-radius:10px;} .cd.grow .cd-th.icon svg{width:56px;height:56px;} body.run-cols .ready{display:none;} body.run-cols .lanes{margin-top:24px;} .ready-sound{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0;} .ready-sound[hidden]{display:none;} .ready-tg{display:flex;flex:1 1 auto;min-width:0;align-items:center;gap:6px;height:40px;margin:0;padding:0 6px 0 8px;border:1px solid var(--ln);border-radius:12px;background:var(--chipbg);color:var(--navy);font:700 13.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-tg svg{width:19px;height:19px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} .ready-sw{position:relative;flex:none;width:34px;height:20px;margin-left:auto;border-radius:10px;background:var(--ln);} .ready-sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004;transition:left .15s;} .ready-tg[aria-pressed="true"] .ready-sw{background:var(--go);} .ready-tg[aria-pressed="true"] .ready-sw::after{left:16px;} .sheet.routine footer{margin-top:10px;} body.theme-future .sheet.routine{--ln:#29e2ff2e;--chipbg:#0f2a4a;--wash:#ffffff06;} body.theme-future .sky{--c:#29e2ff;} body.theme-future .sand{--c:#ff4fd8;} body.theme-future .sage{--c:#5dffb8;} body.theme-future .ready:not(.has-cover) .ready-card{border-color:#29e2ff55;background:linear-gradient(160deg,#12305a88,#0a0f1c);box-shadow:0 0 30px -12px #29e2ff;} body.theme-future .ready h1{font-size:27px;letter-spacing:4px;line-height:1.1;} body.theme-future .ready .tagline{font-size:11px;letter-spacing:2px;} body.theme-future .ready-kv{color:#8fb8d8;font-size:13px;} body.theme-future .ready-kv b{color:#fff;} body.theme-future .chip{background:#ffffff0a;border:1px solid #29e2ff44;} body.theme-future .lanes .rail{background:linear-gradient(#29e2ff,#ff4fd8);box-shadow:0 0 10px #29e2ff66;} body.theme-future .cd{border-color:var(--c);background-color:#0c1322;box-shadow:0 0 14px -8px var(--c);} body.theme-future .cd-t{color:#fff;} body.theme-future .dur{background:transparent;border:1px solid var(--c);color:#fff;} body.theme-future .cd-th.icon{background:#ffffff0a;border:1px solid var(--c);color:#fff;} body.theme-future .rs{border-color:#5dffb855;color:#9fd8c0;} body.theme-future .gl{color:#8fb8d8;} body.theme-code .sheet.routine{font-family:inherit;--ln:#30363d;--chipbg:#161b22;--wash:#161b22;} body.theme-code .sky{--c:#79c0ff;} body.theme-code .sand{--c:#ffa657;} body.theme-code .sage{--c:#7ee787;} body.theme-code .cd{border-radius:6px;} body.theme-code .cd-t{color:var(--c);} body.theme-code .ready h1{font-size:26px;letter-spacing:-.5px;} body.theme-retro .sheet.routine{--ln:#3b241699;--chipbg:#f0b45a55;--wash:#fbf1de00;} body.theme-retro .sky{--c:#e9a15a;} body.theme-retro .sand{--c:#c9512c;} body.theme-retro .sage{--c:#5f8a63;} body.theme-retro .cd,body.theme-retro .ready:not(.has-cover) .ready-card{border:2px solid #3b2416;box-shadow:3px 3px 0 #3b2416;} body.theme-retro .ready h1{font-size:30px;letter-spacing:-.5px;} body.theme-travel .ready h1{font-size:34px;letter-spacing:-1px;} body.theme-travel .sky{--c:#4f9fd0;} body.theme-travel .sand{--c:#e0a13a;} body.theme-travel .sage{--c:#5f9a6e;} body.theme-minimal .ready h1{letter-spacing:-1.5px;} @media(min-width:700px){.lanes{margin-right:24px;} .ready-card{margin-left:24px;margin-right:24px;} .ready:not(.has-cover) .ready-card{margin:24px;} .ready h1{font-size:40px;} .hero{height:300px;}} @media print{.ready-go,.ready-edit,.ready-sound{display:none;} .sheet.routine{padding-bottom:0;}}`
             : "";
           const pictureCss = pictured
             ? ` .pic{display:block;overflow:hidden;background:var(--sky);-webkit-tap-highlight-color:transparent;} .pic img{display:block;width:100%;height:100%;object-fit:cover;} .pic.cover{margin:-30px -34px 22px;aspect-ratio:16/7;max-height:380px;} .event-body.has-pic{min-height:80px;padding-right:86px;} .pic.thumb{position:absolute;right:7px;top:50%;width:64px;height:64px;transform:translateY(-50%);border-radius:12px;box-shadow:0 1px 4px #0002;} .event-body.has-pic .until{right:84px;} .pic-view{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);background:#000000eb;cursor:zoom-out;} .pic-view img{max-width:100vw;max-height:100vh;max-height:100dvh;object-fit:contain;} @media(max-width:850px){.pic.cover{margin:-25px -22px 18px;}} @media(max-width:580px){.pic.cover{margin:-27px -14px 16px;aspect-ratio:16/10;} .event-body.has-pic{min-height:76px;padding-right:64px;} .pic.thumb{right:6px;width:52px;height:52px;border-radius:10px;} .event-body.has-pic .until{right:62px;}} @media print{.pic.cover{margin-top:0;}}`
@@ -4833,6 +5282,8 @@ title: 5-min Core
           );
       }
       preview.addEventListener("load", sendPreview);
+      // A fresh preview document has not heard where the run is.
+      preview.addEventListener("load", () => runner?.resync());
       // Run mode for relative timelines (a workout, a recipe). The studio
       // runs it here rather than in the preview frame: audio, the wake lock
       // and vibration need the top-level page, and the focus panel and the
@@ -4872,10 +5323,12 @@ title: 5-min Core
             transport: mode === "local" ? undefined : TimelineText.syncTransport({ base: SHORT_LINK_API, name: docName, core: TimelineText.runCore() }),
             host: {
               top: document.querySelector("#run-top"),
-              bottom: document.querySelector("#run-bottom"),
               start: document.querySelector("#run-start"),
               edit: editToggle,
+              area: document.querySelector(".workspace"),
+              view: () => document.querySelector(".preview-panel").clientHeight,
               sheet: (run) => preview.contentWindow?.postMessage({ type: "timeline:run", run }, "*"),
+              ticks: (key, ticks) => preview.contentWindow?.postMessage({ type: "timeline:ticks", key, ticks }, "*"),
             },
           },
           TimelineText.runCore,
@@ -4898,6 +5351,11 @@ title: 5-min Core
         // The routine sheet's own Start, and whether it has scrolled away
         // (then the docked one shows). The frame has no audio of its own.
         else if (event.data?.type === "timeline:start") runner?.start();
+        // The ready card's sound switches, and a tap in the preview (the
+        // first tap unlocks audio, where the browser counts a tap in the
+        // frame as one on this page).
+        else if (event.data?.type === "timeline:sound") runner?.sound(event.data.which === "beeps" ? "beeps" : "announce");
+        else if (event.data?.type === "timeline:tap") runner?.unlock();
         else if (event.data?.type === "timeline:dock") {
           previewDock = { docked: !!event.data.docked, bg: String(event.data.bg || "").slice(0, 60) };
           runner?.dock(previewDock.docked, previewDock.bg);
@@ -5155,15 +5613,14 @@ title: 5-min Core
         copy.querySelector("#usage-link")?.setAttribute("hidden", "");
         copy.querySelector("#help-toggle").setAttribute("aria-pressed", "false");
         copy.querySelector("#pane").classList.remove("help");
-        // The run chrome is rebuilt on load from the saved copy's own state;
-        // a run may have moved the Edit button into it.
-        copy.querySelector("body").prepend(copy.querySelector("#edit-toggle"));
-        copy.querySelector("body").classList.remove("run-active", "run-docked", "run-routine");
+        // The run chrome is rebuilt on load from the saved copy's own state.
+        copy.querySelector("body").classList.remove("run-active", "run-done", "run-docked", "run-routine", "run-cols");
         copy.querySelector("#run-css")?.remove();
-        copy.style.removeProperty("--run-bar-h");
-        for (const id of ["#run-top", "#run-bottom", "#run-start"]) {
+        copy.style.removeProperty("--run-col");
+        for (const id of ["#run-top", "#run-start"]) {
           copy.querySelector(id).textContent = "";
           copy.querySelector(id).setAttribute("hidden", "");
+          copy.querySelector(id).removeAttribute("data-view");
         }
         return "<!doctype html>\n" + copy.outerHTML;
       }

@@ -54,17 +54,13 @@
             "beforeend",
             `<a class="edit-pill" href="./${location.hash}" style="position:fixed;right:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:28;padding:9px 14px;border-radius:999px;background:#143e55;color:#fff;font:600 13px system-ui,-apple-system,sans-serif;text-decoration:none;opacity:.85;box-shadow:0 4px 18px #0004">✎ Edit</a>`,
           );
-          // A routine's ready card has its own Edit beside Start; the pill
-          // hides while that card is on screen and moves into the run bar
-          // during a run, so it never sits on a step.
+          // A routine's ready card has its own Edit beside Start. The pill
+          // shows only beside the docked Start: the run view carries its own
+          // Edit (in ⋯, the done row, the left column), which presses it.
           const readyEdit = document.querySelector(".ready-edit");
           if (readyEdit) {
             readyEdit.hidden = false;
             readyEdit.addEventListener("click", () => (location.href = `./${location.hash}`));
-            document.head.insertAdjacentHTML(
-              "beforeend",
-              "<style>body.run-routine:not(.run-docked):not(.run-active)>.edit-pill{display:none}</style>",
-            );
           }
         } catch (error) {
           message.innerHTML = "";
