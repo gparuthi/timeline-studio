@@ -307,3 +307,23 @@ test("standalone pages run locally: rendered pages carry no sync code", () => {
   assert.match(page, /function runRuntime/);
   assert.doesNotMatch(page, /syncTransport|\/run\//);
 });
+
+// v2: a routine needs no clock line. The worker's feed, link preview and
+// CalDAV all go by the parsed clock, so an inferred routine is one too.
+test("the worker treats an inferred routine (no clock line) as a routine", async () => {
+  const text = "title: Core\n+45s | Plank\n+15s | Rest\n+45s | Squats\n\nnote: Mat\n";
+  const payload = "t=" + btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const env = {
+    LINKS: { get: async (key) => (key === "doc:core" ? payload : null), put: async () => {} },
+    ASSETS: { fetch: async () => new Response('<html><head><meta name="app-version" content="" /><link rel="manifest" href="manifest.webmanifest" /><meta name="apple-mobile-web-app-title" content="Timeline" /><title>x</title></head><body><script type="application/json" id="doc">null</script></body></html>') },
+    STUDIO_URL: "https://tl.gaup.uk/",
+  };
+  const ics = await (await worker.fetch(new Request("https://tl.gaup.uk/core.ics"), env)).text();
+  assert.match(ics, /BEGIN:VCALENDAR/);
+  assert.doesNotMatch(ics, /BEGIN:VEVENT/);
+  const page = await (await worker.fetch(new Request("https://tl.gaup.uk/core"), env)).text();
+  assert.match(page, /<meta property="og:description" content="1 min 45 sec · 2 moves · 1 rest">/);
+  const deps = { loadDoc: async () => ({ name: "core", text, version: "v1" }), saveDoc: async () => assert.fail("must not save") };
+  const del = await handleDav(new Request("https://tl.gaup.uk/dav/core/cal/core-plank.ics", { method: "DELETE", headers: { authorization: "Basic " + btoa("core:x") } }), env, deps);
+  assert.equal(del.status, 403);
+});

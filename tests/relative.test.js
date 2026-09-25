@@ -98,10 +98,23 @@ test("date, timezone, city and range are ignored on a relative clock", () => {
   assert.equal(m.days[0].range, null);
 });
 
-test("relative mode must be written; day timelines are unchanged", () => {
-  assert.throws(() => parse("title: T\n+45s | A"), /expected “time \| title”/);
+test("the clock is written, or inferred from a first +duration line; day timelines are unchanged", () => {
+  // No clock line and a bare "+duration" first: a routine (this was an error before).
+  const inferred = parse("title: T\n# steps\nday: Warm-up\n+30s | Jog\n0:30 +45s | Plank");
+  assert.equal(inferred.clock, "relative");
+  assert.deepEqual(times(inferred), [
+    ["Jog", 0, 30],
+    ["Plank", 30, 75],
+  ]);
+  // "clock: day" forces a day plan, so the same text is an error again.
+  assert.throws(() => parse("title: T\nclock: day\n+45s | A"), /expected “time \| title”/);
+  // Times that could be either clock never infer anything.
+  assert.equal(parse("title: T\n0:30 | A").clock, "day");
+  assert.throws(() => parse("title: T\n0:30 | A\n+45s | B"), /expected “time \| title”/);
   assert.throws(() => parse("title: T\nclock: sideways\n08:00 | A"), /clock: relative/);
-  assert.throws(() => parse(routine("8:00 AM | A")), /relative clock a step starts/);
+  // A clock time in a routine says what to write instead.
+  assert.throws(() => parse("title: T\n+15m | Preheat\n5:00 PM | Serve"), /a routine uses lengths, not clock times/);
+  assert.throws(() => parse(routine("8:00 AM | A")), /a routine uses lengths, not clock times/);
   const day = parse("title: T\nclock: day\n08:00 | A\n09:30 +1h30 | B");
   assert.equal(day.clock, "day");
   assert.deepEqual(
@@ -112,6 +125,7 @@ test("relative mode must be written; day timelines are unchanged", () => {
     ],
   );
   assert.equal(day.events[0].at, undefined);
+  assert.equal(parse("title: T\n08:00 | A").clock, "day");
 });
 
 test("step notes belong to the event line right above them, in both clocks", () => {
@@ -125,16 +139,22 @@ test("step notes belong to the event line right above them, in both clocks", () 
     assert.throws(() => parse(stray), /step notes go right under a step/, stray);
 });
 
-test("a relative sheet: badges, offsets, ticks and the masthead", () => {
-  const page = render(routine("+30s | Warm-up\n+45s | Plank\n- Hips level\n+15s | Rest\n1:30 | Flip\n+1m30s | Side"));
-  assert.match(page, /<p class="date">3 min · 5 steps<\/p>/);
-  assert.match(page, /<time>30s<\/time>.*<time>45s<\/time>.*<time>15s<\/time>.*<time>1:30<\/time>.*<time>1:30<\/time>/s);
-  assert.match(page, /class="timeline relative" data-clock="relative"/);
-  assert.match(page, /<span class="offset" data-minute="0.5" style="--m:0.5">0:30<\/span>/);
-  assert.match(page, /<span class="hour-label">1:00<\/span>/);
-  assert.match(page, /<span class="hour-label">3:00<\/span>/);
+test("a routine's page: the ready card and the elapsed lanes, no clock times", () => {
+  const page = render("title: T\n+30s | Warm-up\n+45s | Plank\n- Hips level\n+15s | Rest\n1:30 | Flip\n+1m30s | Side\n\nnote: Mat, water");
+  assert.match(page, /<main class="sheet routine"><header class="ready"><div class="ready-card"><h1>T<\/h1><p class="ready-kv"><b>3 min<\/b> <span>4 moves · 1 rest<\/span><\/p>/);
+  assert.match(page, /data-chip="Mat">.*Mat<\/button><button type="button" class="chip" aria-pressed="false" data-chip="water">.*Water<\/button>/);
+  assert.match(page, /<button type="button" class="ready-go"[^>]*>.*Start <small>· 3 min<\/small><\/button>/);
+  // Durations on chips, starts in the gutter, a rest as a slim row.
+  assert.match(page, /<span class="dur">30s<\/span>.*<span class="dur">45s<\/span>.*<span class="dur">1½ min<\/span>/s);
+  assert.match(page, /<span class="gl ly" data-t="0"[^>]*><b>start<\/b><\/span>/);
+  assert.match(page, /<span class="gl ly" data-t="30"[^>]*>at ½ min<\/span>/);
+  assert.match(page, /<div class="rs w ly" data-k="rest"[^>]*>.*<span class="rs-t">Rest<\/span><span class="rs-len">15s<\/span>/);
+  assert.doesNotMatch(page, /data-t="75"/, "rests get no gutter label");
+  // A moment in no step is a row of its own; notes fold under the card.
+  assert.match(page, /<div class="mo w ly" data-k="moment"[^>]*>.*<b>Flip<\/b>/);
   assert.match(page, /<summary>1 note<\/summary><ul><li>Hips level<\/li><\/ul>/);
-  assert.doesNotMatch(page, /AM|PM/);
+  assert.match(page, /Done · about 3 min<\/div><\/section>/);
+  assert.doesNotMatch(page, /AM|PM|class="hour|class="masthead/);
 });
 
 test("run arithmetic: elapsed is computed from the state, never accumulated", () => {

@@ -99,7 +99,7 @@
         stroke-linejoin: round;
       }
       .topbar h1 {
-        flex: 1;
+        flex: 0 1 auto;
         min-width: 0;
         margin: 0;
         font-size: 14px;
@@ -114,6 +114,110 @@
         align-items: center;
         gap: 2px;
         flex: none;
+      }
+      /* New ▾: starter texts, each opened as a fresh page. On a phone it
+         takes the brand name's place. */
+      .new-menu {
+        margin-right: auto;
+        flex: none;
+      }
+      .menu summary.new-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 36px;
+        padding: 0 10px 0 8px;
+        border-radius: 999px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .new-menu.menu[open] summary.new-btn {
+        border-radius: 999px;
+      }
+      .new-btn svg {
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .new-btn svg.chev {
+        width: 14px;
+        height: 14px;
+      }
+      .new-list {
+        left: 0;
+        right: auto;
+        width: min(300px, calc(100vw - 24px));
+        padding: 6px;
+        border-radius: 16px;
+      }
+      .menu-list.new-list button {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 58px;
+        padding: 8px 10px;
+        border-radius: 11px;
+        font-size: 15px;
+        text-align: left;
+      }
+      .menu-list.new-list button + button {
+        border-top: 0;
+      }
+      .new-list hr {
+        width: calc(100% - 16px);
+        margin: 4px 8px;
+        border: 0;
+        border-top: 1px solid #2b3a47;
+      }
+      .new-list .ic {
+        display: grid;
+        place-items: center;
+        flex: none;
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        background: #26343f;
+        color: #e9f1f5;
+      }
+      .new-list .ic.go {
+        background: #3ecf8e;
+        color: #08241a;
+      }
+      .new-list .ic svg {
+        width: 22px;
+        height: 22px;
+      }
+      .new-list .ic svg.line {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .new-list .ic svg.solid {
+        fill: currentColor;
+      }
+      .new-list b {
+        display: block;
+        color: #fff;
+        font-size: 15px;
+      }
+      .new-list small {
+        display: block;
+        margin-top: 2px;
+        color: #9fb3bf;
+        font-size: 12.5px;
+        font-weight: 400;
+        line-height: 1.25;
+      }
+      @media (max-width: 429px) {
+        .topbar h1 {
+          display: none;
+        }
       }
       .tool {
         position: relative;
@@ -168,12 +272,19 @@
       .workspace > .run-bottom {
         flex: none;
       }
+      /* The docked Start: a full-width bar once the sheet's own Start has
+         scrolled away, with room on the right for the Edit button. */
       .workspace > .run-start-slot {
         position: absolute;
-        left: 50%;
-        bottom: max(14px, env(safe-area-inset-bottom));
-        transform: translateX(-50%);
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding-right: 104px;
         z-index: 27;
+      }
+      body.run-docked:not(.run-active) .edit-toggle {
+        bottom: calc(max(16px, env(safe-area-inset-bottom)) + 8px);
+        opacity: 1;
       }
       body.run-active .edit-toggle {
         bottom: calc(var(--run-bar-h, 0px) + 10px);
@@ -860,6 +971,15 @@
     <header class="topbar">
       <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>
       <h1>Timeline Studio</h1>
+      <details class="menu new-menu" id="new-menu">
+        <summary class="new-btn" title="Start something new" aria-label="New"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <div class="menu-list new-list" role="menu">
+          <button type="button" role="menuitem" data-starter="day"><span class="ic"><svg class="line" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></span><span><b>Day plan</b><small>Events at times of day, on a date</small></span></button
+          ><button type="button" role="menuitem" data-starter="trip"><span class="ic"><svg class="solid" viewBox="0 0 40 40" aria-hidden="true"><path d="m36 5-2-1-3 1-9 9-14-3-4 4 12 6-7 8-6-1-2 3 8 4 4 4 3-2-1-6 8-8 6 13 4-4-3-14 8-9z"/></svg></span><span><b>Trip</b><small>Several days, places, maps</small></span></button
+          ><hr /><button type="button" role="menuitem" data-starter="workout"><span class="ic go"><svg class="solid" viewBox="0 0 40 40" aria-hidden="true"><g transform="rotate(-30 20 20)"><path d="M11 18h18v4H11z"/><rect x="7" y="9" width="6" height="22" rx="2"/><rect x="27" y="9" width="6" height="22" rx="2"/><rect x="2" y="13" width="6" height="14" rx="2"/><rect x="32" y="13" width="6" height="14" rx="2"/></g></svg></span><span><b>Workout</b><small>Steps with lengths, run from Start</small></span></button
+          ><button type="button" role="menuitem" data-starter="recipe"><span class="ic go"><svg class="solid" viewBox="0 0 40 40" aria-hidden="true"><path d="M5 17h30v12a7 7 0 0 1-7 7H12a7 7 0 0 1-7-7z"/><rect x="1" y="18" width="6" height="4" rx="2"/><rect x="33" y="18" width="6" height="4" rx="2"/><path d="M4 15a16 7 0 0 1 32 0z"/><rect x="17" y="5" width="6" height="4" rx="2"/></svg></span><span><b>Recipe</b><small>Steps, some at the same time</small></span></button>
+        </div>
+      </details>
       <div class="tools">
         <span class="tool theme-tool" title="Theme">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0 0 18h.8a2 2 0 0 0 1.4-3.4 1.5 1.5 0 0 1 1-2.6H17a4 4 0 0 0 4-4 8.6 8.6 0 0 0-9-8z"/><circle cx="7.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="10" cy="7.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="14.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/></svg>
@@ -959,18 +1079,20 @@ footer: See you there ♡</pre>
           <details>
             <summary>Workouts and recipes</summary>
             <p>
-              Write <code>clock: relative</code> and times become elapsed time
-              from a <b>Start</b> button: <code>+45s | Plank</code> is a
-              45-second step after the line above it, <code>15:00 +25m</code>
-              a step at a fixed time, and steps may overlap. <code>- </code>
-              lines under a step are its notes. A running routine shows the
-              step, a countdown and the next step, with beeps and an optional
-              voice. On a saved link every device with it open follows the
-              same run: start on the phone, watch on the TV.
+              Start the first step with its length and the text is a
+              routine, run from a <b>Start</b> button instead of the clock:
+              <code>+45s | Plank</code> is a 45-second step after the line
+              above it, <code>15:00 +25m</code> a step at a fixed time, and
+              steps may overlap (they sit side by side). <code>- </code>
+              lines under a step are its notes, and <code>note:</code> lines
+              become things to tick off. A running routine shows the step, a
+              countdown and the next step, with <b>Beeps</b> and
+              <b>Announce steps</b> switches. On a saved link every device
+              with it open follows the same run: start on the phone, watch on
+              the TV. <b>New ▾</b> has a workout and a recipe to start from.
             </p>
             <pre>
 title: 5-min Core
-clock: relative
 +30s | Jog in place
 +45s | Plank | Elbows under shoulders
 - Hips level
@@ -1067,8 +1189,9 @@ clock: relative
       hidden
     />
     <script type="application/json" id="doc">null</script>
-    <script type="application/json" id="sample-workout">"# A routine runs on elapsed time: press Start and follow along.\ntitle: 10-min Core\nclock: relative\ntheme: future\nsubtitle: No equipment, one mat\n\nday: Warm-up\n+1m   | Jog in place | Easy pace, loose shoulders | | sand\n\nday: Main set\n+45s  | Plank | Elbows under shoulders | | sky\n- Hips level with shoulders\n- Breathe out slowly, don't hold your breath\n+15s  | Rest | | | sage\n+45s  | Side plank L | Stack your feet | | sky\n+15s  | Rest | | | sage\n+45s  | Side plank R | Stack your feet | | sky\n+15s  | Rest | | | sage\n+45s  | Dead bug | Low back pressed into the mat | | sky\n- Opposite arm and leg, slowly\n+15s  | Rest | | | sage\n+45s  | Bicycle crunches | Elbow to opposite knee | | sky\n+15s  | Rest | | | sage\n+45s  | Glute bridge | Squeeze at the top | | sky\n+15s  | Rest | | | sage\n+45s  | Mountain climbers | Knees to chest, hips down | | sky\n+15s  | Rest | | | sage\n+45s  | Hollow hold | Arms by your ears | | sky\n\nday: Cool-down\n+1m15s | Stretch | Child's pose, then cobra | | sand\n\nnote: A mat and a bottle of water\n"</script>
-    <script type="application/json" id="sample-recipe">"# Steps can overlap: the oven heats while you chop.\ntitle: Sheet-pan dinner\nclock: relative\ntheme: minimal\nsubtitle: Chicken thighs, peppers and onions for four\n\n0:00 - 15:00 | Preheat the oven | 220°C, rack in the middle | | sand\n0:00 +10m    | Chop | Onions and peppers in thick wedges | | sage\n- 2 red onions\n- 3 peppers, any colour\n+5m          | Season the tray | Oil, salt and paprika; chicken skin side up | | sage\n15:00 +25m   | Roast | Until the chicken is golden | | sand\n+5m          | Rest and plate | Spoon the juices over | | sky\n27:30        | Toss the vegetables | Leave the chicken where it is\n\nnote: 8 chicken thighs, 2 red onions, 3 peppers\nnote: Olive oil, salt, smoked paprika\n"</script>
+    <script type="application/json" id="sample-workout">"# A routine runs on elapsed time: press Start and follow along. Steps\n# start with their length (+45s), which is what makes this a routine.\ntitle: 10-min Core\ntheme: future\nsubtitle: No equipment, one mat\n\nday: Warm-up\n+1m   | Jog in place | Easy pace, loose shoulders | | sand\n\nday: Main set\n+45s  | Plank | Elbows under shoulders | | sky\n- Hips level with shoulders\n- Breathe out slowly, don't hold your breath\n+15s  | Rest | | | sage\n+45s  | Side plank L | Stack your feet | | sky\n+15s  | Rest | | | sage\n+45s  | Side plank R | Stack your feet | | sky\n+15s  | Rest | | | sage\n+45s  | Dead bug | Low back pressed into the mat | | sky\n- Opposite arm and leg, slowly\n+15s  | Rest | | | sage\n+45s  | Bicycle crunches | Elbow to opposite knee | | sky\n+15s  | Rest | | | sage\n+45s  | Glute bridge | Squeeze at the top | | sky\n+15s  | Rest | | | sage\n+45s  | Mountain climbers | Knees to chest, hips down | | sky\n+15s  | Rest | | | sage\n+45s  | Hollow hold | Arms by your ears | | sky\n\nday: Cool-down\n+1m15s | Stretch | Child's pose, then cobra | | sand\n\nnote: A mat and a bottle of water\n"</script>
+    <script type="application/json" id="sample-recipe">"# Steps can overlap: the oven heats while you chop. The first line starts\n# with a length (+15m), which is what makes this a routine.\ntitle: Sheet-pan dinner\ntheme: minimal\nsubtitle: Chicken thighs, peppers and onions for four\n\n+15m         | Preheat the oven | 220°C, rack in the middle | | sand\n0:00 +10m    | Chop | Onions and peppers in thick wedges | | sage\n- 2 red onions\n- 3 peppers, any colour\n+5m          | Season the tray | Oil, salt and paprika; chicken skin side up | | sage\n15:00 +25m   | Roast | Until the chicken is golden | | sand\n+5m          | Rest and plate | Spoon the juices over | | sky\n27:30        | Toss the vegetables | Leave the chicken where it is\n\nnote: 8 chicken thighs, 2 red onions, 3 peppers\nnote: Olive oil, salt, smoked paprika\n"</script>
+    <script type="application/json" id="sample-trip">"# Several days: start each one with a day: line.\ntitle: Long Weekend in Tokyo\ntheme: travel\ntimezone: Asia/Tokyo\n\nday: {{today}}\ncity: Tokyo\nrange: 08:00 - 22:00\n09:00 - 10:30 | Tsukiji breakfast | Tamagoyaki and tuna @ Tsukiji Outer Market | meal | sand\n13:00 | Senso-ji | Go early, it gets packed @ | ticket | sage\n16:00 | Ueno Park | Walk off lunch @ | tree | sage\n19:00 | Shibuya crossing | Dinner nearby | pin | sky\nnote: Get a Suica card at the airport\n\nday: {{tomorrow}}\ncity: Hakone\n08:15 +1h30 | Train to Hakone | Romancecar from Shinjuku | road | sky\n12:00 | Lake Ashi cruise | @ | palm | sage\n16:00 | Onsen | Towels provided | bed | sand\n"</script>
     <script type="application/json" id="studio-source">
       "# A timeline is just text. Times set the scale; cards find their own space.\ntitle: A Day in Los Angeles\ndate: {{today}}\nsubtitle: Sunshine, tacos, and a sunset ♡\nrange: 08:00 - 20:00\ntheme: travel\ncity: Los Angeles\nfooter: Bring sunscreen and a playlist ♡\n\n# time | title | description | icon | color\n08:00 | Coffee and pastries | Neighborhood bakery | coffee | sand\n09:30 | Griffith Observatory | Hike up, skip the parking | pin | sky\n11:30 | Farmers market | Tacos for lunch @ Grand Central Market | palm | sage\n13:00 | Getty Center | Gardens first, then the galleries | ticket | sand\n15:30 - 17:30 | Venice Boardwalk | Rent bikes to Santa Monica | road | sky\n18:00 | Pier at sunset | Ferris wheel, funnel cake | palm | sand\n19:30 | Drive home | Sunset over the freeway | car | sage\n\nnote: Observatory parking fills by 10 AM\nnote: Getty entry is free, parking is not\nnote: Sunset is around 7 PM\n"
     </script>
@@ -1355,6 +1478,30 @@ clock: relative
             throw new Error(`Line ${line}: a picture (the 6th field) is @asset-name or an https:// image URL.`);
           return value;
         }
+        // Which clock a text is on: "relative" or "day". An explicit "clock:"
+        // line wins; otherwise a first event line that starts with a bare
+        // "+duration" makes a routine.
+        function clockOf(text) {
+          const written = String(text).match(/^[ \t]*clock:[ \t]*(\S*)[ \t]*$/m);
+          if (written) return written[1] === "relative" ? "relative" : "day";
+          for (const raw of String(text).split(/\r?\n/)) {
+            const s = raw.trim();
+            if (!s || s.startsWith("#") || /^-(\s|$)/.test(s) || /^[a-z-]+:/.test(s) || /^asset\s/.test(s)) continue;
+            return /^\+\s*\d[^|]*\|/.test(s) ? "relative" : "day";
+          }
+          return "day";
+        }
+        // A rest: a step titled Rest or Break (a length may follow, "Rest 30s"),
+        // or one given the timer icon by hand. The sheet draws it as a slim row
+        // unless it carries a picture or notes.
+        function isRest(event) {
+          return (
+            event.until !== undefined &&
+            !event.picture &&
+            !(event.notes && event.notes.length) &&
+            (/^(?:rest|break|recover|recovery)(?:\s+[\d:]+\s*[a-z]*)?$/i.test(event.title.trim()) || (event.ownIcon && event.icon === "timer"))
+          );
+        }
         function guessIcon(title, detail) {
           for (const text of [title, detail]) {
             const words = String(text || "").toLowerCase();
@@ -1383,9 +1530,13 @@ clock: relative
           };
           const singleton = new Set();
           // "clock: relative" changes how every event line reads, wherever it is
-          // written, so it is found before the lines are parsed. It is never
-          // guessed from the times: "0:30" could be either clock.
-          const relative = /^[ \t]*clock:[ \t]*relative[ \t]*$/m.test(text);
+          // written, so it is found before the lines are parsed. Without a clock
+          // line, one case is inferred: the first event line starts with a bare
+          // "+duration" ("+30s | Jog"), which a day plan cannot parse anyway.
+          // "clock: day" forces a day plan; "0:30" never infers anything, since
+          // it could be either clock.
+          const relative = clockOf(text) === "relative";
+          model.clock = relative ? "relative" : "day";
           // Where the next "+duration" step starts: the end of the event line
           // before it in the source (its start if it has no end), or 0:00.
           let prevEnd = 0;
@@ -1445,6 +1596,7 @@ clock: relative
                 detail,
                 place,
                 icon: icon || guessIcon(title, written),
+                ownIcon: !!icon,
                 color: color || "sky",
                 picture: checkPicture(picture, line),
                 line,
@@ -1465,7 +1617,9 @@ clock: relative
             if (!directive)
               throw new Error(
                 relative && s.includes("|")
-                  ? `Line ${line}: on a relative clock a step starts with an elapsed time like 5:30 or a duration like +45s.`
+                  ? /^[^|]*\b(?:AM|PM)\b/i.test(s)
+                    ? `Line ${line}: a routine uses lengths, not clock times: start the step with a duration like +45s, or an elapsed time like 5:30.`
+                    : `Line ${line}: on a relative clock a step starts with an elapsed time like 5:30 or a duration like +45s.`
                   : `Line ${line}: expected “time | title” or a directive such as “title: My Trip”.`,
               );
             const [, key, value] = directive;
@@ -1944,6 +2098,240 @@ clock: relative
             window.removeEventListener("load", layout);
           };
         }
+        // The routine sheet on the page: lays the lanes out again with the
+        // cards' real heights (routineCore), marks the run on them (finished
+        // steps fade, live ones fill up to a "now" line that passes behind the
+        // cards), keeps the ready card's Start and ingredient ticks working, and
+        // says when that Start has scrolled away so a docked one can show. In
+        // the studio's preview (body.live) Start, ticks and docking go to the
+        // studio by message: that frame has no storage and no audio of its own.
+        function routineRuntime(makeCore) {
+          const core = makeCore(),
+            doc = document,
+            lanes = doc.querySelector(".lanes");
+          if (!lanes) return () => {};
+          const quiet = !!window.__timelineStatic,
+            inPreview = doc.body.classList.contains("live"),
+            post = (message) => parent.postMessage(message, "*");
+          let active = true,
+            map = null,
+            liveRest = null,
+            followed = null,
+            lastWidth = -1;
+          const num = (v) => (v === undefined || v === "" ? undefined : Number(v));
+          const all = () => [...lanes.querySelectorAll("[data-i]")];
+          function layout() {
+            if (!active) return;
+            const els = all(),
+              items = els.map((el) => ({ id: el.dataset.i, at: Number(el.dataset.at), until: num(el.dataset.until), rest: el.dataset.k === "rest", line: Number(el.dataset.line) })),
+              sections = [...lanes.querySelectorAll('[data-k="sec"]')].map((el, i) => ({ id: "s" + i, at: Number(el.dataset.at), el }));
+            // Measure what each card's content needs, all at once.
+            const cards = els.filter((el) => el.dataset.k === "card");
+            cards.forEach((el) => (el.style.height = "auto"));
+            const needs = {};
+            cards.forEach((el) => (needs[el.dataset.i] = Math.ceil(el.getBoundingClientRect().height)));
+            const g = core.layout(items, sections, needs, { liveRest });
+            for (const el of els) {
+              const box = g.boxes.get(el.dataset.i);
+              if (!box) continue;
+              el.style.top = box.top + "px";
+              if (box.height !== undefined) el.style.height = box.height + "px";
+              const brk = el.querySelector(":scope > .brk");
+              if (brk) {
+                brk.hidden = box.brk === null;
+                if (box.brk !== null) brk.style.top = box.brk + "px";
+              }
+            }
+            g.sections.forEach((s) => {
+              const el = sections.find((x) => x.id === s.id);
+              if (el) el.el.style.top = s.top + "px";
+            });
+            for (const label of g.labels) {
+              const el = lanes.querySelector(`.gl[data-t="${label.t}"]`);
+              if (!el) continue;
+              el.style.top = label.top + "px";
+              el.hidden = label.hidden;
+              el.dataset.hidden = label.hidden ? "1" : "";
+            }
+            const done = lanes.querySelector(".dn");
+            if (done) done.style.top = g.done + "px";
+            lanes.style.height = g.height + "px";
+            map = g.map;
+            tick(true);
+          }
+          // The run, as the run runtime (or the studio) reports it.
+          function tick(fromLayout) {
+            if (!active) return;
+            const run = window.__timelineRun && window.__timelineRun.active ? window.__timelineRun : null,
+              e = run ? run.elapsed : -1,
+              els = all();
+            doc.body.classList.toggle("run-on", !!run);
+            let rest = null,
+              liveSteps = [];
+            for (const el of els) {
+              const at = Number(el.dataset.at),
+                until = num(el.dataset.until),
+                isLive = !!run && until !== undefined && at <= e && e < until,
+                isDone = !!run && (until !== undefined ? until <= e : at < e);
+              el.classList.toggle("live", isLive);
+              el.classList.toggle("done", isDone);
+              if (isLive && el.dataset.k === "rest") rest = el.dataset.i;
+              if (isLive && el.dataset.k !== "mini") liveSteps.push(el);
+              // The live step's notes open while it runs and fold when it ends.
+              const notes = el.dataset.k === "card" && el.querySelector(".step-notes");
+              if (notes && isLive && !notes.open && !notes.dataset.auto) {
+                notes.dataset.auto = "1";
+                notes.open = true;
+              } else if (notes && !isLive && notes.dataset.auto) {
+                delete notes.dataset.auto;
+                notes.open = false;
+              }
+              const left = el.dataset.k === "rest" && el.querySelector(".rs-left");
+              if (left) {
+                const secs = Math.max(0, Math.ceil(until - e - 1e-6));
+                left.textContent = isLive ? `· ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")} left` : "";
+                el.querySelector(".rs-len").hidden = isLive;
+              }
+            }
+            // Up next: during a rest (or a gap), the next move is outlined.
+            const moving = liveSteps.some((el) => el.dataset.k === "card");
+            const upcoming = run && !moving ? els.filter((el) => el.dataset.k === "card" && Number(el.dataset.at) > e).sort((a, b) => a.dataset.at - b.dataset.at)[0] : null;
+            els.forEach((el) => el.classList.toggle("upnext", el === upcoming));
+            if (rest !== liveRest && !fromLayout) {
+              liveRest = rest;
+              return layout();
+            }
+            liveRest = rest;
+            // "Now": a line across the lanes, behind the cards, so it shows in
+            // the gutter and between cards but never through a card's text; a
+            // live card fills up to it.
+            let line = lanes.querySelector(".nowh"),
+              label = lanes.querySelector(".gnow");
+            if (!run) {
+              line?.remove();
+              label?.remove();
+              lanes.querySelectorAll(".gl[data-t]").forEach((el) => (el.hidden = el.dataset.hidden === "1"));
+              followed = null;
+              return;
+            }
+            const y = core.yAt(map, e);
+            if (!line) {
+              line = doc.createElement("div");
+              line.className = "nowh";
+              line.setAttribute("aria-hidden", "true");
+              label = doc.createElement("span");
+              label.className = "gl gnow ly";
+              label.innerHTML = "<b>now</b>";
+              lanes.append(line, label);
+            }
+            line.style.top = y - 1 + "px";
+            label.style.top = y - 5 + "px";
+            lanes.querySelectorAll(".gl[data-t]").forEach((el) => (el.hidden = el.dataset.hidden === "1" || Math.abs(parseFloat(el.style.top) - (y - 5)) < 13));
+            for (const el of liveSteps) if (el.dataset.k === "card") el.style.setProperty("--fy", Math.max(0, y - parseFloat(el.style.top)) + "px");
+            // Keep the live steps in view: scroll once each time they change,
+            // so the page can still be scrolled by hand in between.
+            const key = liveSteps.map((el) => el.dataset.i).join(",") || "next:" + (upcoming ? upcoming.dataset.i : "");
+            if (key === followed) return;
+            followed = key;
+            const tops = liveSteps.map((el) => parseFloat(el.style.top)).concat(upcoming ? [parseFloat(upcoming.style.top)] : []),
+              target = Math.min(y - 60, ...tops),
+              base = lanes.getBoundingClientRect().top + window.scrollY;
+            window.scrollTo({ top: Math.max(0, base + target - (run.inset || 0) - 24), behavior: "smooth" });
+          }
+          const onRun = (run) => {
+            window.__timelineRun = run;
+            tick();
+          };
+          window.__timelineSetRun = onRun;
+          // Ingredient ticks, per device, never written into the text.
+          const chips = doc.querySelector(".chips"),
+            tickKey = chips ? "timeline-ticks:" + chips.dataset.key : "";
+          const showTicks = (ticked) =>
+            chips &&
+            chips.querySelectorAll(".chip").forEach((chip) => {
+              const on = ticked.includes(chip.dataset.chip);
+              chip.classList.toggle("on", on);
+              chip.setAttribute("aria-pressed", String(on));
+            });
+          const readTicks = () => {
+            try {
+              return JSON.parse(localStorage.getItem(tickKey) || "[]");
+            } catch (error) {
+              return [];
+            }
+          };
+          const onChip = (event) => {
+            const chip = event.target.closest(".chip");
+            if (!chip) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const on = !chip.classList.contains("on");
+            chip.classList.toggle("on", on);
+            chip.setAttribute("aria-pressed", String(on));
+            if (inPreview) return post({ type: "timeline:tick", key: tickKey, chip: chip.dataset.chip, on });
+            const ticked = readTicks().filter((c) => c !== chip.dataset.chip).concat(on ? [chip.dataset.chip] : []);
+            try {
+              localStorage.setItem(tickKey, JSON.stringify(ticked));
+            } catch (error) {}
+          };
+          const onMessage = (event) => {
+            if (event.source === parent && event.data?.type === "timeline:ticks" && event.data.key === tickKey) showTicks(event.data.ticks || []);
+          };
+          // Start in the card; once it has scrolled away, a docked Start shows
+          // at the bottom (the run runtime's, or the studio's).
+          const go = doc.querySelector(".ready-go");
+          const onGo = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (inPreview) post({ type: "timeline:start" });
+            else window.__timelineRunApi?.start();
+          };
+          let observer = null;
+          const paper = () => getComputedStyle(doc.querySelector(".sheet")).getPropertyValue("--paper").trim();
+          if (!quiet) {
+            chips?.addEventListener("click", onChip);
+            go?.addEventListener("click", onGo);
+            window.addEventListener("message", onMessage);
+            if (inPreview) tickKey && post({ type: "timeline:ticks?", key: tickKey });
+            else showTicks(readTicks());
+            if (go && typeof IntersectionObserver === "function") {
+              observer = new IntersectionObserver((entries) => {
+                const docked = !entries[entries.length - 1].isIntersecting;
+                window.__timelineDocked = docked;
+                if (inPreview) post({ type: "timeline:dock", docked, bg: paper() });
+                else window.__timelineRunApi?.dock(docked, paper());
+              });
+              observer.observe(go);
+            }
+          }
+          const resize = new ResizeObserver((entries) => {
+            const width = entries[0].contentRect.width;
+            if (width !== lastWidth) {
+              lastWidth = width;
+              layout();
+            }
+          });
+          resize.observe(lanes);
+          // Opening or folding a card's notes changes its height.
+          const onToggle = (event) => {
+            if (lanes.contains(event.target)) layout();
+          };
+          doc.addEventListener("toggle", onToggle, true);
+          window.addEventListener("load", layout);
+          doc.fonts?.ready.then(layout);
+          layout();
+          return () => {
+            active = false;
+            resize.disconnect();
+            observer?.disconnect();
+            chips?.removeEventListener("click", onChip);
+            go?.removeEventListener("click", onGo);
+            window.removeEventListener("message", onMessage);
+            doc.removeEventListener("toggle", onToggle, true);
+            window.removeEventListener("load", layout);
+            if (window.__timelineSetRun === onRun) window.__timelineSetRun = null;
+          };
+        }
         function previewRuntime(layout) {
           // In the studio's live preview a tap on a card (or a day heading) asks
           // the editor to open on that source line.
@@ -1958,10 +2346,10 @@ clock: relative
               parent.postMessage({ type: "timeline:picture", src: picture.getAttribute("href") }, "*");
               return;
             }
-            if (event.target.closest("a, summary")) return;
+            if (event.target.closest("a, summary, button")) return;
             const target = event.target.closest("[data-line]");
             if (!target) {
-              if (event.target.closest(".masthead h1")) parent.postMessage({ type: "timeline:edit", title: true }, "*");
+              if (event.target.closest(".masthead h1, .ready h1")) parent.postMessage({ type: "timeline:edit", title: true }, "*");
               return;
             }
             event.preventDefault();
@@ -2010,6 +2398,9 @@ clock: relative
             cleanup();
             document.head.replaceChildren(...next.head.childNodes);
             document.body.replaceChildren(...next.body.childNodes);
+            // The body's classes carry the theme (a routine's sheet styles by it).
+            document.body.className = next.body.className;
+            document.body.classList.add("live");
             if (fresh) {
               window.__timelineScrolled = false;
               window.__timelineRunShown = null;
@@ -2196,6 +2587,272 @@ clock: relative
           });
           return { clock, length, total, spoken, elapsedMs, apply, end, position, skipTo, backTo, seek };
         }
+        // The routine sheet's geometry: elapsed lanes under the ready card. It
+        // places every step, rest, moment and section header in px from the
+        // steps' times. Self-contained like runCore: the renderer runs it with
+        // estimated card heights (so a page read without scripts is laid out),
+        // the page runs it again with measured ones (notes opened, long titles,
+        // a live rest), and the tests call it directly.
+        //
+        // Items: { id, at, until (undefined for a moment), rest, line }, in
+        // seconds. Sections: { at } (a `day:` header row, at its first step).
+        function routineCore() {
+          const PX = 12, // px a minute on the plain scale
+            GAP = 4, // between cards stacked in one lane
+            LONG = 15 * 60, // stretches of long steps longer than this are drawn this tall
+            MIN = { lane: 88, wide: 58, rest: 28, liveRest: 44, moment: 28, section: 24 },
+            MINI = 34, // a folded third step, stacked inside the second lane's card
+            MARK_ABOVE = 44, // room for a card's title above a moment drawn across it
+            MARK_BELOW = 26,
+            LABEL = 16; // gutter labels at least this far apart
+          const frac = (n) => {
+            const whole = Math.floor(n),
+              part = { 0.25: "¼", 0.5: "½", 0.75: "¾" }[Math.round((n - whole) * 100) / 100];
+            return part === undefined ? null : `${whole || ""}${part}`;
+          };
+          const pad = (n) => String(n).padStart(2, "0");
+          // A step's length on its chip: "45s", "15 min", "1¼ min", "1:10", "2 h", "1 h 30".
+          function chip(sec) {
+            if (sec < 60) return `${sec}s`;
+            if (sec >= 3600 && sec % 60 === 0) {
+              const h = Math.floor(sec / 3600),
+                m = (sec % 3600) / 60;
+              return `${h} h${m ? ` ${m}` : ""}`;
+            }
+            if (sec % 60 === 0) return `${sec / 60} min`;
+            const f = sec % 15 === 0 && sec < 3600 ? frac(sec / 60) : null;
+            return f ? `${f} min` : `${Math.floor(sec / 60)}:${pad(sec % 60)}`;
+          }
+          // Where something starts, in the gutter: "start", "at 10 min", "at 27½ min", "at 1 h 15".
+          function atLabel(sec) {
+            if (!sec) return "start";
+            if (sec < 60) return frac(sec / 60) ? `at ${frac(sec / 60)} min` : `at ${sec}s`;
+            if (sec >= 3600) {
+              const h = Math.floor(sec / 3600),
+                rest = sec % 3600,
+                m = rest % 60 === 0 ? String(rest / 60) : frac(rest / 60) || `${Math.floor(rest / 60)}:${pad(rest % 60)}`;
+              return `at ${h} h${rest ? ` ${m}` : ""}`;
+            }
+            if (sec % 60 === 0) return `at ${sec / 60} min`;
+            const f = sec % 15 === 0 ? frac(sec / 60) : null;
+            return f ? `at ${f} min` : `at ${Math.floor(sec / 60)}:${pad(sec % 60)}`;
+          }
+          // A section's length: "1 min", "7 min 45s", "1 h 5 min".
+          function sectionLength(sec) {
+            if (sec < 60) return `${sec}s`;
+            const h = Math.floor(sec / 3600),
+              m = Math.floor(sec / 60) % 60,
+              s = sec % 60;
+            return h ? `${h} h${m ? ` ${m} min` : ""}` : `${m} min${s ? ` ${s}s` : ""}`;
+          }
+          const spansOf = (items) => items.filter((i) => i.until !== undefined).sort((a, b) => a.at - b.at || a.line - b.line);
+          // How many steps run at once, at most (moments do not count).
+          function atOnce(items) {
+            const spans = spansOf(items);
+            return spans.reduce((most, s) => Math.max(most, spans.filter((o) => o.at <= s.at && s.at < o.until).length), 0);
+          }
+          // The ready card's counts: "6 steps · 2 at once", or for a routine
+          // with rests "8 moves · 7 rests".
+          function summary(items) {
+            const rests = items.filter((i) => i.rest).length,
+              moves = items.length - rests,
+              n = atOnce(items),
+              plural = (k, word) => `${k} ${word}${k === 1 ? "" : "s"}`;
+            return (rests ? `${plural(moves, "move")} · ${plural(rests, "rest")}` : plural(items.length, "step")) + (n > 1 ? ` · ${n} at once` : "");
+          }
+          // What you need, from the note: lines: split on commas (not inside
+          // brackets), trimmed, a final full stop dropped.
+          function chips(notes) {
+            const out = [];
+            for (const note of notes) {
+              let depth = 0,
+                word = "";
+              for (const c of String(note) + ",") {
+                if (c === "(" || c === "[") depth++;
+                if ((c === ")" || c === "]") && depth) depth--;
+                if (c === "," && !depth) {
+                  const item = word.trim().replace(/\.$/, "").trim();
+                  if (item) out.push(item);
+                  word = "";
+                } else word += c;
+              }
+            }
+            return out;
+          }
+          // Lanes: steps in start order take the first free lane of two; a
+          // third step running at the same time folds into the step in the
+          // second lane as a mini card. A step nothing else overlaps is wide.
+          function lanes(items) {
+            const info = new Map(),
+              occupant = [null, null];
+            for (const s of spansOf(items)) {
+              const lane = [0, 1].find((l) => !occupant[l] || occupant[l].until <= s.at);
+              if (lane === undefined) {
+                info.set(s.id, { mini: true, host: occupant[1].id });
+                info.get(occupant[1].id).minis.push(s.id);
+                continue;
+              }
+              occupant[lane] = s;
+              info.set(s.id, { lane, minis: [] });
+            }
+            const drawn = spansOf(items).filter((s) => !info.get(s.id).mini);
+            for (const s of drawn) info.get(s.id).wide = !drawn.some((o) => o !== s && o.at < s.until && s.at < o.until);
+            return info;
+          }
+          // The geometry. `needs` maps an id to the px its card's content needs
+          // (measured on the page; estimated by the renderer); the minimums
+          // above always hold.
+          function layout(items, sections = [], needs = {}, options = {}) {
+            const info = lanes(items),
+              spans = spansOf(items).filter((s) => !info.get(s.id).mini),
+              points = items.filter((i) => i.until === undefined).sort((a, b) => a.at - b.at || a.line - b.line),
+              end = Math.max(0, ...items.map((i) => i.until ?? i.at)),
+              host = new Map();
+            // A moment inside a step is a dashed line across it (the step that
+            // started last, then the one ending first); any other moment is a
+            // row of its own.
+            for (const p of points)
+              host.set(
+                p.id,
+                spans.filter((s) => s.at < p.at && p.at < s.until).sort((a, b) => b.at - a.at || a.until - b.until)[0] || null,
+              );
+            const rows = points.filter((p) => !host.get(p.id));
+            const minis = spansOf(items).filter((s) => info.get(s.id).mini);
+            const T = [...new Set([0, end, ...spans.flatMap((s) => [s.at, s.until]), ...points.map((p) => p.at), ...sections.map((s) => s.at), ...minis.map((s) => s.at)])].sort((a, b) => a - b);
+            const index = new Map(T.map((t, i) => [t, i]));
+            // Rows inserted at a moment, before whatever starts then: section
+            // headers first, then moments that sit in no step.
+            const inserted = T.map(() => []);
+            for (const s of sections) inserted[index.get(s.at)].push({ kind: "section", id: s.id, h: MIN.section });
+            for (const p of rows) inserted[index.get(p.at)].push({ kind: "moment", id: p.id, h: Math.max(MIN.moment, needs[p.id] || 0) });
+            const insertedPx = inserted.map((list) => list.reduce((sum, r) => sum + r.h + GAP, 0));
+            // The plain scale, then long stretches drawn shorter: where only
+            // steps over 15 min are running (or nothing is), a stretch longer
+            // than 15 min is drawn 15 min tall, and the steps get a break.
+            const seg = T.slice(0, -1).map((t, i) => ((T[i + 1] - t) / 60) * PX);
+            const quiet = (a, b) => spans.filter((s) => s.at <= a && b <= s.until).every((s) => s.until - s.at > LONG);
+            const runs = [];
+            let run = null;
+            for (let i = 0; i < seg.length; i++) {
+              if (!quiet(T[i], T[i + 1]) || (run && inserted[i].length)) run = null;
+              if (!quiet(T[i], T[i + 1])) continue;
+              if (!run) runs.push((run = { from: i, to: i }));
+              else run.to = i;
+            }
+            for (const r of runs) {
+              const length = T[r.to + 1] - T[r.from];
+              r.compressed = length > LONG;
+              if (r.compressed) for (let i = r.from; i <= r.to; i++) seg[i] *= LONG / length;
+            }
+            // yEnd: where time t is reached; yTop: below any rows inserted at t.
+            let yTop = [],
+              yEnd = [];
+            const place = () => {
+              yEnd = [0];
+              yTop = [insertedPx[0]];
+              for (let i = 1; i < T.length; i++) {
+                yEnd[i] = yTop[i - 1] + seg[i - 1];
+                yTop[i] = yEnd[i] + insertedPx[i];
+              }
+            };
+            // Minimum heights: cards, moments across a card (room for the
+            // card's title above and the label below) and gutter labels. Each
+            // is met by stretching the segment that ends it; taken in order of
+            // that end, one pass settles them all.
+            const need = (s) => {
+              const i = info.get(s.id),
+                base = s.rest ? (options.liveRest === s.id ? MIN.liveRest : MIN.rest) : (i.wide ? MIN.wide : MIN.lane) + i.minis.length * MINI;
+              return Math.max(base, needs[s.id] || 0);
+            };
+            const rules = spans.map((s) => ({ a: s.at, b: s.until, px: need(s) + GAP }));
+            for (const p of points) {
+              const h = host.get(p.id);
+              if (h) rules.push({ a: h.at, b: p.at, px: MARK_ABOVE }, { a: p.at, b: h.until, px: MARK_BELOW });
+            }
+            const labelled = [...new Set(items.filter((i) => !i.rest).map((i) => i.at))].sort((a, b) => a - b);
+            for (let k = 1; k < labelled.length; k++) rules.push({ a: labelled[k - 1], b: labelled[k], px: LABEL, top: true });
+            rules.sort((x, y) => x.b - y.b);
+            place();
+            for (const rule of rules) {
+              const ia = index.get(rule.a),
+                ib = index.get(rule.b),
+                have = (rule.top ? yTop[ib] : yEnd[ib]) - yTop[ia];
+              if (have < rule.px - 0.01) {
+                seg[ib - 1] += rule.px - have;
+                place();
+              }
+            }
+            const round = (n) => Math.round(n * 10) / 10;
+            const boxes = new Map();
+            for (const s of spans) {
+              const i = info.get(s.id),
+                top = yTop[index.get(s.at)],
+                height = yEnd[index.get(s.until)] - top - GAP;
+              const box = { top: round(top), height: round(height), lane: i.wide ? "w" : "l" + i.lane, minis: i.minis, brk: null };
+              // One break per long step, in its longest shortened stretch, in the
+              // largest part of it no moment or the card's title is drawn on.
+              if (!s.rest && s.until - s.at > LONG) {
+                const mine = runs.filter((r) => r.compressed && s.at <= T[r.from] && T[r.to + 1] <= s.until);
+                const best = mine.sort((x, y) => yEnd[y.to + 1] - yTop[y.from] - (yEnd[x.to + 1] - yTop[x.from]))[0];
+                if (best) {
+                  const blocked = [top, top + 50, top + height - 8, top + height, ...points.filter((p) => host.get(p.id) && p.at >= T[best.from] && p.at <= T[best.to + 1]).map((p) => yTop[index.get(p.at)])];
+                  const lo = Math.max(top + 50, yTop[best.from]),
+                    hi = Math.min(top + height - 8, yEnd[best.to + 1]);
+                  const cuts = [lo, hi, ...blocked.filter((y) => y > lo && y < hi)].sort((a, b) => a - b);
+                  let gap = null;
+                  for (let k = 1; k < cuts.length; k++) if (!gap || cuts[k] - cuts[k - 1] > gap[1] - gap[0]) gap = [cuts[k - 1], cuts[k]];
+                  if (gap && gap[1] - gap[0] >= 40) box.brk = round((gap[0] + gap[1]) / 2 - 17 - top);
+                }
+              }
+              boxes.set(s.id, box);
+            }
+            for (const p of points) {
+              const h = host.get(p.id);
+              if (h) boxes.set(p.id, { top: round(yTop[index.get(p.at)]), lane: boxes.get(h.id).lane, host: h.id });
+            }
+            const placedRows = [];
+            inserted.forEach((list, i) => {
+              let y = yEnd[i];
+              for (const r of list) {
+                if (r.kind === "moment") boxes.set(r.id, { top: round(y), height: r.h, lane: "w" });
+                else placedRows.push({ id: r.id, at: T[i], top: round(y) });
+                y += r.h + GAP;
+              }
+            });
+            // Gutter labels, only where something that is not a rest starts: a
+            // step or a moment at its card's top, a folded step where it starts.
+            const labels = labelled.map((t) => {
+              const own = items.filter((i) => i.at === t && !i.rest).map((i) => boxes.get(i.id)).find((b) => b && b.host === undefined);
+              return { t, text: atLabel(t), top: round((own ? own.top : yTop[index.get(t)]) + 4) };
+            });
+            let last = -Infinity;
+            for (const label of labels.sort((a, b) => a.top - b.top)) {
+              label.hidden = label.top - last < 12;
+              if (!label.hidden) last = label.top;
+            }
+            const done = round(yTop[index.get(end)] + 10);
+            return {
+              boxes,
+              sections: placedRows,
+              labels,
+              done,
+              height: round(done + 34),
+              map: T.map((t, i) => [t, round(yTop[i]), round(yEnd[i])]),
+            };
+          }
+          // The y of an elapsed time, for the "now" line.
+          function yAt(map, t) {
+            if (!map || !map.length) return 0;
+            if (t <= map[0][0]) return map[0][1];
+            for (let i = 0; i < map.length - 1; i++) {
+              const [a, top] = map[i],
+                [b, , bottom] = map[i + 1];
+              if (t < b) return top + ((t - a) / (b - a)) * (bottom - top);
+            }
+            return map[map.length - 1][1];
+          }
+          return { chip, atLabel, sectionLength, atOnce, summary, chips, lanes, layout, yAt, MIN, GAP };
+        }
         // What the run runtime needs from a model: its steps in time order and a
         // key for the run state in localStorage (a hash of the steps, so the same
         // routine resumes in the studio, view.html and an exported copy alike).
@@ -2203,7 +2860,7 @@ clock: relative
           const steps = model.events
             .slice()
             .sort((a, b) => a.at - b.at || a.line - b.line)
-            .map((e) => ({ line: e.line, at: e.at, until: e.until, title: e.title, detail: e.detail, place: e.place, notes: e.notes, picture: pictureUrl(model, e.picture) }));
+            .map((e) => ({ line: e.line, at: e.at, until: e.until, title: e.title, detail: e.detail, place: e.place, notes: e.notes, picture: pictureUrl(model, e.picture), color: e.color, rest: isRest(e) }));
           const source = JSON.stringify([model.title, steps.map((s) => [s.at, s.until ?? null, s.title])]);
           let h1 = 0xdeadbeef,
             h2 = 0x41c6ce57;
@@ -2240,32 +2897,45 @@ clock: relative
           const css = `.run-top[hidden],.run-bottom[hidden],.run-start-slot[hidden],.run-panel [hidden],.run-bar [hidden]{display:none!important}
       .run-doc.run-top{position:sticky;top:0;z-index:26}
       .run-doc.run-bottom{position:fixed;left:0;right:0;bottom:0;z-index:27}
-      .run-doc.run-start-slot{position:fixed;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:27}
+      .run-doc.run-start-slot{position:fixed;left:0;right:0;bottom:0;z-index:27}
+      .run-start-slot{display:flex;padding:30px 16px max(16px,env(safe-area-inset-bottom));background:linear-gradient(to bottom,transparent,var(--dock-bg,transparent) 42%);pointer-events:none}
+      body:has(.edit-pill) .run-doc.run-start-slot{padding-right:96px}
       body.run-doc-host.run-active{padding-bottom:var(--run-bar-h,0px)}
       body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
       .run-panel,.run-bar,.run-start{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#e9f1f5;-webkit-font-smoothing:antialiased;letter-spacing:0;text-align:left}
-      .run-panel{max-height:62vh;max-height:62dvh;overflow:auto;padding:calc(10px + env(safe-area-inset-top)) 16px 12px;background:#11181df5;border-bottom:1px solid #2b3740;box-shadow:0 8px 28px #0005}
+      .run-panel{max-height:62vh;max-height:62dvh;overflow:auto;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;background:#11181d;border-bottom:1px solid #2b3740;box-shadow:0 8px 28px #0005}
       .run-inner{max-width:720px;margin:0 auto}
       .run-head{display:flex;justify-content:space-between;gap:12px;font-size:13px;font-weight:600;color:#9fb3bf}
       .run-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .run-count{flex:none;font-variant-numeric:tabular-nums}
       .run-photo{margin:8px 0 0;border-radius:12px;overflow:hidden;background:#0b1013}
-      .run-photo img{display:block;width:100%;height:min(30vh,280px);height:min(30dvh,280px);object-fit:contain}
+      .run-photo img{display:block;width:100%;height:min(26vh,240px);height:min(26dvh,240px);object-fit:contain}
       .run-next-thumb{flex:none;margin-left:auto;width:44px;height:44px;border-radius:8px;overflow:hidden;background:#0b1013}
-      .run-next-thumb img{display:block;width:100%;height:100%;object-fit:cover}
-      .run-step{margin:6px 0 8px;font-size:26px;font-weight:800;line-height:1.1;letter-spacing:-.3px;text-transform:uppercase;overflow-wrap:anywhere}
+      .run-next-thumb img,.run-up-pic img{display:block;width:100%;height:100%;object-fit:cover}
+      .run-step{margin:8px 0 8px;font-size:24px;font-weight:800;line-height:1.1;letter-spacing:-.3px;text-transform:uppercase;overflow-wrap:anywhere}
+      .run-resting .run-step{color:#9fb3bf}
       .run-meter{height:10px;border-radius:999px;background:#26323a;overflow:hidden}
       .run-fill{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#3ecf8e,#8fe3b9);transition:width .25s linear}
-      .run-paused .run-fill{background:#6f8390}
+      .run-paused .run-fill,.run-resting .run-fill{background:#6f8390}
       .run-time{display:flex;align-items:baseline;gap:8px;margin-top:6px}
-      .run-secs{font-size:44px;font-weight:800;line-height:1;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+      .run-secs{font-size:40px;font-weight:800;line-height:1;letter-spacing:-1px;font-variant-numeric:tabular-nums}
       .run-secs-label{min-width:0;font-size:14px;font-weight:600;color:#9fb3bf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .run-detail{margin:8px 0 0;font-size:15px;line-height:1.3;color:#cfdde5;overflow-wrap:anywhere}
       .run-notes{margin:6px 0 0;padding-left:20px;font-size:15px;line-height:1.35}
       .run-notes li{margin:2px 0}
-      .run-also{list-style:none;margin:8px 0 0;padding:0;font-size:14px;color:#cfdde5}
-      .run-also li{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-top:1px dashed #2b3740}
-      .run-also b{font-variant-numeric:tabular-nums;color:#e9f1f5}
+      .run-also{list-style:none;margin:10px 0 0;padding:0}
+      .run-also li{display:flex;align-items:center;gap:10px;margin-top:6px;padding:8px 10px;border-radius:10px;background:#1b262e;border:1px solid #2b3740;font-size:14px;font-weight:700}
+      .run-dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--c,#5f8fb0)}
+      .run-also .run-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .run-mm{flex:1;min-width:24px;height:6px;border-radius:999px;background:#26323a;overflow:hidden}
+      .run-mm i{display:block;height:100%;background:var(--c,#5f8fb0)}
+      .run-also b{flex:none;font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+      .run-upnext{display:flex;gap:12px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid #2b3740}
+      .run-up-pic{flex:none;width:96px;height:96px;border-radius:12px;overflow:hidden;background:#0b1013}
+      .run-up-text{min-width:0}
+      .run-up-kicker{font-size:12px;color:#9fb3bf;text-transform:uppercase;letter-spacing:1.5px}
+      .run-up-title{font-size:20px;font-weight:800;line-height:1.15;text-transform:uppercase;overflow-wrap:anywhere}
+      .run-up-detail{font-size:14px;color:#cfdde5}
       .run-next{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:8px;border-top:1px solid #2b3740;font-size:14px;color:#9fb3bf}
       .run-next-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .run-next b{color:#e9f1f5}
@@ -2273,20 +2943,32 @@ clock: relative
       .run-done-title{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}
       .run-done-actions{display:flex;justify-content:center;gap:10px;margin-top:12px}
       .run-bar{padding:8px 12px max(10px,env(safe-area-inset-bottom));background:#11181df5;border-top:1px solid #2b3740;box-shadow:0 -8px 28px #0004}
-      .run-status{display:flex;align-items:center;justify-content:center;gap:10px;min-height:28px;font-size:13px;color:#9fb3bf;font-variant-numeric:tabular-nums}
-      .run-controls,.run-confirm{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px}
-      .run-confirm{font-size:15px;font-weight:600}
-      .run-btn,.run-start,.run-done button,.run-confirm button,.run-chip{appearance:none;-webkit-appearance:none;border:0;margin:0;cursor:pointer;font:inherit;font-weight:700;color:#e9f1f5;background:#24313a;touch-action:manipulation}
+      .run-status{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 10px;min-height:26px;font-size:13px;color:#9fb3bf;font-variant-numeric:tabular-nums;text-align:center}
+      .run-toggles{display:flex;gap:8px;margin:6px 0 8px}
+      .run-tg{display:flex;align-items:center;gap:8px;height:40px;padding:0 8px 0 10px;border:1px solid #2b3740!important;border-radius:12px;background:#1c2830;font-size:14px;white-space:nowrap}
+      .run-tg.run-announce{flex:1;min-width:0}
+      .run-tg svg{width:19px;height:19px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+      .run-sw{position:relative;flex:none;width:34px;height:20px;margin-left:auto;border-radius:10px;background:#3a4a55}
+      .run-sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#9fb3bf;transition:left .15s}
+      .run-tg[aria-pressed="true"] .run-sw{background:#3ecf8e}
+      .run-tg[aria-pressed="true"] .run-sw::after{left:16px;background:#fff}
+      .run-controls,.run-confirm{display:flex;align-items:center;justify-content:center;gap:10px}
+      .run-confirm{min-height:44px;font-size:15px;font-weight:600}
+      .run-btn,.run-start,.run-done button,.run-confirm button,.run-chip,.run-tg{appearance:none;-webkit-appearance:none;border:0;margin:0;cursor:pointer;font:inherit;font-weight:700;color:#e9f1f5;background:#24313a;touch-action:manipulation}
+      .run-tg{background:#1c2830}
       .run-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;height:44px;padding:0 10px;border-radius:999px;font-size:15px}
       .run-btn svg,.run-start svg{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+      .run-start svg{fill:currentColor;stroke:none;width:20px;height:20px}
       .run-pause,.run-start{background:#3ecf8e;color:#08241a}
       .run-pause{min-width:112px}
-      .run-start{display:inline-flex;align-items:center;gap:8px;height:46px;padding:0 20px;border-radius:999px;font-size:16px;white-space:nowrap;box-shadow:0 6px 22px #0005}
-      .run-chip{height:28px;padding:0 12px;border-radius:999px;background:#f0b45a;color:#2b1d05;font-size:12px}
+      .run-start{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:10px;height:56px;padding:0 20px;border-radius:999px;font-size:18px;font-weight:800;white-space:nowrap;box-shadow:0 6px 22px #0006;pointer-events:auto}
+      .run-start small{font-weight:600;font-size:15px;opacity:.8}
+      .run-elapsed{white-space:nowrap}
+      .run-chip{height:26px;padding:0 12px;border-radius:999px;background:#f0b45a;color:#2b1d05;font-size:12px;white-space:nowrap}
       .run-done button,.run-confirm button{height:44px;padding:0 18px;border-radius:999px}
       .run-restart,.run-stop-yes{background:#3ecf8e!important;color:#08241a!important}
       .run-stop-yes{background:#e0674f!important;color:#fff!important}
-      @media(max-width:420px){.run-step{font-size:22px}.run-secs{font-size:38px}.run-controls{gap:6px}.run-pause{min-width:100px}}`;
+      @media(max-width:420px){.run-step{font-size:22px}.run-secs{font-size:38px}.run-controls{gap:8px}.run-pause{min-width:100px}.run-tg{font-size:13px;gap:6px}}`;
           if (!doc.getElementById("run-css")) {
             const style = doc.createElement("style");
             style.id = "run-css";
@@ -2309,21 +2991,19 @@ clock: relative
             doc.body.classList.add("run-doc-host");
           }
           const icon = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`,
-            speaker = '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/>',
             icons = {
               back: icon('<path d="M6 5v14"/><path d="M19 5 9 12l10 7z"/>'),
               skip: icon('<path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/>'),
               pause: icon('<path d="M8 5v14M16 5v14"/>'),
               play: icon('<path d="M7 4.5v15L19.5 12z"/>'),
               stop: icon('<rect x="6" y="6" width="12" height="12" rx="1.5"/>'),
-              beep: icon(speaker + '<path d="M15.5 9a4 4 0 0 1 0 6"/>'),
-              voice: icon(speaker + '<path d="M15.5 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>'),
-              mute: icon(speaker + '<path d="m16 9.5 5 5M21 9.5l-5 5"/>'),
+              beep: icon('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/>'),
+              voice: icon('<path d="M9 21v-3h2a1.5 1.5 0 0 0 1.5-1.5V14l1.4-.6-1.4-3A5.3 5.3 0 1 0 2.5 14.3V21"/><path d="M16.8 9.2a3.8 3.8 0 0 1 0 5.6"/><path d="M19.8 6.3a8 8 0 0 1 0 11.4"/>'),
             };
           top.innerHTML =
-            '<section class="run-panel" aria-label="Current step"><div class="run-inner"><div class="run-live"><div class="run-head"><span class="run-name"></span><span class="run-count"></span></div><div class="run-photo" hidden></div><div class="run-step" role="status"></div><div class="run-meter"><span class="run-fill"></span></div><div class="run-time"><b class="run-secs"></b><span class="run-secs-label"></span></div><p class="run-detail" hidden></p><ul class="run-notes" hidden></ul><ul class="run-also" hidden></ul><div class="run-next"><span class="run-next-text"></span><span class="run-next-thumb" hidden></span></div></div><div class="run-done" hidden><div class="run-done-title"></div><div class="run-done-actions"><button type="button" class="run-restart">Restart</button><button type="button" class="run-close">Close</button></div></div></div></section>';
-          bottom.innerHTML = `<div class="run-bar"><div class="run-inner"><div class="run-status"><span class="run-elapsed"></span><button type="button" class="run-chip" hidden>Tap for sound</button></div><div class="run-controls"><button type="button" class="run-btn run-back" aria-label="Back" title="Back to the start of this step (or the previous one)">${icons.back}</button><button type="button" class="run-btn run-pause"></button><button type="button" class="run-btn run-skip" aria-label="Skip" title="Skip to the next step">${icons.skip}</button><button type="button" class="run-btn run-sound"></button><button type="button" class="run-btn run-stop" aria-label="Stop" title="Stop the run">${icons.stop}</button></div><div class="run-confirm" hidden><span>End this run?</span><button type="button" class="run-stop-yes">Stop</button><button type="button" class="run-stop-no">Keep going</button></div></div></div>`;
-          startSlot.innerHTML = `<button type="button" class="run-start">${icons.play}<span></span></button>`;
+            '<section class="run-panel" aria-label="Current step"><div class="run-inner"><div class="run-live"><div class="run-head"><span class="run-name"></span><span class="run-count"></span></div><div class="run-photo" hidden></div><div class="run-step" role="status"></div><div class="run-meter"><span class="run-fill"></span></div><div class="run-time"><b class="run-secs"></b><span class="run-secs-label"></span></div><p class="run-detail" hidden></p><ul class="run-notes" hidden></ul><ul class="run-also" hidden></ul><div class="run-upnext" hidden><span class="run-up-pic" hidden></span><div class="run-up-text"><div class="run-up-kicker"></div><div class="run-up-title"></div><div class="run-up-detail"></div></div></div><div class="run-next"><span class="run-next-text"></span><span class="run-next-thumb" hidden></span></div></div><div class="run-done" hidden><div class="run-done-title"></div><div class="run-done-actions"><button type="button" class="run-restart">Restart</button><button type="button" class="run-close">Close</button></div></div></div></section>';
+          bottom.innerHTML = `<div class="run-bar"><div class="run-inner"><div class="run-status"><span class="run-elapsed"></span><button type="button" class="run-chip" hidden>Tap for sound</button></div><div class="run-toggles"><button type="button" class="run-tg run-beeps" aria-pressed="true">${icons.beep}<span>Beeps</span><span class="run-sw" aria-hidden="true"></span></button><button type="button" class="run-tg run-announce" aria-pressed="false">${icons.voice}<span>Announce steps</span><span class="run-sw" aria-hidden="true"></span></button></div><div class="run-controls"><button type="button" class="run-btn run-back" aria-label="Back" title="Back to the start of this step (or the previous one)">${icons.back}</button><button type="button" class="run-btn run-pause"></button><button type="button" class="run-btn run-skip" aria-label="Skip" title="Skip to the next step">${icons.skip}</button><button type="button" class="run-btn run-stop" aria-label="Stop" title="Stop the run">${icons.stop}</button></div><div class="run-confirm" hidden><span>End this run?</span><button type="button" class="run-stop-yes">Stop</button><button type="button" class="run-stop-no">Keep going</button></div></div></div>`;
+          startSlot.innerHTML = `<button type="button" class="run-start">${icons.play}<span>Start</span><small></small></button>`;
           [top, bottom, startSlot].forEach((el) => el.setAttribute("data-html2canvas-ignore", ""));
           const $ = (root, selector) => root.querySelector(selector),
             ui = {
@@ -2337,6 +3017,12 @@ clock: relative
               detail: $(top, ".run-detail"),
               notes: $(top, ".run-notes"),
               also: $(top, ".run-also"),
+              upnext: $(top, ".run-upnext"),
+              upPic: $(top, ".run-up-pic"),
+              upKicker: $(top, ".run-up-kicker"),
+              upTitle: $(top, ".run-up-title"),
+              upDetail: $(top, ".run-up-detail"),
+              nextRow: $(top, ".run-next"),
               next: $(top, ".run-next-text"),
               photo: $(top, ".run-photo"),
               nextThumb: $(top, ".run-next-thumb"),
@@ -2347,7 +3033,8 @@ clock: relative
               controls: $(bottom, ".run-controls"),
               confirm: $(bottom, ".run-confirm"),
               pause: $(bottom, ".run-pause"),
-              sound: $(bottom, ".run-sound"),
+              beeps: $(bottom, ".run-beeps"),
+              announce: $(bottom, ".run-announce"),
               start: $(startSlot, ".run-start"),
             };
 
@@ -2404,17 +3091,33 @@ clock: relative
           }
           const transport = config.transport || localTransport();
 
-          // Sound: beeps, beeps + voice, or off; remembered per device.
-          const sounds = ["beep", "voice", "mute"],
-            soundNames = { beep: "beeps", voice: "beeps + voice", mute: "off" };
-          let sound = "beep";
+          // Sound: two switches, remembered per device. Beeps are the short
+          // count-in and the long tone at each new step; Announce says each step
+          // as it starts. The one cycling button this replaces stored
+          // "beep" | "voice" | "mute"; that choice carries over once.
+          let beeps = true,
+            voice = false;
           try {
-            const saved = localStorage.getItem("timeline:sound");
-            if (sounds.includes(saved)) sound = saved;
+            const b = localStorage.getItem("timeline:beeps"),
+              a = localStorage.getItem("timeline:announce");
+            if (b === null && a === null) {
+              const old = localStorage.getItem("timeline:sound");
+              voice = old === "voice";
+              beeps = old !== "mute";
+            } else {
+              beeps = b !== "off";
+              voice = a === "on";
+            }
           } catch (error) {}
+          const saveSound = () => {
+            try {
+              localStorage.setItem("timeline:beeps", beeps ? "on" : "off");
+              localStorage.setItem("timeline:announce", voice ? "on" : "off");
+            } catch (error) {}
+          };
           let audio = null;
           // Audio has to be unlocked by a tap (iOS): Start, Resume, Restart, the
-          // sound button and the "Tap for sound" chip all do it.
+          // sound switches and the "Tap for sound" chip all do it.
           function unlock() {
             try {
               const Context = window.AudioContext || window.webkitAudioContext;
@@ -2431,13 +3134,13 @@ clock: relative
                 source.start(0);
               }
             } catch (error) {}
-            if (sound === "voice" && window.speechSynthesis)
+            if (voice && window.speechSynthesis)
               try {
                 window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
               } catch (error) {}
           }
           function tone(frequency, seconds) {
-            if (sound === "mute" || !audio || audio.state !== "running") return;
+            if (!beeps || !audio || audio.state !== "running") return;
             try {
               const t = audio.currentTime,
                 osc = audio.createOscillator(),
@@ -2454,7 +3157,7 @@ clock: relative
             } catch (error) {}
           }
           function say(text) {
-            if (sound !== "voice" || !window.speechSynthesis || !text) return;
+            if (!voice || !window.speechSynthesis || !text) return;
             try {
               window.speechSynthesis.cancel();
               const utterance = new SpeechSynthesisUtterance(text);
@@ -2471,7 +3174,6 @@ clock: relative
           const spokenStep = (step) =>
             step.title.replace(/\s+L$/, " left").replace(/\s+R$/, " right") +
             (step.until !== undefined ? ", " + core.spoken(step.until - step.at) : "");
-
           // Keep the screen on while running; the browser drops the lock when
           // the page is hidden, so it is asked for again on the way back.
           let lock = null,
@@ -2514,8 +3216,9 @@ clock: relative
             lastCount = null,
             announce = false,
             confirming = false,
-            note = "",
-            noteUntil = 0;
+            // The sheet's own Start is on screen: no docked one. The page says
+            // when it scrolls away (routineRuntime, or the studio's preview).
+            docked = !host && window.__timelineDocked === true;
           const setText = (el, text) => {
             if (el.textContent !== text) el.textContent = text;
           };
@@ -2540,10 +3243,11 @@ clock: relative
           };
           const esc = (text) =>
             String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+          const colors = { sky: "#5f8fb0", sand: "#b98a4a", sage: "#7f9a6e" };
           function show(mode) {
             top.hidden = mode === "idle";
             bottom.hidden = mode !== "run";
-            startSlot.hidden = mode !== "idle";
+            startSlot.hidden = mode !== "idle" || !docked;
             ui.live.hidden = mode !== "run";
             ui.done.hidden = mode !== "done";
             doc.body.classList.toggle("run-active", mode === "run");
@@ -2554,7 +3258,7 @@ clock: relative
             const state = transport.get(),
               now = transport.now(),
               total = core.end(steps);
-            setText(ui.start.lastChild, `Start · ${core.total(total)}`);
+            setText(ui.start.lastChild, `· ${core.total(total)}`);
             if (state) {
               const e = core.elapsedMs(state, now) / 1000;
               if (e >= total) {
@@ -2594,75 +3298,106 @@ clock: relative
             buzz([200, 100, 200]);
             say("Done");
           }
+          const bar = (s, e) => `${Math.min(100, Math.max(0, ((e - s.at) / Math.max(0.001, s.until - s.at)) * 100)).toFixed(1)}%`;
+          const left = (until, e) => core.clock(Math.ceil(until - e - 1e-6));
           function running(state, e, total) {
             const paused = state.pausedAt != null,
               pos = core.position(steps, e),
-              primary = pos.active[0] || null,
-              ending = pos.ending,
-              next = pos.next;
+              // The step ending soonest drives the header: its title, bar and
+              // countdown. Any other live step gets a smaller row of its own.
+              lead = pos.ending,
+              others = pos.active.filter((s) => s !== lead).sort((a, b) => a.until - b.until),
+              next = pos.next,
+              resting = !!(lead && lead.rest),
+              // During a rest (or a gap), the move that follows, large.
+              coming = (lead ? steps.filter((s) => s.at >= lead.until && !s.rest)[0] : next) || null,
+              moves = steps.filter((s) => !s.rest);
             show("run");
             top.classList.toggle("run-paused", paused);
+            top.classList.toggle("run-resting", resting);
             setText(ui.name, title);
-            setText(ui.count, pos.index >= 0 ? `step ${pos.index + 1} of ${steps.length}` : `${steps.length} steps`);
-            // The countdown follows the active step that ends soonest; between
+            setText(
+              ui.count,
+              steps.some((s) => s.rest)
+                ? `move ${moves.filter((s) => (s.until ?? s.at) <= e).length} of ${moves.length} done`
+                : `${core.clock(Math.floor(e))} of ${core.clock(total)}`,
+            );
+            // The countdown follows the live step that ends soonest; between
             // steps it counts down to the next one.
-            const target = ending ? ending.until : next ? next.at : total,
-              from = ending
-                ? ending.at
-                : Math.max(0, ...steps.filter((s) => (s.until ?? s.at) <= e).map((s) => s.until ?? s.at)),
-              left = Math.max(0, target - e);
-            setText(ui.step, primary ? primary.title : next ? "Get ready" : "");
+            const target = lead ? lead.until : next ? next.at : total,
+              from = lead ? lead.at : Math.max(0, ...steps.filter((s) => (s.until ?? s.at) <= e).map((s) => s.until ?? s.at)),
+              remaining = Math.max(0, target - e);
+            setText(ui.step, lead ? lead.title : next ? "Get ready" : "");
             ui.fill.style.width = `${Math.min(100, Math.max(0, ((e - from) / Math.max(0.001, target - from)) * 100)).toFixed(2)}%`;
-            setText(ui.secs, core.clock(Math.ceil(left - 1e-6)));
+            setText(ui.secs, core.clock(Math.ceil(remaining - 1e-6)));
             setText(
               ui.secsLabel,
-              paused ? "paused" : ending ? (ending === primary ? "left" : `left · ${ending.title}`) : next ? `until ${next.title}` : "left",
+              paused
+                ? "paused"
+                : resting || !lead
+                  ? coming
+                    ? `then ${coming.title}`
+                    : "left"
+                  : `left of ${core.total(lead.until - lead.at)}`,
             );
-            const detail = primary ? [primary.detail, primary.place && `@ ${primary.place}`].filter(Boolean).join(" ") : "";
+            const detail = lead && !resting ? [lead.detail, lead.place && `@ ${lead.place}`].filter(Boolean).join(" ") : "";
             setText(ui.detail, detail);
             ui.detail.hidden = !detail;
-            // The live step's picture, large; the next step's as a thumbnail.
-            setPicture(ui.photo, primary && primary.picture);
-            setPicture(ui.nextThumb, next && next.picture);
-            setList(ui.notes, primary ? primary.notes.map((n) => `<li>${esc(n)}</li>`) : []);
+            // The lead step's picture, large; the next step's as a thumbnail.
+            setPicture(ui.photo, lead && !resting && lead.picture);
+            setList(ui.notes, lead && !resting ? lead.notes.map((n) => `<li>${esc(n)}</li>`) : []);
             setList(
               ui.also,
-              pos.active.slice(1).map((s) => `<li><span>${esc(s.title)}</span><b>${core.clock(Math.ceil(s.until - e - 1e-6))} left</b></li>`),
+              others.map(
+                (s) =>
+                  `<li style="--c:${colors[s.color] || colors.sky}"><i class="run-dot"></i><span class="run-nm">${esc(s.title)}</span><span class="run-mm"><i style="width:${bar(s, e)}"></i></span><b>${left(s.until, e)}</b></li>`,
+              ),
             );
-            const nextLength = next ? (next.until !== undefined ? core.clock(next.until - next.at) : `at ${core.clock(next.at)}`) : "";
+            const showComing = (resting || !lead) && !!coming;
+            ui.upnext.hidden = !showComing;
+            if (showComing) {
+              setPicture(ui.upPic, coming.picture);
+              setText(ui.upKicker, `Up next${coming.until !== undefined ? ` · ${core.length(coming.until - coming.at)}` : ""}`);
+              setText(ui.upTitle, coming.title);
+              setText(ui.upDetail, coming.detail || "");
+            }
+            ui.nextRow.hidden = showComing;
+            setPicture(ui.nextThumb, !showComing && next && next.picture);
+            const nextLength = next ? (next.until !== undefined ? core.total(next.until - next.at) : `at ${core.clock(next.at)}`) : "";
             if (ui.next.dataset.value !== (next ? next.title + nextLength : "")) {
               ui.next.dataset.value = next ? next.title + nextLength : "";
-              ui.next.innerHTML = next ? `next ▸ <b>${esc(next.title)}</b> · ${nextLength}` : "last step";
+              ui.next.innerHTML = next ? `next · <b>${esc(next.title)}</b> · ${nextLength}` : "last step";
             }
-            setText(
-              ui.elapsed,
-              Date.now() < noteUntil ? note : `elapsed ${core.clock(Math.floor(e))} · left ${core.clock(Math.ceil(total - e - 1e-6))}${paused ? " · paused" : ""}`,
-            );
+            // One real clock time, and only once a run is going: when it ends.
+            const ends = new Date(Date.now() + (total - e) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+            setText(ui.elapsed, `elapsed ${core.clock(Math.floor(e))} · left ${core.clock(Math.ceil(total - e - 1e-6))} · ${paused ? "paused" : `done ≈ ${ends}`}`);
             const pauseHtml = paused ? `${icons.play}<span>Resume</span>` : `${icons.pause}<span>Pause</span>`;
             if (ui.pause.dataset.paused !== String(paused)) {
               ui.pause.dataset.paused = String(paused);
               ui.pause.innerHTML = pauseHtml;
               ui.pause.setAttribute("aria-label", paused ? "Resume" : "Pause");
             }
-            if (ui.sound.dataset.sound !== sound) {
-              ui.sound.dataset.sound = sound;
-              ui.sound.innerHTML = icons[sound];
-              ui.sound.setAttribute("aria-label", `Sound: ${soundNames[sound]}`);
-              ui.sound.title = `Sound: ${soundNames[sound]} (tap to change)`;
-            }
+            ui.beeps.setAttribute("aria-pressed", String(beeps));
+            ui.announce.setAttribute("aria-pressed", String(voice));
             ui.controls.hidden = confirming;
             ui.confirm.hidden = !confirming;
-            ui.chip.hidden = paused || sound === "mute" || !!(audio && audio.state === "running");
-            // Cues, only while running and in view: a long beep (and the step's
-            // name, with voice on) whenever a step starts, short beeps at 3, 2, 1.
+            ui.chip.hidden = paused || (!beeps && !voice) || !!(audio && audio.state === "running");
+            // Cues, only while running and in view: a long beep whenever a step
+            // starts, and with Announce the step that started (all of them when
+            // two start together); short beeps at 3, 2, 1.
             const latest = steps.filter((s) => s.at <= e).at(-1),
               cueKey = latest ? steps.indexOf(latest) : -1,
-              count = Math.ceil(left - 1e-6),
+              count = Math.ceil(remaining - 1e-6),
               cue = !paused && !doc.hidden;
             if (cue && cueKey >= 0 && (announce || (lastKey !== null && cueKey !== lastKey))) {
               tone(660, 0.45);
               buzz(200);
-              say(spokenStep(latest));
+              say(
+                steps
+                  .filter((s) => s.at === latest.at)
+                  .map(spokenStep)
+                  .join(". "),
+              );
             } else if (cue && lastCount === count + 1 && count >= 1 && count <= 3) {
               tone(880, 0.14);
               buzz(60);
@@ -2696,10 +3431,11 @@ clock: relative
               event.stopPropagation();
               fn();
             });
-          on(ui.start, () => {
+          const start = () => {
             unlock();
             act("start");
-          });
+          };
+          on(ui.start, start);
           on(ui.pause, () => {
             unlock();
             act("toggle");
@@ -2715,29 +3451,39 @@ clock: relative
             confirming = false;
             render();
           });
-          on(ui.sound, () => {
-            sound = sounds[(sounds.indexOf(sound) + 1) % sounds.length];
-            try {
-              localStorage.setItem("timeline:sound", sound);
-            } catch (error) {}
+          on(ui.beeps, () => {
+            beeps = !beeps;
+            saveSound();
             unlock();
-            note = `sound: ${soundNames[sound]}`;
-            noteUntil = Date.now() + 1800;
-            if (sound === "voice") say("Voice on");
+            if (beeps) tone(880, 0.14);
+            render();
+          });
+          on(ui.announce, () => {
+            voice = !voice;
+            saveSound();
+            unlock();
+            if (voice) say("Announcing steps");
+            else window.speechSynthesis?.cancel();
             render();
           });
           on(ui.chip, () => {
             unlock();
             render();
           });
-          on($(top, ".run-restart"), () => {
-            unlock();
-            act("start");
-          });
+          on($(top, ".run-restart"), start);
           on($(top, ".run-close"), () => {
             done = null;
             render();
           });
+          // The sheet's own Start scrolled out of view (or back): dock ours.
+          // `bg` is the sheet's colour, for the fade behind the docked bar.
+          const dock = (on, bg) => {
+            docked = !!on;
+            if (bg) startSlot.style.setProperty("--dock-bg", bg);
+            doc.body.classList.toggle("run-docked", docked);
+            render();
+          };
+          if (!host) window.__timelineRunApi = { start, dock };
           transport.subscribe(() => render());
           const timer = setInterval(render, 250);
           doc.addEventListener("visibilitychange", render);
@@ -2753,6 +3499,8 @@ clock: relative
               }
               render();
             },
+            start,
+            dock,
             state: () => transport.get(),
             // The run's clock (the server's, for a synced run).
             now: () => transport.now(),
@@ -2763,7 +3511,8 @@ clock: relative
               if (transport.close) transport.close();
               wake(false);
               sheet({ active: false });
-              doc.body.classList.remove("run-active");
+              doc.body.classList.remove("run-active", "run-docked");
+              if (!host && window.__timelineRunApi && window.__timelineRunApi.start === start) window.__timelineRunApi = null;
               if (host) [top, bottom, startSlot].forEach((el) => ((el.innerHTML = ""), (el.hidden = true)));
               else [top, bottom, startSlot].forEach((el) => el.remove());
             },
@@ -2779,9 +3528,11 @@ clock: relative
           // Pictures: a step's 6th field and the cover, resolved to URLs.
           const cover = pictureUrl(m, m.cover),
             pictured = !!cover || m.events.some((e) => e.picture);
+          // The preview keeps one runtime while the text changes kind, so it
+          // carries both layouts and picks by the page it is given.
           const runtime = live
-            ? `(${previewRuntime.toString()})(${layoutRuntime.toString()});`
-            : `(${layoutRuntime.toString()})();` +
+            ? `(${previewRuntime.toString()})(function () { return document.querySelector(".lanes") ? (${routineRuntime.toString()})(${routineCore.toString()}) : (${layoutRuntime.toString()})(); });`
+            : (rel ? `(${routineRuntime.toString()})(${routineCore.toString()});` : `(${layoutRuntime.toString()})();`) +
               (pictured ? `\n(${pictureRuntime.toString()})();` : "") +
               (rel ? `\n(${runRuntime.toString()})(${JSON.stringify(runConfig(m)).replace(/</g, "\\u003c")}, ${runCore.toString()});` : "");
           // URLs in a description or note become links. Map links (Google or
@@ -2823,45 +3574,105 @@ clock: relative
             `<a class="pic ${className}" href="${escape(url)}" target="_blank" rel="noopener" aria-label="${escape(label)}"><img src="${escape(url)}" alt=""></a>`;
           const cardBody = (e, day) =>
             `<div class="event-body${e.picture ? " has-pic" : ""}"><span class="event-icon" aria-hidden="true">${e.icon.startsWith("@") ? `<img src="${escape(m.assets[e.icon.slice(1)])}" alt="">` : `<svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg>`}</span><h2>${escape(e.title)}</h2>${e.detail || e.place ? `<p>${[e.detail ? linkify(e.detail) : "", e.place ? `<a class="map-link" href="${escape(mapSearchUrl(e.place, day.city || m.city))}" target="_blank" rel="noopener" title="${escape(e.place)}"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg><span class="map-name">${escape(e.place)}</span></a>` : ""].filter(Boolean).join(" ")}</p>` : ""}${stepNotes(e)}${e.picture ? picture(pictureUrl(m, e.picture), "thumb", `Photo: ${e.title}`) : ""}</div></li>`;
-          // A relative clock is scaled so the whole routine has a readable height
-          // (about one card per step); ticks every 1, 5, 10 or 30 min by length.
-          const totalMin = rel ? Math.max(m.total, 1) / 60 : 0,
-            tickMin = totalMin <= 12 ? 1 : totalMin <= 50 ? 5 : totalMin <= 120 ? 10 : 30,
-            perMinute = rel ? Math.max(60 / tickMin, Math.min(200, (m.events.length * 90) / totalMin)) : 0;
-          const relativeDay = (day, heading) => {
-            const s0 = day.startSec,
-              s1 = day.endSec,
-              step = tickMin * 60,
-              marks = [s0];
-            for (let t = Math.ceil(s0 / step) * step; t < s1; t += step)
-              if (t - s0 >= step / 2 && s1 - t >= step / 2) marks.push(t);
-            marks.push(s1);
-            const min = (sec) => (sec - s0) / 60;
-            const hours = marks
-              .map(
-                (t) =>
-                  `<div class="hour" data-minute="${min(t)}" style="--i:${min(t) / 60}"><span class="hour-label">${core.clock(t)}</span><span class="hour-dot"></span></div>`,
-              )
-              .join("");
-            // Where each step starts, as a small label on the axis.
-            const offsets = [...new Set(day.events.map((e) => e.at))]
-              .map((t) => `<span class="offset" data-minute="${min(t)}" style="--m:${min(t)}">${core.clock(t)}</span>`)
-              .join("");
-            const events = day.events
-              .map(
-                (e) =>
-                  `<li class="event ${e.color}" data-line="${e.line}" data-minute="${min(e.at)}"${e.until !== undefined ? ` data-end="${min(e.until)}"` : ""} style="--m:${min(e.at)}"><time>${e.until !== undefined ? core.length(e.until - e.at) : core.clock(e.at)}</time>${cardBody(e, day)}`,
-              )
-              .join("");
-            return `<section class="day">${heading}<section class="timeline relative" data-clock="relative" data-duration="${min(s1)}" data-start="${s0 / 60}" data-date="" style="--hour-height:${perMinute * 60}px" aria-label="Timeline. Dots show when each step starts; cards are spaced for readability."><div class="axis" aria-hidden="true"></div><div class="hours" aria-hidden="true">${hours}</div><div class="offsets" aria-hidden="true">${offsets}</div><svg class="connectors" aria-hidden="true"></svg><ol class="events">${events}</ol></section>${notesHtml(day.notes)}</section>`;
+          // A routine (a relative clock) is its own page: the ready card (cover,
+          // title, how long, what you need, Start), then the steps in elapsed
+          // lanes laid out by routineCore. Day timelines never reach this.
+          const routineBody = () => {
+            const rc = routineCore(),
+              items = m.events.map((e, i) => ({ id: String(i), at: e.at, until: e.until, rest: isRest(e), line: e.line })),
+              info = rc.lanes(items),
+              multi = m.days.length > 1,
+              sections = m.days
+                .map((day, i) => ({ id: "s" + i, at: day.startSec, label: day.label || (multi ? `Part ${i + 1}` : ""), length: day.endSec - day.startSec, line: day.label ? day.line : 0 }))
+                .filter((s) => s.label);
+            // Estimated card heights at phone width (a lane card has about 77 px
+            // for text beside its thumbnail); the page measures the real ones.
+            const lines = (text, perLine, most) => Math.min(most, Math.max(1, Math.ceil(String(text).length / perLine)));
+            const needs = {};
+            m.events.forEach((e, i) => {
+              const lane = info.get(String(i));
+              if (e.until === undefined || items[i].rest || !lane || lane.mini || lane.wide) return;
+              const detail = [e.detail, e.place].filter(Boolean).join(" ");
+              needs[i] = 8 + lines(e.title, 10.5, 2) * 17 + (detail ? 2 + lines(detail, 12.5, 2) * 15 : 0) + 8 + 22 + lane.minis.length * 34 + 8;
+            });
+            const g = rc.layout(items, sections, needs);
+            const px = (n) => `${n}px`;
+            const icon = (e, cls) =>
+              e.icon.startsWith("@")
+                ? `<span class="${cls} icon"><img src="${escape(m.assets[e.icon.slice(1)])}" alt=""></span>`
+                : `<span class="${cls} icon" aria-hidden="true"><svg viewBox="0 0 40 40"><use href="#${e.icon}"/></svg></span>`;
+            const thumb = (e) => (e.picture ? picture(pictureUrl(m, e.picture), "cd-th", `Photo: ${e.title}`) : icon(e, "cd-th"));
+            const detailHtml = (e) =>
+              e.detail || e.place
+                ? `<p class="cd-d">${[e.detail ? linkify(e.detail) : "", e.place ? `<a class="map-link" href="${escape(mapSearchUrl(e.place, m.city))}" target="_blank" rel="noopener" title="${escape(e.place)}"><svg viewBox="0 0 40 40" aria-hidden="true"><use href="#pin"/></svg><span class="map-name">${escape(e.place)}</span></a>` : ""].filter(Boolean).join(" ")}</p>`
+                : "";
+            const attrs = (e, i, kind) => ` data-k="${kind}" data-i="${i}" data-line="${e.line}" data-at="${e.at}"${e.until !== undefined ? ` data-until="${e.until}"` : ""}`;
+            const mini = (i) => {
+              const e = m.events[Number(i)];
+              return `<div class="mini ${e.color}"${attrs(e, i, "mini")}><b>${escape(e.title)}</b><span class="dur">${rc.chip(e.until - e.at)}</span></div>`;
+            };
+            const html = [];
+            m.events.forEach((e, i) => {
+              const box = g.boxes.get(String(i));
+              if (!box) return; // folded into another step's card
+              const at = `top:${px(box.top)}${box.height !== undefined ? `;height:${px(box.height)}` : ""}`;
+              if (e.until === undefined) {
+                html.push(
+                  box.host !== undefined
+                    ? `<div class="mark ${box.lane} ly"${attrs(e, i, "mark")} style="${at}"><span>${escape(e.title)}</span></div>`
+                    : `<div class="mo w ly"${attrs(e, i, "moment")} style="${at}">${icon(e, "mo-i")}<b>${escape(e.title)}</b>${e.detail ? `<span>${escape(e.detail)}</span>` : ""}</div>`,
+                );
+                return;
+              }
+              const length = rc.chip(e.until - e.at);
+              if (items[i].rest) {
+                html.push(`<div class="rs ${box.lane} ly"${attrs(e, i, "rest")} style="${at}">${icon(e, "rs-i")}<span class="rs-t">${escape(e.title)}</span><span class="rs-len">${length}</span><span class="rs-left"></span></div>`);
+                return;
+              }
+              const wide = box.lane === "w",
+                brk = box.brk !== null ? `<div class="brk" style="top:${px(box.brk)}"><span>${length}</span></div>` : "",
+                dur = box.brk !== null ? "" : `<span class="dur">${length}</span>`;
+              html.push(
+                `<div class="cd ${box.lane} ${e.color} ly"${attrs(e, i, "card")} style="${at}">` +
+                  (wide
+                    ? `<div class="cd-row"><h3 class="cd-t">${escape(e.title)}</h3>${stepNotes(e)}${dur}</div>${detailHtml(e)}`
+                    : `<h3 class="cd-t">${escape(e.title)}</h3>${detailHtml(e)}${box.minis.map(mini).join("")}${dur || e.notes.length ? `<div class="cd-ft">${dur}${stepNotes(e)}</div>` : ""}`) +
+                  `${thumb(e)}${brk}</div>`,
+              );
+            });
+            for (const s of g.sections) {
+              const section = sections.find((x) => x.id === s.id);
+              html.push(`<div class="lsec ly" data-k="sec" data-at="${s.at}"${section.line ? ` data-line="${section.line}"` : ""} style="top:${px(s.top)}">${escape(section.label)} <em>${rc.sectionLength(section.length)}</em></div>`);
+            }
+            for (const l of g.labels) html.push(`<span class="gl ly" data-t="${l.t}" style="top:${px(l.top)}"${l.hidden ? " hidden" : ""}>${l.t ? escape(l.text) : `<b>${l.text}</b>`}</span>`);
+            html.push(`<div class="dn ly" style="top:${px(g.done)}"><span class="dn-ck" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span>Done · about ${core.total(m.total)}</div>`);
+            // What you need: the note: lines as tickable chips (ticks stay on
+            // this device); a note with a link stays a note.
+            const notes = [...m.notes, ...m.days.flatMap((day) => day.notes)],
+              chips = rc.chips(notes.filter((n) => !/https?:\/\//.test(n))),
+              linked = notes.filter((n) => /https?:\/\//.test(n)),
+              show = (text) => (/^[a-z][a-z]/.test(text) ? text[0].toUpperCase() + text.slice(1) : text);
+            const heading = `<h1>${escape(m.title)}</h1>${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}`;
+            const play = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15L19.5 12z"/></svg>';
+            const ready =
+              `<header class="ready${cover ? " has-cover" : ""}">` +
+              (cover ? `<div class="hero">${picture(cover, "cover", "Cover photo")}<div class="scrim">${heading}</div></div>` : "") +
+              `<div class="ready-card">${cover ? "" : heading}<p class="ready-kv"><b>${core.total(m.total)}</b> <span>${escape(rc.summary(items))}</span></p>` +
+              (chips.length
+                ? `<div class="chips" data-key="${escape(m.title)}">${chips.map((c) => `<button type="button" class="chip" aria-pressed="false" data-chip="${escape(c)}"><span class="ck" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span>${escape(show(c))}</button>`).join("")}</div>`
+                : "") +
+              (linked.length ? `<ul class="ready-notes">${linked.map((n) => `<li>${linkify(n)}</li>`).join("")}</ul>` : "") +
+              `<button type="button" class="ready-go" data-html2canvas-ignore>${play}Start <small>· ${core.total(m.total)}</small></button></div></header>`;
+            return `${ready}<section class="lanes" style="height:${px(g.height)}" aria-label="Steps, from Start"><div class="rail" aria-hidden="true"></div>${html.join("")}</section>`;
           };
-          const days = m.days
+          const days = rel
+            ? ""
+            : m.days
             .map((day, index) => {
               const heading =
                 m.days.length > 1
                   ? `<div class="day-heading" role="heading" aria-level="2"${day.label ? ` data-line="${day.line}"` : ""}>${escape(day.label || day.iso || `${rel ? "Part" : "Day"} ${index + 1}`)}</div>`
                   : "";
-              if (rel) return relativeDay(day, heading);
               const hours = Array.from(
                 { length: (day.end - day.start) / 60 + 1 },
                 (_, i) =>
@@ -2876,10 +3687,7 @@ clock: relative
               return `<section class="day">${heading}<section class="timeline" data-duration="${day.end - day.start}" data-start="${day.start}" data-date="${day.iso}" aria-label="Timeline. Dots show exact times; cards are spaced for readability."><div class="axis" aria-hidden="true"></div><div class="hours" aria-hidden="true">${hours}</div><svg class="connectors" aria-hidden="true"></svg><ol class="events">${events}</ol></section>${notesHtml(day.notes)}</section>`;
             })
             .join("");
-          // A routine's masthead gives its length and step count, not a date.
-          const date = rel
-            ? `${core.total(m.total)} · ${m.events.length} step${m.events.length === 1 ? "" : "s"}`
-            : m.date || (m.days.length > 1 ? spanLabel(m.days) : m.days[0].label);
+          const date = rel ? "" : m.date || (m.days.length > 1 ? spanLabel(m.days) : m.days[0].label);
           const decorations = m["header-art"]
             ? `<img class="la-art custom-art" alt="" src="${escape(m.assets[m["header-art"].replace(/^@/, "")])}">`
             : m.theme === "travel"
@@ -2889,7 +3697,7 @@ clock: relative
           // Only timelines that use them carry these, so a day timeline's page is
           // unchanged.
           const relativeCss = rel
-            ? ` .offsets{position:absolute;inset:0;pointer-events:none;} .offset{position:absolute;left:0;width:calc(var(--axis) - 14px);top:calc(var(--m) / 60 * var(--hour-height));transform:translateY(-50%);text-align:right;font-size:12px;font-weight:700;line-height:1;letter-spacing:0;color:var(--blue);opacity:.85;font-variant-numeric:tabular-nums;white-space:nowrap;} .timeline.relative .hour-label,.timeline.relative .event time{font-variant-numeric:tabular-nums;} @media(max-width:580px){.timeline.relative .hour-label{font-size:13px;letter-spacing:-.3px;} .offset{width:calc(var(--axis) - 9px);font-size:10px;}}`
+            ? ` .sheet.routine{max-width:760px;padding:0 0 120px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;--ln:#8080803d;--chipbg:#80808024;--wash:#8080800d;--go:#3ecf8e;--go-ink:#08241a;} .sheet.routine *{box-sizing:border-box;} .ready{margin:0 0 4px;} .ready h1{margin:0;padding:0;max-width:none;text-align:left;font-size:32px;line-height:1.05;letter-spacing:-1.2px;} .ready .tagline{margin:6px 0 0;text-align:left;font-size:15px;line-height:1.3;} .hero{position:relative;height:232px;overflow:hidden;background:var(--chipbg);} .hero .pic.cover{position:absolute;inset:0;margin:0;height:100%;max-height:none;aspect-ratio:auto;} .hero .scrim{position:absolute;left:0;right:0;bottom:0;padding:70px 16px 14px;background:linear-gradient(transparent,#000d);pointer-events:none;} .hero .scrim h1{color:#fff;pointer-events:auto;text-shadow:0 1px 12px #0008;} .hero .scrim .tagline{color:#fffc;} .ready-card{margin:16px 16px 0;} .ready:not(.has-cover) .ready-card{margin:16px;padding:18px 16px 16px;border-radius:14px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));} .ready-kv{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:12px 0 0;font-size:14px;color:var(--blue);} .has-cover .ready-kv{margin-top:0;} .ready-kv b{font-size:22px;color:var(--navy);letter-spacing:-.5px;} .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0;} .chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;margin:0;padding:0 11px 0 7px;border:0;border-radius:999px;background:var(--chipbg);color:var(--navy);font:inherit;font-size:13px;line-height:1.2;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ck{display:grid;place-items:center;width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--blue);} .ck svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;visibility:hidden;} .chip.on .ck{background:var(--go);border-color:var(--go);color:var(--go-ink);} .chip.on .ck svg{visibility:visible;} .ready-notes{margin:10px 0 0;padding-left:18px;font-size:13px;color:var(--blue);} .ready-go{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;height:56px;margin:16px 0 2px;border:0;border-radius:999px;background:var(--go);color:var(--go-ink);font:800 18px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;box-shadow:0 6px 22px #0003;-webkit-tap-highlight-color:transparent;} .ready-go svg{width:20px;height:20px;fill:currentColor;} .ready-go small{font-weight:600;font-size:15px;opacity:.8;} body.run-on .ready-go{visibility:hidden;} .lanes{position:relative;display:block;margin:18px 16px 0 0;} .lanes .rail{position:absolute;left:70px;top:0;bottom:0;width:2px;background:var(--ln);} .ly{position:absolute;} .w{left:80px;right:0;} .l0{left:80px;width:calc((100% - 86px) / 2);} .l1{left:calc(80px + (100% - 86px) / 2 + 6px);right:0;} .gl{left:0;width:64px;text-align:right;font:600 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:-.3px;color:var(--blue);white-space:nowrap;} .gl b{color:var(--navy);font-weight:700;} .gl[hidden]{display:none;} .cd{z-index:1;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));padding:8px 9px 8px 12px;overflow:hidden;color:var(--navy);text-align:left;--c:#5f8fb0;} .cd::before,.mini::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);} .sky{--c:#5f8fb0;} .sand{--c:#c08a44;} .sage{--c:#6f9a5e;} .cd-t{margin:0;padding-right:46px;font-size:14px;font-weight:700;line-height:1.2;letter-spacing:-.1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-d{margin:2px 0 0;padding-right:46px;font-size:12px;line-height:1.25;color:var(--blue);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-ft{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:auto;padding-top:6px;} .dur{flex:none;padding:4px 6px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:0;white-space:nowrap;} .cd-th{position:absolute;right:8px;top:8px;width:40px;height:40px;border-radius:8px;overflow:hidden;} .cd-th.icon,.mo-i,.rs-i{display:grid;place-items:center;color:var(--blue);} .cd-th.icon{background:var(--chipbg);} .cd-th.icon svg{width:22px;height:22px;fill:currentColor;} .icon img{width:100%;height:100%;object-fit:cover;} .cd.w{padding-top:7px;} .cd-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding-right:48px;min-width:0;} .cd.w .cd-t{flex:0 1 auto;min-width:0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd.w .dur{margin-left:auto;} .cd.w .cd-d{padding-right:48px;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd .step-notes{margin:0;flex:none;order:1;} .cd.w .dur{order:2;} .cd .step-notes summary{padding:2px 7px;border-color:var(--ln);font-size:11px;font-weight:500;line-height:16px;letter-spacing:0;opacity:1;} .cd .step-notes[open]{order:3;flex-basis:100%;} .cd .step-notes ul{margin:4px 0 2px;padding-left:16px;font-size:13px;line-height:1.3;} .cd .map-link{font-size:10px;} .brk{position:absolute;left:-2px;right:-2px;height:34px;display:grid;place-items:center;background:var(--paper);z-index:1;} .brk::before,.brk::after{content:'';position:absolute;left:0;right:0;height:8px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M0 6.5 6 1.5 12 6.5' fill='none' stroke='%238a8a86' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x;} .brk::before{top:-4px;} .brk::after{bottom:-4px;} .brk span{padding:5px 9px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 12px/1 ui-monospace,Menlo,monospace;} .mini{position:relative;display:flex;align-items:center;gap:4px;flex:none;height:30px;margin:6px -5px 0 -8px;padding:0 4px 0 8px;border-radius:8px;border:1px solid var(--blue);background:var(--paper);font-size:11.5px;white-space:nowrap;overflow:hidden;box-shadow:0 -5px 0 -2px var(--ln),0 6px 14px #0003;cursor:pointer;} .mini b{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:600;} .mini .dur{margin-left:auto;padding:3px 4px;font-size:10px;} .mark{z-index:2;height:0;border-top:1px dashed var(--navy);cursor:pointer;} .mark span{position:absolute;right:6px;top:-10px;max-width:calc(100% - 12px);padding:1px 6px;border-radius:6px;border:1px solid var(--ln);background:var(--paper);color:var(--navy);font-size:12px;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .rs,.mo{z-index:1;display:flex;align-items:center;gap:8px;height:28px;padding:0 10px 0 12px;border-radius:7px;border:1px dashed var(--ln);background-color:var(--paper);color:var(--blue);font:600 12px/1 ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;cursor:pointer;} .rs-i svg,.mo-i svg{width:14px;height:14px;fill:currentColor;} .rs-i,.mo-i{width:14px;height:14px;flex:none;} .rs-t{text-transform:lowercase;} .rs-left:empty{display:none;} .mo{border-style:solid;color:var(--navy);font-family:inherit;font-size:13px;} .mo span{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--blue);font-weight:400;} .lsec{left:80px;right:0;display:flex;align-items:center;gap:8px;height:24px;color:var(--blue);font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;} .lsec em{font-style:normal;font-weight:600;letter-spacing:0;text-transform:none;font-family:ui-monospace,Menlo,monospace;} .lsec::after{content:'';flex:1;border-top:1px solid var(--ln);} .dn{left:80px;right:0;display:flex;align-items:center;gap:10px;height:28px;color:var(--blue);font-size:14px;font-weight:600;} .dn-ck{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:1px dashed var(--ln);} .dn-ck svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.live .cd,body.live .lsec[data-line]{cursor:pointer;} .run-on .cd.done,.run-on .rs.done,.run-on .mo.done,.run-on .mark.done{opacity:.42;} .lanes .cd.live{border:2px solid #3ecf8e99;padding:7px 8px 7px 11px;background-image:linear-gradient(#3ecf8e24 0 var(--fy,0px),var(--wash) var(--fy,0px));} .lanes .cd.upnext{border-style:dashed;border-color:var(--c);} .lanes .rs.live{align-items:flex-end;padding-bottom:8px;border:2px solid #3ecf8e;background-color:#3ecf8e1c;color:var(--navy);} .nowh{position:absolute;left:66px;right:-8px;height:2px;z-index:0;background:var(--navy);box-shadow:0 0 6px var(--navy);pointer-events:none;} .nowh::before{content:'';position:absolute;left:0;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--navy);} .gl.gnow{color:var(--navy);font-weight:700;} .sheet.routine footer{margin-top:10px;} body.theme-future .sheet.routine{--ln:#29e2ff2e;--chipbg:#0f2a4a;--wash:#ffffff06;} body.theme-future .sky{--c:#29e2ff;} body.theme-future .sand{--c:#ff4fd8;} body.theme-future .sage{--c:#5dffb8;} body.theme-future .ready:not(.has-cover) .ready-card{border-color:#29e2ff55;background:linear-gradient(160deg,#12305a88,#0a0f1c);box-shadow:0 0 30px -12px #29e2ff;} body.theme-future .ready h1{font-size:27px;letter-spacing:4px;line-height:1.1;} body.theme-future .ready .tagline{font-size:11px;letter-spacing:2px;} body.theme-future .ready-kv{color:#8fb8d8;font-size:13px;} body.theme-future .ready-kv b{color:#fff;} body.theme-future .chip{background:#ffffff0a;border:1px solid #29e2ff44;} body.theme-future .lanes .rail{background:linear-gradient(#29e2ff,#ff4fd8);box-shadow:0 0 10px #29e2ff66;} body.theme-future .cd{border-color:var(--c);background-color:#0c1322;box-shadow:0 0 14px -8px var(--c);} body.theme-future .cd-t{color:#fff;} body.theme-future .dur{background:transparent;border:1px solid var(--c);color:#fff;} body.theme-future .cd-th.icon{background:#ffffff0a;border:1px solid var(--c);color:#fff;} body.theme-future .rs{border-color:#5dffb855;color:#9fd8c0;} body.theme-future .gl{color:#8fb8d8;} body.theme-code .sheet.routine{font-family:inherit;--ln:#30363d;--chipbg:#161b22;--wash:#161b22;} body.theme-code .sky{--c:#79c0ff;} body.theme-code .sand{--c:#ffa657;} body.theme-code .sage{--c:#7ee787;} body.theme-code .cd{border-radius:6px;} body.theme-code .cd-t{color:var(--c);} body.theme-code .ready h1{font-size:26px;letter-spacing:-.5px;} body.theme-retro .sheet.routine{--ln:#3b241699;--chipbg:#f0b45a55;--wash:#fbf1de00;} body.theme-retro .sky{--c:#e9a15a;} body.theme-retro .sand{--c:#c9512c;} body.theme-retro .sage{--c:#5f8a63;} body.theme-retro .cd,body.theme-retro .ready:not(.has-cover) .ready-card{border:2px solid #3b2416;box-shadow:3px 3px 0 #3b2416;} body.theme-retro .ready h1{font-size:30px;letter-spacing:-.5px;} body.theme-travel .ready h1{font-size:34px;letter-spacing:-1px;} body.theme-travel .sky{--c:#4f9fd0;} body.theme-travel .sand{--c:#e0a13a;} body.theme-travel .sage{--c:#5f9a6e;} body.theme-minimal .ready h1{letter-spacing:-1.5px;} @media(min-width:700px){.lanes{margin-right:24px;} .ready-card{margin-left:24px;margin-right:24px;} .ready:not(.has-cover) .ready-card{margin:24px;} .ready h1{font-size:40px;} .hero{height:300px;}} @media print{.ready-go{display:none;} .sheet.routine{padding-bottom:0;}}`
             : "";
           const pictureCss = pictured
             ? ` .pic{display:block;overflow:hidden;background:var(--sky);-webkit-tap-highlight-color:transparent;} .pic img{display:block;width:100%;height:100%;object-fit:cover;} .pic.cover{margin:-30px -34px 22px;aspect-ratio:16/7;max-height:380px;} .event-body.has-pic{min-height:80px;padding-right:86px;} .pic.thumb{position:absolute;right:7px;top:50%;width:64px;height:64px;transform:translateY(-50%);border-radius:12px;box-shadow:0 1px 4px #0002;} .event-body.has-pic .until{right:84px;} .pic-view{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);background:#000000eb;cursor:zoom-out;} .pic-view img{max-width:100vw;max-height:100vh;max-height:100dvh;object-fit:contain;} @media(max-width:850px){.pic.cover{margin:-25px -22px 18px;}} @media(max-width:580px){.pic.cover{margin:-27px -14px 16px;aspect-ratio:16/10;} .event-body.has-pic{min-height:76px;padding-right:64px;} .pic.thumb{right:6px;width:52px;height:52px;border-radius:10px;} .event-body.has-pic .until{right:62px;}} @media print{.pic.cover{margin-top:0;}}`
@@ -2904,7 +3712,11 @@ clock: relative
             : "";
           return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="${darkThemes[m.theme] ? "light dark" : m.theme === "future" || m.theme === "code" ? "dark" : "light"}"><title>${escape(m.title)}</title><style>${art.css}
       ${extraCss}${relativeCss}${notesCss}${pictureCss}
-      ${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-scheme:dark){${darkThemes[m.theme]}}` : ""}</style></head><body class="theme-${m.theme}${live ? " live" : ""}">${symbols}<main class="sheet">${cover ? picture(cover, "cover", "Cover photo") : ""}<header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main><script>${runtime}<\/script></body></html>`;
+      ${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-scheme:dark){${darkThemes[m.theme]}}` : ""}</style></head><body class="theme-${m.theme}${live ? " live" : ""}">${symbols}${
+            rel
+              ? `<main class="sheet routine">${routineBody()}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main>`
+              : `<main class="sheet">${cover ? picture(cover, "cover", "Cover photo") : ""}<header class="masthead">${decorations}<h1>${escape(m.title)}</h1>${date ? `<p class="date">${escape(date)}</p>` : ""}${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}</header>${days}${notesHtml(m.notes)}${m.footer ? `<footer><span>${escape(m.footer)}</span></footer>` : ""}</main>`
+          }<script>${runtime}<\/script></body></html>`;
         }
         // Shareable links: the whole timeline text travels in the URL fragment,
         // deflate-compressed when the browser can ("z="), plain otherwise ("t=").
@@ -3260,7 +4072,13 @@ clock: relative
           return { assetName, withAsset, withPicture, withCover, reusable };
         }
 
-        const api = { parse, render, pictureEdits: pictureEdits(), syncTransport, icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl, describe, runCore, runConfig, runRuntime };
+        // A routine in one line, for link previews: "45 min · 6 steps · 2 at once".
+        function routineSummary(model) {
+          const items = model.events.map((e, i) => ({ id: String(i), at: e.at, until: e.until, rest: isRest(e), line: e.line }));
+          return `${runCore().total(model.total)} · ${routineCore().summary(items)}`;
+        }
+
+        const api = { parse, render, pictureEdits: pictureEdits(), syncTransport, icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl, describe, runCore, runConfig, runRuntime, routineCore, routineSummary, clockOf, isRest };
         if (typeof module !== "undefined" && module.exports) module.exports = api;
         else root.TimelineText = api;
       })(typeof globalThis !== "undefined" ? globalThis : this);
@@ -3892,7 +4710,8 @@ clock: relative
       // a routine. Unnamed pages and standalone copies run locally, with the
       // state in localStorage.
       let runner = null,
-        runnerMode = "";
+        runnerMode = "",
+        previewDock = { docked: false, bg: "" };
       function syncRun(model) {
         if (model.clock !== "relative") {
           runner?.destroy();
@@ -3923,6 +4742,7 @@ clock: relative
           },
           TimelineText.runCore,
         );
+        runner.dock(previewDock.docked, previewDock.bg);
       }
       // The preview asks the studio to scroll when the iframe itself can't
       // (iOS sizes iframes to their content; the panel scrolls instead).
@@ -3936,6 +4756,30 @@ clock: relative
           if (event.data.title) editTitle();
           else editLine(Number(event.data.line));
         } else if (event.data?.type === "timeline:picture") showPicture(String(event.data.src || ""));
+        // The routine sheet's own Start, and whether it has scrolled away
+        // (then the docked one shows). The frame has no audio of its own.
+        else if (event.data?.type === "timeline:start") runner?.start();
+        else if (event.data?.type === "timeline:dock") {
+          previewDock = { docked: !!event.data.docked, bg: String(event.data.bg || "").slice(0, 60) };
+          runner?.dock(previewDock.docked, previewDock.bg);
+        }
+        // Ingredient ticks: kept on this device for the frame, which has no
+        // storage of its own; never written into the text.
+        else if (event.data?.type === "timeline:tick" || event.data?.type === "timeline:ticks?") {
+          const key = String(event.data.key || "");
+          if (!key.startsWith("timeline-ticks:") || key.length > 300) return;
+          let ticks = [];
+          try {
+            ticks = JSON.parse(localStorage.getItem(key) || "[]");
+          } catch (error) {}
+          if (event.data.type === "timeline:tick") {
+            const chip = String(event.data.chip || "");
+            ticks = ticks.filter((c) => c !== chip).concat(event.data.on ? [chip] : []);
+            try {
+              localStorage.setItem(key, JSON.stringify(ticks));
+            } catch (error) {}
+          } else preview.contentWindow?.postMessage({ type: "timeline:ticks", key, ticks }, "*");
+        }
       });
       // Keep the current-line highlight on the line the caret is on.
       const caretLine = document.querySelector("#caret-line");
@@ -4172,7 +5016,7 @@ clock: relative
         copy.querySelector("#help-toggle").setAttribute("aria-pressed", "false");
         copy.querySelector("#pane").classList.remove("help");
         // The run chrome is rebuilt on load from the saved copy's own state.
-        copy.querySelector("body").classList.remove("run-active");
+        copy.querySelector("body").classList.remove("run-active", "run-docked");
         copy.querySelector("#run-css")?.remove();
         copy.style.removeProperty("--run-bar-h");
         for (const id of ["#run-top", "#run-bottom", "#run-start"]) {
@@ -4495,7 +5339,7 @@ clock: relative
               // Not requestAnimationFrame: a backgrounded tab never fires it.
               await new Promise((tick) => setTimeout(tick, 0));
               const baked = new DOMParser().parseFromString(html, "text/html");
-              for (const selector of [".timeline", ".axis", ".hour", ".offset", ".event"]) {
+              for (const selector of [".timeline", ".axis", ".hour", ".offset", ".event", ".lanes", ".ly", ".brk"]) {
                 const from = live.querySelectorAll(selector),
                   to = baked.querySelectorAll(selector);
                 if (from.length !== to.length) throw new Error("layout mismatch");
@@ -4525,7 +5369,7 @@ clock: relative
         return new Promise((resolve, reject) => {
           const frame = document.createElement("iframe");
           frame.setAttribute("aria-hidden", "true");
-          frame.style.cssText = "position:fixed;left:-10000px;top:0;width:720px;height:1200px;visibility:hidden;border:0";
+          frame.style.cssText = "position:fixed;left:-10000px;top:0;width:720px;height:400px;visibility:hidden;border:0";
           const finish = (fn) => (value) => {
             frame.remove();
             fn(value);
@@ -4611,7 +5455,7 @@ clock: relative
           // white on dark themes (so the shared image shows no past-fade;
           // the now line and the time-until label still mark the moment).
           const captureCss =
-            ".event-body{background:var(--wash);} .flight-art,.la-art{z-index:0;} .hour{z-index:0;} .events{position:relative;z-index:2;} .connectors{z-index:1;} .event.past,.connector.past,.event-dot.past{opacity:1;} .now{animation:none;} h1::after{animation:none;}";
+            ".event-body{background:var(--wash);} .flight-art,.la-art{z-index:0;} .hour{z-index:0;} .events{position:relative;z-index:2;} .connectors{z-index:1;} .event.past,.connector.past,.event-dot.past{opacity:1;} .now{animation:none;} h1::after{animation:none;} .sheet.routine{padding-bottom:28px;}";
           frame.srcdoc = html.replace(
             "</head>",
             `<style>${captureCss}</style><script>window.__timelineStatic = true<\/script><script src="vendor/html2canvas.min.js"><\/script></head>`,
@@ -4672,6 +5516,36 @@ clock: relative
       }
       document.querySelector("#try-workout").addEventListener("click", () => loadSample("sample-workout"));
       document.querySelector("#try-recipe").addEventListener("click", () => loadSample("sample-recipe"));
+      // New ▾: a starter text for each kind, opened the same way as the
+      // samples (a fresh page; nothing is saved until the first edit). The
+      // day plan is the studio's own example on today's date, the trip
+      // starts today and tomorrow.
+      const newMenu = document.querySelector("#new-menu");
+      function openStarter(kind) {
+        const day = (offset) => {
+          const date = new Date();
+          date.setDate(date.getDate() + offset);
+          return date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+        };
+        const sample = (id) => JSON.parse(document.getElementById(id).textContent);
+        const text = {
+          day: () => sample("studio-source").replace("{{today}}", day(0)),
+          trip: () => sample("sample-trip").replace("{{today}}", day(0)).replace("{{tomorrow}}", day(1)),
+          workout: () => sample("sample-workout"),
+          recipe: () => sample("sample-recipe"),
+        }[kind]();
+        newMenu.open = false;
+        setHelp(false);
+        closePane();
+        const hash = "text=" + encodeURIComponent(text);
+        if (docName) location.href = SHORT_LINK_API + "#" + hash;
+        else if (location.hash === "#" + hash) loadFromHash();
+        else location.hash = hash;
+      }
+      newMenu.querySelectorAll("[data-starter]").forEach((button) => button.addEventListener("click", () => openStarter(button.dataset.starter)));
+      document.addEventListener("click", (event) => {
+        if (newMenu.open && !event.target.closest("#new-menu")) newMenu.open = false;
+      });
       document
         .querySelector("#add-image")
         .addEventListener("click", () =>

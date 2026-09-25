@@ -463,12 +463,38 @@ Format, one item per line:
 - A place goes at the end of the description after " @ ": "Gear run @ REI Baldwin Hills", or just "@ Wi Spa" when there is nothing else to say; a bare "@" as the description means the title is the place ("Manhattan Beach | @"). It becomes a map link by itself, so never write addresses or URLs. When the instruction names a place for an event, add it this way.
 - Lines starting with # are comments.
 
-Routines. A timeline with "clock: relative" is a workout or a recipe timed from Start, not a day:
-- Its times are elapsed time since Start: "M:SS" (5:30 is 5 minutes 30 seconds in) or "H:MM:SS". Never write clock times or AM/PM in a routine.
+Routines. A timeline whose first event line starts with a bare duration ("+45s | Plank", "+15m | Preheat the oven"), or that has "clock: relative", is a routine: a workout, a recipe or any steps followed live from a Start button, not a day:
+- Its times are elapsed time since Start: "M:SS" (5:30 is 5 minutes 30 seconds in) or "H:MM:SS". Never write clock times or AM/PM in a routine, and no "date:" or "range:".
 - "+45s | Plank" is a step that starts when the line above it ends. Its length is the duration: "+45s", "+2m", "+1m30s", "+1h". To make a step longer or shorter, change only its duration ("make rests 20s": every "+15s | Rest" becomes "+20s | Rest"); the steps after it move by themselves, so leave their lines alone.
 - A span "0:00 - 15:00" or "15:00 +25m" has a fixed start; to lengthen it change its end or its duration ("roast 5 minutes longer": "15:00 +25m | Roast" becomes "15:00 +30m | Roast"). Spans may overlap.
 - Order matters: a "+duration" step follows the line above it, so never sort a routine's lines. To add a step, insert a new line (for example "+45s | Plank") at the place in the order where it happens, and copy the fields and notes of a similar step when the user says "another".
 - "day:" lines in a routine are section labels ("Warm-up", "Main set"), not dates.
+- Keep the first step a bare duration ("+15m | Preheat the oven", not "0:00 - 15:00 | Preheat the oven"): that is what marks the text as a routine.
+
+Making a routine. When the instruction asks to make the timeline a routine ("make this a routine", "turn this into a recipe timer", "make it a workout I can run"):
+- Keep the title, subtitle, theme, notes and every event's title, description, icon, color, picture and "- " notes.
+- Remove "date:", "range:", "timezone:" and "city:" lines, and "day:" lines that are dates (keep ones that name a part, like "day: Warm-up").
+- "+duration" is the length of that one step, never the time since Start. A step's length: to its end if it has one; otherwise until the next event after it in time starts (17:10 then 17:15 makes "+5m", even if a longer step is still running); the last one without an end gets a sensible length for what it is (plating 5 minutes, serving 2 minutes).
+- Measure every step from the first event's time (that is 0:00). When steps overlap, or a step does not follow straight on from the line above it, write its start as elapsed time too: "M:SS +length".
+- Keep the first line a bare duration. Never write "+0m": something with no length is a moment, written as its elapsed time alone ("40:00 | Serve").
+- Example. This day plan:
+    title: Taco night
+    date: Friday, Jun 5, 2026
+    18:00 - 18:20 | Simmer the beans
+    18:00 - 18:10 | Chop the salsa
+    18:10 | Warm the tortillas
+    18:20 - 18:35 | Cook the fish
+    18:35 | Serve
+  becomes this routine:
+    title: Taco night
+    +20m | Simmer the beans
+    0:00 +10m | Chop the salsa
+    10:00 +10m | Warm the tortillas
+    20:00 +15m | Cook the fish
+    35:00 | Serve
+- If the old times matter, say what clock time to press Start in the "Note:" line after the block ("Start at 6:00 PM to eat at 6:35"), never in the timeline itself (not as a "note:" line either).
+
+Writing a new one. When the timeline is empty, write a new timeline from the instruction, starting with a "title:" line. A workout, a recipe, a practice or anything done step by step from a start moment is a routine: steps in order, each starting with its length ("+45s | Plank"), the first one a bare duration, no clock times and no date; parallel steps as "0:00 +10m | Chop"; rests titled "Rest"; real names for every step (actual exercises, actual cooking steps), never "Move 1"; equipment or ingredients in "note:" lines, comma separated. Anything else is a day plan with times of day. "theme:" is one of travel, minimal, retro, future, code (future suits a workout, minimal a recipe) or left out.
 
 Rules:
 - Change only what the instruction asks. Every other line stays byte-for-byte the same, in the same order within its day.
@@ -476,7 +502,7 @@ Rules:
 - A time without AM/PM takes the reading closest to the event's current time and to what the event is: dinner at 7:30 is 19:30, coffee at 9 is 09:00, "3 pm" is 15:00.
 - Keep events under each day sorted by time (except in a routine, see above).
 - "Today" and "tomorrow" are relative to the date given with the instruction.
-- If the instruction cannot be applied or is ambiguous, return the timeline unchanged and explain in the note.
+- If the instruction cannot be applied or is ambiguous, return the timeline unchanged and explain in the note (for an empty timeline, write the most likely one).
 
 Answer with the full timeline inside one fenced block:
 \`\`\`timeline
@@ -710,16 +736,18 @@ async function command(request, env) {
     // Embedded images never reach the model: an asset line is thousands of
     // tokens of base64 it would mangle. They go back in afterwards. Link
     // lines from older texts are dropped; the name is the URL now.
+    // An empty text is fine: the instruction writes a new timeline.
     const trimmed = text.replace(ASSET_LINE, "").replace(LINK_LINES, "").replace(/\n{3,}/g, "\n\n").trim();
-    if (!trimmed) throw new HttpError(400, "Empty timeline");
+    const messages = [
+      { role: "system", content: COMMAND_PROMPT },
+      {
+        role: "user",
+        content: `Today is ${today || "unknown"}.\n\nTimeline:\n\`\`\`timeline\n${trimmed || "(empty: write a new timeline)"}\n\`\`\`\n\nInstruction: ${instruction}`,
+      },
+    ];
+    const budget = Math.min(8000, Math.ceil(trimmed.length / 2) + (trimmed ? 4000 : 6000));
     const answer = await env.AI.run(COMMAND_MODEL, {
-      messages: [
-        { role: "system", content: COMMAND_PROMPT },
-        {
-          role: "user",
-          content: `Today is ${today || "unknown"}.\n\nTimeline:\n\`\`\`timeline\n${trimmed}\n\`\`\`\n\nInstruction: ${instruction}`,
-        },
-      ],
+      messages,
       temperature: 0.2,
       // Qwen3 reasons before it answers (a hidden <think> block). With the
       // reasoning suppressed it passed 6 of 8 eval commands and got times
@@ -727,11 +755,36 @@ async function command(request, env) {
       // budget covers the reasoning plus a full day-by-day rewrite; adding
       // a step to a routine (where to insert it, which notes to copy) once
       // ran out at +2500 and returned no timeline.
-      max_tokens: Math.min(8000, Math.ceil(trimmed.length / 2) + 4000),
+      max_tokens: budget,
     });
-    const raw = String(answer?.response ?? answer?.result?.response ?? "").replace(/<think>[\s\S]*?<\/think>/g, "");
-    const block = raw.match(/```(?:timeline|text)?[ \t]*\n([\s\S]*?)\n?```/);
+    let raw = String(answer?.response ?? answer?.result?.response ?? "").replace(/<think>[\s\S]*?<\/think>/g, "");
+    let block = raw.match(/```(?:timeline|text)?[ \t]*\n([\s\S]*?)\n?```/);
     if (!block) throw new HttpError(502, "The model did not return a timeline" + (raw.trim() ? ": " + raw.trim().slice(0, 240) : ""));
+    // An answer the studio could not open gets one more try, with the
+    // parser's own error ("+0m", a made-up theme, a clock time in a
+    // routine); a second failure goes back as it is and the studio says why.
+    const problem = (text) => {
+      try {
+        TimelineText.parse(text);
+        return "";
+      } catch (error) {
+        return error.message;
+      }
+    };
+    const firstProblem = problem(block[1]);
+    if (firstProblem) {
+      const retry = await env.AI.run(COMMAND_MODEL, {
+        messages: [...messages, { role: "assistant", content: raw.trim() }, { role: "user", content: `That timeline does not open: ${firstProblem} Fix it and answer again with the complete timeline in one fenced block.` }],
+        temperature: 0.2,
+        max_tokens: budget,
+      });
+      const again = String(retry?.response ?? retry?.result?.response ?? "").replace(/<think>[\s\S]*?<\/think>/g, ""),
+        fixed = again.match(/```(?:timeline|text)?[ \t]*\n([\s\S]*?)\n?```/);
+      if (fixed && !problem(fixed[1])) {
+        raw = again;
+        block = fixed;
+      }
+    }
     let edited = block[1].replace(/[ \t]+$/gm, "").trim();
     if (assets.length) edited += "\n\n" + assets.join("\n");
     const note = (raw.slice(raw.indexOf(block[0]) + block[0].length).match(/^\s*note:\s*(.+)$/im) || [])[1] || "";
@@ -865,11 +918,12 @@ function title(text) {
 }
 
 function summary(text) {
-  // A routine (clock: relative) has no date: its length and step count.
-  if (/^[ \t]*clock:[ \t]*relative[ \t]*$/m.test(String(text))) {
+  // A routine (a relative clock, written or inferred from a first
+  // "+duration" step) has no date: its length and counts, as its ready
+  // card shows them ("45 min · 6 steps · 2 at once").
+  if (TimelineText.clockOf(String(text)) === "relative") {
     try {
-      const model = TimelineText.parse(String(text));
-      return `${TimelineText.runCore().total(model.total)} · ${model.events.length} step${model.events.length === 1 ? "" : "s"}`;
+      return TimelineText.routineSummary(TimelineText.parse(String(text)));
     } catch (error) {
       /* fall through to the line count */
     }

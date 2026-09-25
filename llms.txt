@@ -1,9 +1,30 @@
 # Timeline Studio: instructions for AI assistants
 
-Timeline Studio (https://tl.gaup.uk/) turns a small plain-text format into a
-visual day plan or trip itinerary. You are reading this because a person wants
-you to write one. Follow this page: write the timeline text, then give the
-person an "open" link and the text itself.
+Timeline Studio (https://tl.gaup.uk/) turns a small plain-text format into one
+of two kinds of page:
+
+- a **day plan**: events at times of day, on dates (a day out, a trip, an
+  agenda, a conference);
+- a **routine**: steps someone follows live from a **Start** button (a
+  workout, a recipe, a practice session, a cleaning routine). A routine has no
+  clock times and no date; it runs from whenever they press Start, with a
+  countdown, beeps and the steps announced aloud.
+
+You are reading this because a person wants you to write one. Follow this
+page: pick the kind, write the text, then give the person an "open" link and
+the text itself.
+
+## Pick the kind first
+
+If the person will do it step by step from a start moment (cook it, train it,
+practise it, clean it), write a **routine**, even if they also say when
+("dinner at 7", "my 6 AM workout"). A routine's first step starts with its
+length, `+45s | Plank` or `+15m | Preheat the oven`, and it never contains
+clock times (5:00 PM, 17:00) or a `date:`. If they named a time, say it in your
+reply instead: "It takes 45 minutes: start by 6:15 for dinner at 7."
+
+Anything that happens at times of day, possibly over several days, is a
+**day plan** (see The format). Never mix the two in one text.
 
 ## What to send back
 
@@ -32,7 +53,8 @@ fragment never reaches a server until then.
 
 ## The format
 
-A timeline is lines of text. Settings are `key: value` lines; events are lines
+Both kinds use this format; a routine differs only in its times (see
+Routines below). A timeline is lines of text. Settings are `key: value` lines; events are lines
 of fields separated by `|`. Lines starting with `#` are comments. Blank lines
 are ignored.
 
@@ -110,7 +132,7 @@ as a "Map" chip.
 | `city:` | Added to every map search. Global, or per day. |
 | `timezone:` | `PT`, `ET`, `CET`, `IST`, or an IANA name like `Asia/Tokyo`. Global, or per day. Only affects calendar export. |
 | `places: off` | Stops the studio auto-adding `@ place` to events. |
-| `clock: relative` | A routine timed from Start (see Routines and recipes). |
+| `clock: relative` | Optional: marks a routine (a first `+duration` step already does). |
 | `cover:` | An `https://` image URL shown above the title. |
 
 ### Several days
@@ -150,28 +172,35 @@ Lines starting with `- ` directly under an event line are that event's notes
     - Bring a jacket
     - Cash for the arcade
 
-## Routines and recipes (`clock: relative`)
+## Routines: workouts and recipes
 
-A workout or a recipe is followed live from a **Start** button rather than
-laid out on a day. Write `clock: relative` in the header (it is never guessed)
-and every time becomes elapsed time since Start. The page then gets a Start
-button, a countdown with beeps and an optional voice, and pictures of each
-step; on a saved link every device with the link open follows the same run.
+A routine is followed live from a **Start** button rather than laid out on a
+day. Write the steps in order, each starting with its length. **Start the
+first step with a `+duration`** (`+45s | Plank`, `+15m | Preheat the oven`):
+that is what makes the text a routine. (`clock: relative` in the header does
+the same and is optional.) The page then shows a ready card with the total
+time, what you need and a Start button, the steps in lanes (steps that
+overlap sit side by side), and while running a countdown with beeps and the
+steps announced; on a saved link every device with the link open follows the
+same run.
 
 - `+45s | Plank` is a step that starts when the line above it (in the text)
   ends, or at 0:00 if it is the first. Durations take `s`, `m`, `h` and
   combinations: `+45s`, `+2m`, `+1m30s`, `+90s`, `+1h`. This is the usual
   form: write the steps in order, each with its length.
 - `5:30` is a moment 5 min 30 s after Start (M:SS); `1:02:03` is H:MM:SS.
-  Never use AM/PM or clock times in a routine.
-- Spans have a fixed start: `0:00 - 15:00` or `15:00 +25m`. Spans may
-  overlap, for parallel recipe tracks (the oven heats while you chop).
+  Never use AM/PM, clock times or a `date:` in a routine.
+- A step with a fixed start: `0:00 +10m` or `15:00 +25m` (also
+  `0:00 - 15:00`). These may overlap, for parallel recipe tracks (the oven
+  heats while you chop). Keep the very first step a bare `+duration`.
 - `- ` lines directly under a step are its notes: form cues, or a recipe
   step's ingredients and details. They open while the step is running.
 - `day: Warm-up` lines are section labels on one continuous clock, not dates.
   `date:`, `range:`, `timezone:` and `city:` are ignored.
-- Write repeated steps out in full (there is no repeat block), and put the
-  equipment or the shopping list in `note:` lines.
+- Write repeated steps out in full (there is no repeat block). Title rests
+  `Rest` (they show as slim rows).
+- Put the equipment or the shopping list in `note:` lines, comma separated:
+  each item becomes a chip the person can tick off.
 - Leave the icon empty: plank/squat → dumbbell, jog/warm-up → run,
   stretch/cool-down → stretch, rest → timer, boil/simmer → pot,
   chop/roast/bake → meal are guessed for you.
@@ -179,7 +208,6 @@ step; on a saved link every device with the link open follows the same run.
 A workout:
 
     title: 7-min Core
-    clock: relative
     theme: future
     subtitle: No equipment, one mat
 
@@ -205,18 +233,19 @@ A workout:
 A recipe, with steps that overlap:
 
     title: Sheet-pan dinner
-    clock: relative
     theme: minimal
 
-    0:00 - 15:00 | Preheat the oven | 220°C, rack in the middle | | sand
+    +15m         | Preheat the oven | 220°C, rack in the middle | | sand
     0:00 +10m    | Chop | Onions and peppers in thick wedges | | sage
     - 2 red onions
     - 3 peppers
     +5m          | Season the tray | Oil, salt and paprika | | sage
     15:00 +25m   | Roast | Until the chicken is golden | | sand
     +5m          | Rest and plate | Spoon the juices over | | sky
+    27:30        | Toss the vegetables | Leave the chicken where it is
 
     note: 8 chicken thighs, 2 red onions, 3 peppers
+    note: Olive oil, salt, smoked paprika
 
 ### Pictures
 
@@ -236,9 +265,11 @@ own photos in the studio (tap a card, then **Photo**).
 
 - Output only the format above: no Markdown, bold or bullets inside the
   timeline text.
-- Every event line starts with a time (or, in a routine, a `+duration`). Do
-  not write events without times; if the person gave none, choose sensible
-  ones and say so.
+- Every event line starts with a time; in a routine, with a length
+  (`+45s`), and the first one always does. Do not write events without
+  times; if the person gave none, choose sensible ones and say so.
+- A routine has no clock times and no date. A day plan has no `+duration`
+  steps without a start time.
 - Ask for missing essentials only when you truly cannot guess (usually the
   date). Otherwise make reasonable choices and mention them in one line.
 - Keep it to what fits on a phone: about 4 to 10 events a day (a routine may

@@ -2,9 +2,10 @@
 // index.html carries its own copy of timeline-renderer.js (the studio is one
 // self-contained file). This rewrites that copy from timeline-renderer.js,
 // indented to sit in index.html's <script>, and the help panel's "Try a
-// workout" / "Try a recipe" samples from example.routine.txt and
-// example.recipe.txt. `--check` only reports whether they match
-// (tests/renderer.test.js runs the same comparison).
+// workout" / "Try a recipe" samples (and the New menu's trip) from
+// example.routine.txt, example.recipe.txt and example.trip.txt. `--check`
+// only reports whether they match (tests/renderer.test.js runs the same
+// comparison).
 //
 //   node scripts/inline-renderer.js          # write index.html
 //   node scripts/inline-renderer.js --check  # exit 1 if out of step
@@ -42,7 +43,7 @@ function expected() {
 }
 
 // The samples ride in <script type="application/json" id="sample-…"> blocks.
-const SAMPLES = { "sample-workout": "example.routine.txt", "sample-recipe": "example.recipe.txt" };
+const SAMPLES = { "sample-workout": "example.routine.txt", "sample-recipe": "example.recipe.txt", "sample-trip": "example.trip.txt" };
 const sampleBlock = (id) => new RegExp(`(<script type="application/json" id="${id}">)([\\s\\S]*?)(</script>)`);
 function sampleJson(file) {
   return JSON.stringify(fs.readFileSync(path.join(root, file), "utf8")).replace(/</g, "\\u003c");

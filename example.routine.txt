@@ -1,6 +1,6 @@
-# A routine runs on elapsed time: press Start and follow along.
+# A routine runs on elapsed time: press Start and follow along. Steps
+# start with their length (+45s), which is what makes this a routine.
 title: 10-min Core
-clock: relative
 theme: future
 subtitle: No equipment, one mat
 

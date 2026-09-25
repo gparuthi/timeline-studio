@@ -1,10 +1,10 @@
-# Steps can overlap: the oven heats while you chop.
+# Steps can overlap: the oven heats while you chop. The first line starts
+# with a length (+15m), which is what makes this a routine.
 title: Sheet-pan dinner
-clock: relative
 theme: minimal
 subtitle: Chicken thighs, peppers and onions for four
 
-0:00 - 15:00 | Preheat the oven | 220°C, rack in the middle | | sand
++15m         | Preheat the oven | 220°C, rack in the middle | | sand
 0:00 +10m    | Chop | Onions and peppers in thick wedges | | sage
 - 2 red onions
 - 3 peppers, any colour
