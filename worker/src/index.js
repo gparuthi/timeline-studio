@@ -12,6 +12,9 @@
 //   /dav/<name>/          CalDAV: calendar apps edit the events (caldav.js)
 //   GET  /resolve?u=      follows a Google/Apple Maps link -> { url, name, address }
 //   POST /command         { text, command, today } -> { text, note }   edit by instruction
+//   GET  /run/<name>      WebSocket: the live run of a routine, shared by every
+//                         page open on the link (runroom.js); .json polls it,
+//                         POST sends an op when the socket is down
 //   POST /img             image bytes (png/jpeg/webp/gif, <= 1.5 MB) -> { url }
 //   GET  /img/<hash>.<ext> the image, cached for a year (content-addressed)
 //   GET  /<id>            a snapshot from the earlier content-addressed
@@ -25,12 +28,17 @@
 
 import TimelineText from "../../timeline-renderer.js";
 import { isDavRequest, handleDav } from "./caldav.js";
+import { RunRoom } from "./runroom.js";
+
+// The Durable Object class must be exported by the Worker's main module.
+export { RunRoom };
 
 const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
 const LINK_LINES = /^[ \t]*link[ \t]*:.*(?:\r?\n|$)/gm;
 const NAME = /^\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.txt|\.ics|\.mobileconfig|\.webmanifest)?$/;
 const ID = /^\/([A-Za-z0-9_-]{7,22})(\.txt|\.ics)?$/;
+const RUN = /^\/run\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])(\.json)?$/;
 // Names that would shadow a studio file or an endpoint on this origin.
 const RESERVED = new Set(["dav", "claim", "index", "view", "themes", "vendor", "worker", "command", "resolve", "example", "icon", "icon-512", "apple-touch-icon", "manifest", "assets", "api", "version", "llms", "img", "run", "places"]);
 const CORS = {
@@ -59,6 +67,8 @@ export default {
     if (url.pathname === "/command" && request.method === "POST") return command(request, env);
     if (url.pathname === "/places" && request.method === "POST") return places(request, env);
     if (url.pathname === "/img" && request.method === "POST") return putImage(request, env, url);
+    const run = url.pathname.match(RUN);
+    if (run) return runRoom(request, env, run[1], !!run[2]);
     const image = url.pathname.match(IMAGE);
     if (image && (request.method === "GET" || request.method === "HEAD")) return getImage(env, image[1], request.method);
     const named = url.pathname.match(NAME);
@@ -138,6 +148,21 @@ function plain(text, cache = "no-store", version = "") {
   return new Response(text, {
     headers: { "content-type": "text/plain; charset=utf-8", "cache-control": cache, ...(version ? { etag: `"${version}"` } : {}), ...CORS },
   });
+}
+
+// ---- live runs --------------------------------------------------------------
+
+// Every page open on a routine's link joins its run: one RunRoom per name.
+async function runRoom(request, env, name, poll) {
+  if (!env.RUNS) return json({ error: "Live runs are not available here" }, 404);
+  if (RESERVED.has(name)) return json({ error: "No such timeline" }, 404);
+  const stub = env.RUNS.get(env.RUNS.idFromName(name));
+  const socket = (request.headers.get("upgrade") || "").toLowerCase() === "websocket";
+  if (socket && request.method === "GET" && !poll) return stub.fetch(request);
+  if (request.method === "GET" && poll) return stub.fetch(new Request("https://run/state"));
+  if (request.method === "POST" && !poll)
+    return stub.fetch(new Request("https://run/op", { method: "POST", body: await request.text(), headers: { "content-type": "application/json" } }));
+  return json({ error: "Use a WebSocket, GET /run/<name>.json or POST an op" }, 400);
 }
 
 // ---- pictures ---------------------------------------------------------------

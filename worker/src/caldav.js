@@ -79,6 +79,9 @@ export async function handleDav(request, env, deps) {
   }
   const ctag = doc.version,
     etag = `"${doc.version}"`;
+  // A routine (clock: relative) has no dates: its calendar is empty and
+  // read-only, so a calendar app cannot add a dated day to it.
+  const readOnly = model.clock === "relative";
   const depth = request.headers.get("depth") === "1" ? 1 : 0;
   const level = !pathName ? "root" : uid ? "event" : url.pathname.endsWith("/cal/") ? "calendar" : "principal";
 
@@ -86,7 +89,7 @@ export async function handleDav(request, env, deps) {
     const responses = [];
     if (level === "root") responses.push(response("/dav/", rootProps(principal)));
     if (level === "principal") {
-      responses.push(response(principal, principalProps(name, principal)));
+      responses.push(response(principal, principalProps(name, principal, readOnly)));
       if (depth) responses.push(response(calendarHref, calendarProps(model, name, calendarHref, ctag)));
     }
     if (level === "calendar") {
@@ -121,6 +124,8 @@ export async function handleDav(request, env, deps) {
       headers: { "content-type": "text/calendar; charset=utf-8", etag, "cache-control": "no-store" },
     });
   }
+  if (readOnly && (method === "PUT" || method === "DELETE"))
+    return new Response("This timeline is a routine (clock: relative); its calendar is read-only.", { status: 403 });
   if (level === "event" && method === "PUT") {
     const incoming = parseEvent(await request.text());
     if (!incoming) return new Response("Expected one VEVENT", { status: 400 });
@@ -514,14 +519,16 @@ function multistatus(responses) {
   });
 }
 
-const privileges =
+const READ_ONLY = "<D:current-user-privilege-set><D:privilege><D:read/></D:privilege></D:current-user-privilege-set>";
+const privileges = (readOnly) => (readOnly ? READ_ONLY : READ_WRITE);
+const READ_WRITE =
   "<D:current-user-privilege-set><D:privilege><D:read/></D:privilege><D:privilege><D:write/></D:privilege><D:privilege><D:write-content/></D:privilege><D:privilege><D:bind/></D:privilege><D:privilege><D:unbind/></D:privilege></D:current-user-privilege-set>";
 
 function rootProps(principal) {
   return `<D:resourcetype><D:collection/></D:resourcetype><D:current-user-principal><D:href>${principal}</D:href></D:current-user-principal><D:displayname>Timeline Studio</D:displayname>`;
 }
 
-function principalProps(name, principal) {
+function principalProps(name, principal, readOnly) {
   return (
     `<D:resourcetype><D:collection/><D:principal/></D:resourcetype>` +
     `<D:displayname>${escapeXml(name)}</D:displayname>` +
@@ -529,7 +536,7 @@ function principalProps(name, principal) {
     `<D:principal-URL><D:href>${principal}</D:href></D:principal-URL>` +
     `<C:calendar-home-set><D:href>${principal}</D:href></C:calendar-home-set>` +
     `<C:calendar-user-address-set><D:href>mailto:${escapeXml(name)}@tl.gaup.uk</D:href></C:calendar-user-address-set>` +
-    privileges
+    privileges(readOnly)
   );
 }
 
@@ -543,7 +550,7 @@ function calendarProps(model, name, href, ctag) {
     `<D:supported-report-set><D:supported-report><D:report><C:calendar-multiget/></D:report></D:supported-report><D:supported-report><D:report><C:calendar-query/></D:report></D:supported-report></D:supported-report-set>` +
     `<A:calendar-color>#165481FF</A:calendar-color>` +
     `<C:calendar-timezone>${escapeXml(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Timeline Studio//tl.gaup.uk//EN\r\nBEGIN:VTIMEZONE\r\nTZID:${model.timezone || DEFAULT_ZONE}\r\nEND:VTIMEZONE\r\nEND:VCALENDAR\r\n`)}</C:calendar-timezone>` +
-    privileges
+    privileges(model.clock === "relative")
   );
 }
 

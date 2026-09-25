@@ -1434,6 +1434,7 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
       else if (window.__timelineSetRun) window.__timelineSetRun(info);
     };
     let done = null, // { wall } from the end of the last step until Restart or Close
+      lastRun = null, // { state, e } as last shown, to tell a finish from a stop
       lastKey = null,
       lastCount = null,
       announce = false,
@@ -1482,19 +1483,25 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
       if (state) {
         const e = core.elapsedMs(state, now) / 1000;
         if (e >= total) {
-          // Finished. Heard live when this page saw the run going.
-          if (lastKey !== null && state.pausedAt == null && !doc.hidden) {
-            tone(660, 0.8);
-            buzz([200, 100, 200]);
-            say("Done");
-          }
-          done = { wall: Math.max(0, total * 1000 + state.pausedMs - state.shiftMs) };
-          lastKey = lastCount = null;
+          // Finished. Heard live when this page saw the run going; a run
+          // that ended long before this page opened is just cleared.
+          const seen = lastKey !== null;
+          if (seen && state.pausedAt == null && !doc.hidden) finishCue();
+          done = seen || e - total < 600 ? { wall: wallTime(state, total) } : null;
+          lastKey = lastCount = lastRun = null;
           transport.send({ op: "stop" });
           return;
         }
+        lastRun = { state, e };
         return running(state, e, total);
       }
+      // The run ended elsewhere (another device, another tab). At its end,
+      // that page finished it first: this one shows Done too.
+      if (lastRun && !done && lastRun.e >= total - 2) {
+        if (lastRun.state.pausedAt == null && !doc.hidden) finishCue();
+        done = { wall: wallTime(lastRun.state, total) };
+      }
+      lastRun = null;
       lastKey = lastCount = null;
       confirming = false;
       wake(false);
@@ -1504,6 +1511,13 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
         return show("done");
       }
       show("idle");
+    }
+    // How long the run really took: its length plus pauses, less skips.
+    const wallTime = (state, total) => Math.max(0, total * 1000 + state.pausedMs - state.shiftMs);
+    function finishCue() {
+      tone(660, 0.8);
+      buzz([200, 100, 200]);
+      say("Done");
     }
     function running(state, e, total) {
       const paused = state.pausedAt != null,
@@ -1665,6 +1679,8 @@ body.run-active .edit-pill{bottom:calc(var(--run-bar-h,0px) + 10px)!important}
         render();
       },
       state: () => transport.get(),
+      // The run's clock (the server's, for a synced run).
+      now: () => transport.now(),
       destroy() {
         alive = false;
         clearInterval(timer);
@@ -1857,6 +1873,251 @@ ${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-sc
     return new TextDecoder().decode(await pipe(bytes, DecompressionStream));
   }
 
+  // The synced run: the run state lives in the link server's RunRoom
+  // (worker/src/runroom.js) and every page open on the link follows it. Same
+  // interface as the local transport in runRuntime ({ now, get, send,
+  // subscribe, rekey, close }). Only the hosted studio uses it, so it is not
+  // carried by rendered pages.
+  //
+  // Time is the server's: each page estimates its clock skew from pings
+  // (the server answers with its own time), keeping the estimate from the
+  // quickest round trip, so pages on different devices agree on elapsed
+  // time. A page whose socket drops reconnects with backoff and polls
+  // GET /run/<name>.json every 3 s meanwhile; an op sent while the socket is
+  // down goes by POST.
+  function syncTransport(options) {
+    const env = {
+        WebSocket: typeof WebSocket === "function" ? WebSocket : null,
+        fetch: typeof fetch === "function" ? fetch.bind(globalThis) : null,
+        clock: () => Date.now(),
+        setTimeout: (fn, ms) => setTimeout(fn, ms),
+        clearTimeout: (id) => clearTimeout(id),
+        document: typeof document !== "undefined" ? document : null,
+        ...options,
+      },
+      core = options.core,
+      base = String(options.base).replace(/\/?$/, "/"),
+      path = `run/${options.name}`,
+      socketUrl = base.replace(/^http/, "ws") + path;
+    let state = null,
+      offset = 0,
+      bestRtt = Infinity,
+      socket = null,
+      open = false,
+      closed = false,
+      backoff = 1000,
+      reconnectTimer = null,
+      pollTimer = null,
+      pingTimer = null,
+      pings = 0,
+      listener = null,
+      joined = false,
+      // Requests are numbered; a reply older than what is shown is dropped
+      // (a poll sent before an op must not undo it when it lands after).
+      seq = 0,
+      shown = 0,
+      // When the oldest unanswered ping went out: a socket that stops
+      // answering (a phone that changed networks, a server restart) can
+      // still look open, so no answer in 10 s drops it and reconnects.
+      awaiting = 0;
+    const now = () => env.clock() + offset;
+    const notify = () => listener && listener(state);
+    // A reply to our own request: the round trip bounds the skew. A plain
+    // broadcast only gives a first guess until a ping comes back.
+    function learn(serverNow, sentAt) {
+      if (typeof serverNow !== "number") return;
+      const at = env.clock();
+      if (sentAt === undefined) {
+        if (bestRtt === Infinity) offset = serverNow - at;
+        return;
+      }
+      const rtt = Math.max(0, at - sentAt);
+      if (rtt <= bestRtt) {
+        bestRtt = rtt;
+        offset = serverNow + rtt / 2 - at;
+      }
+    }
+    function take(message, sentAt, request) {
+      if (!message || !("state" in message)) return;
+      learn(message.now, sentAt);
+      if (request !== undefined) {
+        if (request < shown) return;
+        shown = request;
+      } else shown = seq;
+      state = message.state || null;
+      joined = true;
+      notify();
+    }
+    function ping() {
+      if (!open) return;
+      if (awaiting && env.clock() - awaiting > 10000) return drop();
+      if (!awaiting) awaiting = env.clock();
+      socket.send(JSON.stringify({ op: "ping", t: env.clock() }));
+    }
+    function drop() {
+      const ws = socket;
+      socket = null;
+      open = false;
+      awaiting = 0;
+      env.clearTimeout(pingTimer);
+      try {
+        ws && ws.close();
+      } catch (error) {}
+      retry();
+    }
+    function schedulePings() {
+      env.clearTimeout(pingTimer);
+      // Quickly at first (the first round trips on a new socket are often
+      // slow), then every 20 s, which also keeps the socket alive.
+      const delay = pings < 4 ? [0, 700, 1500, 3000][pings] : 20000;
+      pingTimer = env.setTimeout(() => {
+        pings++;
+        ping();
+        schedulePings();
+      }, delay);
+    }
+    function connect() {
+      if (closed || !env.WebSocket) return startPolling();
+      env.clearTimeout(reconnectTimer);
+      let ws;
+      try {
+        ws = new env.WebSocket(socketUrl);
+      } catch (error) {
+        return retry();
+      }
+      socket = ws;
+      ws.onopen = () => {
+        if (socket !== ws) return;
+        open = true;
+        backoff = 1000;
+        pings = 0;
+        awaiting = 0;
+        stopPolling();
+        schedulePings();
+      };
+      ws.onmessage = (event) => {
+        if (socket !== ws) return;
+        let message;
+        try {
+          message = JSON.parse(event.data);
+        } catch (error) {
+          return;
+        }
+        if ("pong" in message) {
+          awaiting = 0;
+          learn(message.now, message.pong);
+        } else take(message);
+      };
+      ws.onclose = ws.onerror = () => {
+        if (socket !== ws) return;
+        socket = null;
+        open = false;
+        env.clearTimeout(pingTimer);
+        retry();
+      };
+    }
+    function retry() {
+      if (closed) return;
+      startPolling();
+      env.clearTimeout(reconnectTimer);
+      reconnectTimer = env.setTimeout(connect, backoff);
+      backoff = Math.min(backoff * 2, 30000);
+    }
+    async function poll() {
+      if (closed || open || !env.fetch) return;
+      const sentAt = env.clock(),
+        request = ++seq;
+      try {
+        const response = await env.fetch(`${base}${path}.json`, { cache: "no-store" });
+        if (response.ok) take(await response.json(), sentAt, request);
+      } catch (error) {
+        /* offline: the next poll tries again */
+      }
+    }
+    function startPolling() {
+      if (pollTimer || closed) return;
+      poll();
+      const again = () => {
+        pollTimer = env.setTimeout(() => {
+          poll();
+          again();
+        }, 3000);
+      };
+      again();
+    }
+    function stopPolling() {
+      env.clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    // Back in view (a phone unlocked, a tab switched to): reconnect now
+    // rather than at the end of a long backoff.
+    const onVisible = () => {
+      if (closed || !env.document || env.document.hidden) return;
+      if (!open) {
+        backoff = 1000;
+        connect();
+        poll();
+        return;
+      }
+      // The socket may have died while the page was away: ask, and drop it
+      // if no answer comes soon.
+      ping();
+      const asked = awaiting;
+      env.setTimeout(() => {
+        if (open && awaiting && awaiting === asked && env.clock() - asked >= 5000) drop();
+      }, 5000);
+    };
+    env.document && env.document.addEventListener("visibilitychange", onVisible);
+    connect();
+    return {
+      now,
+      get: () => state,
+      // Applied here at once, so the page answers the tap; the server's
+      // broadcast (with its own clock and run id) follows and wins.
+      send(op) {
+        state = core.apply(state, op, now());
+        shown = ++seq;
+        notify();
+        if (open) {
+          socket.send(JSON.stringify(op));
+          return;
+        }
+        if (!env.fetch) return;
+        const sentAt = env.clock(),
+          request = ++seq;
+        env
+          .fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(op) })
+          .then((response) => (response.ok ? response.json() : null))
+          .then((message) => message && take(message, sentAt, request))
+          .catch(() => {});
+      },
+      subscribe(fn) {
+        listener = fn;
+      },
+      // One run per link, whatever the text: nothing to move.
+      rekey() {},
+      // Whether the server's state has arrived yet (until then an idle page
+      // does not know whether a run is going).
+      joined: () => joined,
+      skew: () => ({ offset, rtt: bestRtt }),
+      close() {
+        closed = true;
+        env.clearTimeout(reconnectTimer);
+        env.clearTimeout(pingTimer);
+        stopPolling();
+        env.document && env.document.removeEventListener("visibilitychange", onVisible);
+        if (socket) {
+          const ws = socket;
+          socket = null;
+          open = false;
+          try {
+            ws.close(1000, "done");
+          } catch (error) {}
+        }
+      },
+    };
+  }
+
   // Text edits for the studio's Photo button: name an asset after its
   // step, write or replace "asset <name>: <url>", set a line's picture (the
   // 6th field) or the cover. Plain string work, kept here so node tests
@@ -1924,7 +2185,7 @@ ${themes[m.theme]}${darkThemes[m.theme] ? `\n@media screen and (prefers-color-sc
     return { assetName, withAsset, withPicture, withCover, reusable };
   }
 
-  const api = { parse, render, pictureEdits: pictureEdits(), icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl, describe, runCore, runConfig, runRuntime };
+  const api = { parse, render, pictureEdits: pictureEdits(), syncTransport, icons, themes: themeNames, encodeLink, decodeLink, location, mapSearchUrl, describe, runCore, runConfig, runRuntime };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.TimelineText = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
