@@ -105,12 +105,12 @@ test("initialize negotiates the version and carries the instructions", async () 
   assert.equal(unknown.error.code, -32601);
 });
 
-test("tools/list: five tools with schemas, descriptions and annotations", async () => {
+test("tools/list: six tools with schemas, descriptions and annotations", async () => {
   const { rpc } = setup();
   const { tools } = (await rpc("tools/list")).result;
   assert.deepEqual(
     tools.map((t) => t.name),
-    ["format_guide", "create_timeline", "get_timeline", "update_timeline", "control_run"],
+    ["format_guide", "create_timeline", "get_timeline", "update_timeline", "control_run", "upload_image"],
   );
   for (const tool of tools) {
     assert.ok(tool.description.length > 80, tool.name);
@@ -289,7 +289,7 @@ test("batches, notifications and malformed messages", async () => {
     "one answer per request, none for the notification",
   );
   assert.equal(answers[0].result.protocolVersion, "2025-03-26");
-  assert.equal(answers[1].result.tools.length, 5);
+  assert.equal(answers[1].result.tools.length, 6);
   assert.equal(answers[2].error.code, -32601);
   assert.equal(answers[3].error.code, -32600, "no jsonrpc: 2.0");
   const onlyNotes = await post([{ jsonrpc: "2.0", method: "notifications/initialized" }]);
@@ -335,7 +335,7 @@ test("a 2026-07-28 client is served per request, with server/discover", async ()
   assert.match(discover.result.instructions, /format_guide/);
   assert.equal(discover.result._meta["io.modelcontextprotocol/serverInfo"].name, "timeline-studio");
   const list = await (await post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: { _meta: meta } }, { ...headers, "mcp-method": "tools/list" })).json();
-  assert.equal(list.result.tools.length, 5);
+  assert.equal(list.result.tools.length, 6);
   assert.equal(typeof list.result.ttlMs, "number");
   const created = await (
     await post(

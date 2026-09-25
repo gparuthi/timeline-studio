@@ -14,7 +14,9 @@
 //
 // No sign-in, the same model as the links: a name is the whole capability.
 // The guards are the MCP rate limit (60 requests a minute per address),
-// 100 KB of text at most, and create never overwrites.
+// 100 KB of text at most, a 2.5 MB request (one base64 picture), and
+// create never overwrites. upload_image also counts against the IMAGES
+// limit (30 a minute per address).
 //
 // Every tool result carries structuredContent and a text block with a
 // Markdown link, for chats that show only the text. A bad timeline comes
@@ -22,6 +24,7 @@
 // message, so the model can fix the line and call again.
 
 import TimelineText from "../../timeline-renderer.js";
+import { ImageError, imageSource, storeImage } from "./images.js";
 
 const LEGACY_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const MODERN_VERSIONS = ["2026-07-28"];
@@ -29,7 +32,7 @@ const META_VERSION = "io.modelcontextprotocol/protocolVersion";
 const META_SERVER = "io.modelcontextprotocol/serverInfo";
 const SERVER_INFO = { name: "timeline-studio", title: "Timeline Studio", version: "1.0.0", websiteUrl: "https://tl.gaup.uk/" };
 const MAX_TEXT = 100 * 1024; // bytes of timeline text
-const MAX_BODY = 256 * 1024; // a request, JSON escaping included
+const MAX_BODY = 2.5 * 1024 * 1024; // a request: room for one base64 picture (upload_image)
 const MAX_PAYLOAD = 64 * 1024; // what the studio's own save (PUT) accepts
 const NAME = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
 const HOSTS = new Set(["tl.gaup.uk", "www.tl.gaup.uk"]);
@@ -44,7 +47,8 @@ export const INSTRUCTIONS = `Timeline Studio turns a small plain-text format int
 - create_timeline checks and saves the text and returns its link. To change a timeline, call get_timeline, edit the text (keep every line you do not need to change exactly as it was), then update_timeline with the version you read. On a conflict, redo your change on the current text it returns.
 - If a call says "Line N: …", fix that line and call again.
 - Always give the person the returned link as a Markdown link. Do not paste the whole text unless they ask.
-- control_run starts, pauses, resumes, stops or reads the live run of a routine; every phone or TV with the link open follows it.`;
+- control_run starts, pauses, resumes, stops or reads the live run of a routine; every phone or TV with the link open follows it.
+- upload_image stores a picture (base64 or an https URL) and can put it on a step or as the cover in one call. Send JPEG or WebP, at most about 1280 px on the long edge.`;
 
 const nameProperty = {
   type: "string",
@@ -132,6 +136,30 @@ export const TOOLS = [
       additionalProperties: false,
     },
     annotations: { title: "Control a routine's run", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: "upload_image",
+    title: "Upload a picture",
+    description:
+      "Stores a picture and returns its https URL; with timeline plus step (or cover: true) it also puts the picture on that step (its 6th field, through an asset line) or as the cover, and saves the timeline like update_timeline. Send exactly one of data_base64 (raw base64 or a data:image/...;base64, URI) or url (an https image this server fetches, such as a file download link or a generated image). Send JPEG or WebP, at most about 1280 px on the long edge: the server does not resize, and refuses anything over 1.5 MB or that is not a PNG, JPEG, WebP or GIF. The same picture twice gives the same URL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        data_base64: { type: "string", description: "The picture as raw base64 or a data:image/jpeg;base64,… URI. Leave it out when you send url." },
+        url: { type: "string", description: "An https:// image URL for the server to fetch (10 s, 3 redirects, 1.5 MB at most). Leave it out when you send data_base64." },
+        mime_type: { type: "string", description: "Optional: image/jpeg, image/png, image/webp or image/gif. The bytes decide the type; this is only checked." },
+        timeline: nameProperty,
+        step: {
+          type: "string",
+          description: 'Which step gets the picture: its title (case-insensitive; an exact title wins, then a unique start of one) or its 1-based line number in the text, such as "7". Needs timeline.',
+        },
+        cover: { type: "boolean", description: "true to make the picture the timeline's cover (above the title) instead of a step's. Needs timeline." },
+        asset_name: { type: "string", description: "Optional name for the asset line (asset <name>: <url>). Defaults to the step title as a slug, or cover; -2, -3… if taken. Replacing a step's picture reuses its asset." },
+        version: { type: "string", description: "The version get_timeline or create_timeline returned; if the timeline changed since, nothing is saved (as update_timeline)." },
+      },
+      additionalProperties: false,
+    },
+    annotations: { title: "Upload a picture", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
 ];
 
@@ -409,7 +437,92 @@ const CALLS = {
     ].filter(Boolean);
     return toolResult(structured, `${parts.join(" ")}\n\nEvery page with [the timeline](${url}) open follows the run.`);
   },
+
+  async upload_image(args, context) {
+    const { env, deps, request } = context;
+    const cover = args.cover === true,
+      hasStep = args.step !== undefined && args.step !== null && String(args.step).trim() !== "",
+      hasTimeline = args.timeline !== undefined && args.timeline !== null && String(args.timeline).trim() !== "";
+    if (cover && hasStep) throw new ToolError("Give step or cover: true, not both.");
+    if ((cover || hasStep) && !hasTimeline) throw new ToolError("step and cover need timeline (its name or link).");
+    if (hasTimeline && !cover && !hasStep) throw new ToolError("With timeline, say where the picture goes: step (a title or line number) or cover: true.");
+    const mime = args.mime_type === undefined || args.mime_type === null ? "" : String(args.mime_type).trim().toLowerCase();
+    if (mime && !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mime)) throw new ToolError("mime_type must be image/jpeg, image/png, image/webp or image/gif.");
+    // Check the timeline and the step before storing anything.
+    let doc = null,
+      target = null;
+    if (hasTimeline) {
+      const name = nameFrom(args.timeline, deps.reserved);
+      doc = await deps.loadDoc(env, name);
+      if (!doc) throw new ToolError(`There is no timeline at “${name}”. Use create_timeline to make one.`);
+      staleCheck(args.version, doc, name, context.origin + name);
+      target = cover ? { cover: true } : { event: findStep(TimelineText.parse(doc.text), args.step) };
+    }
+    if (env.IMAGES) {
+      const ip = request.headers.get("cf-connecting-ip") || "unknown";
+      const { success } = await env.IMAGES.limit({ key: ip });
+      if (!success) throw new ToolError("Too many uploads: 30 a minute. Wait a minute and try again.");
+    }
+    let stored;
+    try {
+      const bytes = await imageSource({ data: args.data_base64, url: args.url, hosts: HOSTS, env, fetch: deps.fetch });
+      stored = await storeImage(env, bytes, context.origin);
+    } catch (error) {
+      if (error instanceof ImageError) throw new ToolError(`Not uploaded: ${error.message}.`.replace(/\.\.$/, "."));
+      throw error;
+    }
+    if (!doc) return toolResult({ url: stored.url, type: stored.type, size: stored.size }, `Uploaded: ${stored.url}\n\nUse it as a step's picture (the 6th field) or the cover: in a timeline, or call upload_image with timeline and step to attach it.`);
+    // Write it in: the asset line plus the step's 6th field (the picture
+    // first, since adding an asset line may shift line numbers), or cover:.
+    const { assetName, withAsset, withPicture, withCover, reusable } = TimelineText.pictureEdits;
+    const text = doc.text,
+      model = TimelineText.parse(text),
+      current = target.cover ? model.cover || "" : target.event.picture || "",
+      base = args.asset_name !== undefined && args.asset_name !== null && String(args.asset_name).trim() ? String(args.asset_name) : target.cover ? "cover" : target.event.title,
+      name = reusable(text, current) || assetName(base, text),
+      next = target.cover ? withCover(withAsset(text, name, stored.url), `@${name}`) : withAsset(withPicture(text, target.event.line, `@${name}`), name, stored.url);
+    const saved = await deps.saveDoc(env, doc.name, await checkedText(next, deps));
+    const timelineUrl = context.origin + doc.name;
+    const where = target.cover ? "as the cover" : `on “${target.event.title}”`;
+    return toolResult(
+      { url: stored.url, asset: name, timeline_url: timelineUrl, version: saved.version },
+      `Uploaded and put ${where} (asset ${name}).\n\n[Open the timeline](${timelineUrl})\n\nNew version: ${saved.version}.`,
+    );
+  },
 };
+
+// A stale version is refused with the current text, as update_timeline does.
+function staleCheck(value, doc, name, url) {
+  const version = value === undefined || value === null ? "" : String(value).trim();
+  if (version && version !== doc.version)
+    throw new ToolError(
+      `Not saved: “${name}” changed since version ${version} (someone edited it). Its current version is ${doc.version}. Call again with version "${doc.version}" if the step is still right.\n\n\`\`\`text\n${doc.text.replace(/\n$/, "")}\n\`\`\``,
+      { error: "conflict", url, name, version: doc.version, text: doc.text },
+    );
+}
+
+// The step an agent named: a 1-based line number, else a title (an exact
+// match, case-insensitive, wins; then a unique start of one). Anything else
+// is an error that lists the steps.
+function findStep(model, value) {
+  const events = model.events,
+    list = () => events.map((e) => `${e.title} (line ${e.line})`).join("; "),
+    raw = String(value).trim();
+  if (typeof value === "number" || /^\d+$/.test(raw)) {
+    const line = Number(raw),
+      event = events.find((e) => e.line === line);
+    if (!event) throw new ToolError(`Line ${line} is not a step. Steps: ${list()}.`);
+    return event;
+  }
+  const wanted = raw.toLowerCase(),
+    exact = events.filter((e) => e.title.toLowerCase() === wanted);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) throw new ToolError(`More than one step is called “${raw}”: give its line number instead. Steps: ${list()}.`);
+  const prefix = events.filter((e) => e.title.toLowerCase().startsWith(wanted));
+  if (prefix.length === 1) return prefix[0];
+  if (prefix.length > 1) throw new ToolError(`“${raw}” matches more than one step (${prefix.map((e) => e.title).join(", ")}): give the whole title or the line number. Steps: ${list()}.`);
+  throw new ToolError(`No step is called “${raw}”. Steps: ${list()}.`);
+}
 
 // Where a run is, in words and seconds, from the room's { state, now }.
 function where(room, steps) {

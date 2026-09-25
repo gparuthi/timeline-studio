@@ -16,8 +16,10 @@
 //                         page open on the link (runroom.js); .json polls it,
 //                         POST sends an op when the socket is down
 //   POST /mcp             the MCP connector for ChatGPT and Claude (mcp.js):
-//                         format_guide, create/get/update_timeline, control_run
-//   POST /img             image bytes (png/jpeg/webp/gif, <= 1.5 MB) -> { url }
+//                         format_guide, create/get/update_timeline, control_run,
+//                         upload_image
+//   POST /img             image bytes (png/jpeg/webp/gif, <= 1.5 MB), or JSON
+//                         { data } / { url } from an agent -> { url } (images.js)
 //   GET  /img/<hash>.<ext> the image, cached for a year (content-addressed)
 //   GET  /<id>            a snapshot from the earlier content-addressed
 //                         scheme, opened in the studio read-only-until-edited
@@ -32,9 +34,10 @@ import TimelineText from "../../timeline-renderer.js";
 import { isDavRequest, handleDav } from "./caldav.js";
 import { RunRoom } from "./runroom.js";
 import { handleMcp } from "./mcp.js";
+import { IMAGE_PATH, ImageError, MAX_IMAGE, MAX_IMAGE_JSON, imageSource, sniffImage, storeImage } from "./images.js";
 
 // The Durable Object class must be exported by the Worker's main module.
-export { RunRoom };
+export { RunRoom, sniffImage };
 
 const MAX_PAYLOAD = 64 * 1024;
 const PAYLOAD = /^(z|t)=[A-Za-z0-9_-]{1,}$/;
@@ -74,7 +77,7 @@ export default {
     if (url.pathname === "/img" && request.method === "POST") return putImage(request, env, url);
     const run = url.pathname.match(RUN);
     if (run) return runRoom(request, env, run[1], !!run[2]);
-    const image = url.pathname.match(IMAGE);
+    const image = url.pathname.match(IMAGE_PATH);
     if (image && (request.method === "GET" || request.method === "HEAD")) return getImage(env, image[1], request.method);
     const named = url.pathname.match(NAME);
     if (named && request.method === "PUT") return put(request, env, named[1]);
@@ -172,24 +175,11 @@ async function runRoom(request, env, name, poll) {
 
 // ---- pictures ---------------------------------------------------------------
 
-// Step photos and covers are stored once, by content, instead of riding in
-// the text as base64: a routine with ten photos would otherwise make every
-// save, poll and command carry megabytes. The studio downscales first
-// (<= 1280 px, WebP or JPEG, ~400 KB); this refuses anything over 1.5 MB
-// or that is not a PNG, JPEG, WebP or GIF by its own bytes (never SVG,
-// which could carry script on this origin). No expiry.
-const MAX_IMAGE = 1.5 * 1024 * 1024;
-const IMAGE = /^\/img\/([0-9a-f]{16})\.(?:png|jpg|webp|gif)$/;
-const IMAGE_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
-export function sniffImage(bytes) {
-  const at = (i, ...values) => values.every((v, k) => bytes[i + k] === v);
-  if (at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
-  if (at(0, 0xff, 0xd8, 0xff)) return "image/jpeg";
-  if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return "image/webp";
-  if (at(0, 0x47, 0x49, 0x46, 0x38)) return "image/gif";
-  return "";
-}
-
+// Pictures (images.js): POST /img takes the studio's raw bytes, or JSON
+// { data } (base64 or a data: URI) or { url } (an https image this server
+// fetches) from an agent calling HTTP directly. All three are checked and
+// stored the same way, once by content. 30 uploads a minute per address.
+const HOSTS = new Set(["tl.gaup.uk", "www.tl.gaup.uk"]);
 async function putImage(request, env, url) {
   try {
     if (env.IMAGES) {
@@ -197,24 +187,29 @@ async function putImage(request, env, url) {
       const { success } = await env.IMAGES.limit({ key: ip });
       if (!success) throw new HttpError(429, "Too many uploads, try again in a minute");
     }
-    if (Number(request.headers.get("content-length")) > MAX_IMAGE) throw new HttpError(413, "Image too large (1.5 MB at most)");
-    const bytes = new Uint8Array(await request.arrayBuffer());
-    if (bytes.length > MAX_IMAGE) throw new HttpError(413, "Image too large (1.5 MB at most)");
-    if (!bytes.length) throw new HttpError(400, "No image");
-    const type = sniffImage(bytes);
-    if (!type) throw new HttpError(415, "Only PNG, JPEG, WebP or GIF images");
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-    const hash = [...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
-    const key = "img:" + hash;
-    // Content-addressed: the same picture uploaded twice is stored once.
-    const existing = await env.LINKS.get(key, "stream");
-    if (existing) await existing.cancel();
-    else await env.LINKS.put(key, bytes, { metadata: { type, size: bytes.length } });
-    const link = new URL(`/img/${hash}.${IMAGE_TYPES[type]}`, url);
-    if (link.hostname !== "localhost" && link.hostname !== "127.0.0.1") link.protocol = "https:";
-    return json({ url: link.href, type, size: bytes.length }, 201);
+    const isJson = /^application\/json\b/i.test(request.headers.get("content-type") || "");
+    const cap = isJson ? MAX_IMAGE_JSON : MAX_IMAGE;
+    if (Number(request.headers.get("content-length")) > cap) throw new HttpError(413, "Image too large (1.5 MB at most)");
+    let bytes;
+    if (isJson) {
+      const raw = await request.text();
+      if (raw.length > cap) throw new HttpError(413, "Image too large (1.5 MB at most)");
+      let body;
+      try {
+        body = JSON.parse(raw);
+      } catch (error) {
+        throw new HttpError(400, 'Expected JSON { "data": "<base64 or data: URI>" } or { "url": "https://…" }');
+      }
+      if (!body || typeof body !== "object") throw new HttpError(400, 'Expected JSON { "data": … } or { "url": … }');
+      bytes = await imageSource({ data: body.data, url: body.url, hosts: HOSTS, env });
+    } else {
+      bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.length > MAX_IMAGE) throw new HttpError(413, "Image too large (1.5 MB at most)");
+    }
+    const stored = await storeImage(env, bytes, url);
+    return json({ url: stored.url, type: stored.type, size: stored.size }, 201);
   } catch (error) {
-    if (error instanceof HttpError) return json({ error: error.message }, error.status);
+    if (error instanceof HttpError || error instanceof ImageError) return json({ error: error.message }, error.status);
     return json({ error: error.message || String(error) }, 400);
   }
 }

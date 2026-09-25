@@ -15,8 +15,8 @@ page: pick the kind, write the text, then give the person an "open" link and
 the text itself.
 
 If you have the Timeline Studio connector (tools named `create_timeline`,
-`get_timeline`, `update_timeline`, `format_guide`), use it instead of building
-a link: it checks the text, saves it and returns a short link to give the
+`get_timeline`, `update_timeline`, `format_guide`, `upload_image`), use it
+instead of building a link: it checks the text, saves it and returns a short link to give the
 person, and it can change the same timeline later. Its address is
 https://tl.gaup.uk/mcp (no sign-in).
 
@@ -270,6 +270,14 @@ When you write a timeline, a picture must be an `https://` URL of an image
 that really exists: one the person gave you, or one you are certain of. Never
 invent an image URL; leave the field out instead. The person can add their
 own photos in the studio (tap a card, then **Photo**).
+
+A picture you have (one the person sent, or one you made) can be uploaded:
+the `upload_image` tool takes base64 or an https URL, and a timeline and
+step (or `cover: true`) to put it there in the same call; or `POST
+https://tl.gaup.uk/img` with `Content-Type: application/json` and
+`{"data": "<base64>"}` or `{"url": "https://..."}` returns `{"url": ...}`
+to use as the picture. Send JPEG or WebP, at most about 1280 px on the long
+edge (1.5 MB at most).
 
 ## Rules for a good result
 
