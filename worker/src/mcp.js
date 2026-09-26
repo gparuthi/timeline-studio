@@ -31,7 +31,7 @@ const LEGACY_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 const MODERN_VERSIONS = ["2026-07-28"];
 const META_VERSION = "io.modelcontextprotocol/protocolVersion";
 const META_SERVER = "io.modelcontextprotocol/serverInfo";
-const SERVER_INFO = { name: "timeline-studio", title: "Timeline Studio", version: "1.2.0", websiteUrl: "https://tl.gaup.uk/" };
+const SERVER_INFO = { name: "timeline-studio", title: "Timeline Studio", version: "1.2.1", websiteUrl: "https://tl.gaup.uk/" };
 const MAX_TEXT = 100 * 1024; // bytes of timeline text
 const MAX_BODY = 2.5 * 1024 * 1024; // a request: room for one base64 picture (upload_image)
 const MAX_PAYLOAD = 64 * 1024; // what the studio's own save (PUT) accepts
@@ -49,7 +49,7 @@ export const INSTRUCTIONS = `Timeline Studio turns a small plain-text format int
 - If a call says "Line N: …", fix that line and call again.
 - Always give the person the returned link as a Markdown link. Do not paste the whole text unless they ask.
 - control_run starts, pauses, resumes, stops, seeks or reads the live run of a routine; every phone or TV with the link open follows it. "I'm 3 minutes in" is op seek with to "3:00".
-- upload_image stores a picture (base64 or an https URL) and can put it on a step or as the cover in one call. Send JPEG or WebP, at most about 1280 px on the long edge.`;
+- upload_image stores a picture (base64 or an https URL) and can put it on a step or as the cover in one call. Send JPEG or WebP, at most about 1280 px on the long edge. One picture per step, of that step, never a collage; a photo of the whole dish is the cover.`;
 
 const nameProperty = {
   type: "string",
@@ -150,7 +150,7 @@ export const TOOLS = [
     name: "upload_image",
     title: "Upload a picture",
     description:
-      "Stores a picture and returns its https URL; with timeline plus step (or cover: true) it also puts the picture on that step (its 6th field, through an asset line) or as the cover, and saves the timeline like update_timeline. Send exactly one of data_base64 (raw base64 or a data:image/...;base64, URI) or url (an https image this server fetches, such as a file download link or a generated image). Send JPEG or WebP, at most about 1280 px on the long edge: the server does not resize, and refuses anything over 1.5 MB or that is not a PNG, JPEG, WebP or GIF. The same picture twice gives the same URL.",
+      "Stores a picture and returns its https URL; with timeline plus step (or cover: true) it also puts the picture on that step (its 6th field, through an asset line) or as the cover, and saves the timeline like update_timeline. Send exactly one of data_base64 (raw base64 or a data:image/...;base64, URI) or url (an https image this server fetches, such as a file download link or a generated image). Send JPEG or WebP, at most about 1280 px on the long edge: the server does not resize, and refuses anything over 1.5 MB or that is not a PNG, JPEG, WebP or GIF. The same picture twice gives the same URL. One picture per step, showing that step; never a collage or grid of several steps in one picture; a photo of the whole dish goes in the cover (cover: true).",
     inputSchema: {
       type: "object",
       properties: {

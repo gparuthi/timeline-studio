@@ -250,6 +250,7 @@ test("the tool asks for small JPEG or WebP pictures", () => {
   const tool = TOOLS.find((t) => t.name === "upload_image");
   assert.match(tool.description, /1280 px/);
   assert.match(tool.description, /JPEG or WebP/);
+  assert.match(tool.description, /One picture per step, showing that step; never a collage or grid of several steps in one picture; a photo of the whole dish goes in the cover/);
   assert.deepEqual(Object.keys(tool.inputSchema.properties), ["data_base64", "url", "mime_type", "timeline", "step", "cover", "asset_name", "version"]);
   assert.equal(tool.annotations.readOnlyHint, false);
 });

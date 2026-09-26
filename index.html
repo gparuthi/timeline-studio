@@ -1474,7 +1474,13 @@ title: 5-min Core
           ["timer", /\b(rest|resting|recover|recovery|break|pause|wait|hold|timer)\b/],
           ["pot", /\b(boil|boiling|simmer|simmering|stew|soup|stir|stirring|saut[eé]e?|fry|frying|pan|pot|cook|cooking|pasta|rice|sauce|reduce)\b/],
           ["meal", /\b(chop|chopping|dice|dicing|slice|slicing|mince|peel|grate|prep|season|seasoning|marinate|mix|whisk|knead|roast|roasting|bake|baking|grill|grilling|broil|preheat|oven|plate|plating|serve|toss|garnish)\b/],
-        ];
+        ].map(([icon, pattern]) => [
+          icon,
+          // JavaScript's \b knows only ASCII letters: é is not one, so "sauté"
+          // and "café" never end on a boundary. The rules' word edges are
+          // letters and digits in any script instead.
+          new RegExp(pattern.source.replace(/^\\b/, "(?<![\\p{L}\\p{N}_])").replace(/\\b$/, "(?![\\p{L}\\p{N}_])"), "u"),
+        ]);
         // "Gear run @ REI Baldwin Hills": what follows " @ " in a description (or
         // a description that starts with "@") is a place. The sheet shows it as a
         // pin chip that searches the map for it, and the calendar feed makes it
@@ -2175,11 +2181,78 @@ title: 5-min Core
             liveRest = null,
             followed = null,
             nextKey = "",
-            lastWidth = -1;
+            lastWidth = -1,
+            // Lanes Fill (§9): whether the sheet was fitted to the screen's
+            // height, and what it was fitted to (the view, the layout, the width).
+            fitted = false,
+            fillKey = "";
           const num = (v) => (v === undefined || v === "" ? undefined : Number(v));
           const all = () => [...lanes.querySelectorAll("[data-i]")];
+          const fillOf = (info) => [!!(info && info.cols), (info && info.room) || 0, (info && info.view) || 0, (info && info.vw) || 0].join(":");
+          // The height the lanes may take to fit the screen: in two columns, the
+          // view from the lanes' top down to 16 px above its bottom; on a phone,
+          // the view under the run header (the run reports both, as `room`: in
+          // the studio's iOS preview the frame is as tall as its content). None
+          // for a static copy, or a view too short to be worth fitting.
+          function fillRoom(info, cols) {
+            if (quiet) return 0;
+            const view = info && info.room > 0 ? info.room : window.innerHeight - (cols ? 0 : 57),
+              top = lanes.getBoundingClientRect().top - doc.documentElement.getBoundingClientRect().top,
+              room = cols ? view - top - 16 : view - 20;
+            return room >= 240 ? Math.floor(room) : 0;
+          }
+          // On a wide screen a tall card is marked every 5 minutes (10, 15, 30
+          // or 60 where 5 would crowd) down its left edge, "— 10 min", below its
+          // text and above its foot, clear of a moment drawn across it. None on
+          // a sheet with long stretches drawn shorter (not to scale).
+          function minuteTicks(els, g) {
+            lanes.querySelectorAll(".tk").forEach((el) => el.remove());
+            for (const el of els) {
+              const box = el.dataset.k === "card" && g.boxes.get(el.dataset.i);
+              if (!box || box.brk !== null) continue;
+              const at = Number(el.dataset.at),
+                until = Number(el.dataset.until),
+                y0 = core.yAt(g.map, at),
+                step = [300, 600, 900, 1800, 3600].find((s) => core.yAt(g.map, at + s) - y0 >= 34);
+              if (!step || at + step >= until) continue;
+              const card = el.getBoundingClientRect(),
+                foot = el.querySelector(":scope > .cd-ft"),
+                text = [...el.querySelectorAll(":scope > .cd-t, :scope > .cd-d, :scope > .mini, :scope > .cd-inl, :scope > .cd-row > *")]
+                  .map((part) => part.getBoundingClientRect())
+                  .filter((r) => r.height > 0)
+                  .reduce((bottom, r) => Math.max(bottom, r.bottom - card.top), 0),
+                from = text + 12,
+                to = (foot ? foot.getBoundingClientRect().top - card.top : box.height) - 10,
+                marks = [...lanes.querySelectorAll('[data-k="mark"]')].map((m) => g.boxes.get(m.dataset.i)).filter((m) => m && m.host === el.dataset.i).map((m) => m.top - box.top);
+              for (let t = at + step; t < until - 1; t += step) {
+                const y = Math.round((core.yAt(g.map, t) - box.top) * 10) / 10;
+                if (y < from || y > to || marks.some((m) => Math.abs(m - y) < 16)) continue;
+                const tick = doc.createElement("i");
+                tick.className = "tk";
+                tick.setAttribute("aria-hidden", "true");
+                tick.style.top = y + "px";
+                tick.innerHTML = `<b>${core.chip(t - at)}</b>`;
+                el.append(tick);
+              }
+            }
+          }
           function layout() {
             if (!active) return;
+            // The view and the screen's width set the cards' sizes on a wide
+            // screen (§9): they apply before anything is measured.
+            const info = window.__timelineRun || null,
+              cols = !!(info && info.cols),
+              sheetEl = doc.querySelector(".sheet.routine");
+            doc.body.classList.toggle("run-cols", cols);
+            if (sheetEl) {
+              // 1% of the screen's width and of the view's height (the studio's
+              // preview frame is narrower than the screen, and on iOS as tall as
+              // its content): the sizes are the artboard's at 16:10 and no taller
+              // on a wider screen.
+              sheetEl.style.setProperty("--vw", ((info && info.vw) || window.innerWidth) / 100 + "px");
+              sheetEl.style.setProperty("--vh", ((info && info.view) || window.innerHeight) / 100 + "px");
+            }
+            fillKey = fillOf(info);
             const els = all(),
               items = els.map((el) => ({ id: el.dataset.i, at: Number(el.dataset.at), until: num(el.dataset.until), rest: el.dataset.k === "rest", line: Number(el.dataset.line) })),
               sections = [...lanes.querySelectorAll('[data-k="sec"]')].map((el, i) => ({ id: "s" + i, at: Number(el.dataset.at), el }));
@@ -2188,7 +2261,12 @@ title: 5-min Core
             cards.forEach((el) => (el.style.height = "auto"));
             const needs = {};
             cards.forEach((el) => (needs[el.dataset.i] = Math.ceil(el.getBoundingClientRect().height)));
-            const g = core.layout(items, sections, needs, { liveRest });
+            // Lanes Fill: the largest scale at which the routine fits the view,
+            // drawn whole; a routine too long for it keeps 12 px a minute and its
+            // breaks, and scrolls.
+            const room = fillRoom(info, cols),
+              g = room ? core.fit(items, sections, needs, { liveRest }, room) : core.layout(items, sections, needs, { liveRest });
+            fitted = !!g.fits;
             for (const el of els) {
               const box = g.boxes.get(el.dataset.i);
               if (!box) continue;
@@ -2199,6 +2277,8 @@ title: 5-min Core
                 brk.hidden = box.brk === null;
                 if (box.brk !== null) brk.style.top = box.brk + "px";
               }
+              // A broken card's length is on its break, not on a chip.
+              if (el.dataset.k === "card") el.classList.toggle("bk", box.brk !== null);
             }
             g.sections.forEach((s) => {
               const el = sections.find((x) => x.id === s.id);
@@ -2211,9 +2291,16 @@ title: 5-min Core
               el.hidden = label.hidden;
               el.dataset.hidden = label.hidden ? "1" : "";
             }
-            const done = lanes.querySelector(".dn");
-            if (done) done.style.top = g.done + "px";
-            lanes.style.height = g.height + "px";
+            // Fitted, the lanes take the whole room and Done sits at its bottom.
+            const height = fitted ? Math.max(g.height, room) : g.height,
+              done = lanes.querySelector(".dn");
+            if (done) done.style.top = Math.round((g.done + height - g.height) * 10) / 10 + "px";
+            lanes.style.height = height + "px";
+            // (Not where long stretches are drawn shorter: they are not to scale.)
+            if (cols && !g.breaks) minuteTicks(els, g);
+            else lanes.querySelectorAll(".tk").forEach((el) => el.remove());
+            lanes.dataset.scale = String(Math.round(g.scale * 100) / 100);
+            lanes.classList.toggle("fit", fitted);
             map = g.map;
             tick(true);
           }
@@ -2228,6 +2315,8 @@ title: 5-min Core
               cols = !!(info && info.cols),
               e = run ? run.elapsed : -1,
               els = all();
+            // The view changed (resized, two columns on or off): fit again.
+            if (!fromLayout && fillOf(info) !== fillKey) return layout();
             doc.body.classList.toggle("run-on", !!run);
             doc.body.classList.toggle("run-cols", cols);
             const fin = !run && info && info.finished ? info.finished : null,
@@ -2281,6 +2370,15 @@ title: 5-min Core
                 notes.open = false;
                 reflow = true;
               }
+              // A live card's chip counts down ("3:57 left") beside the green
+              // bar growing down its left edge (§9).
+              const chip = el.dataset.k === "card" && el.querySelector(":scope > .cd-row > .dur, :scope > .cd-ft > .dur");
+              if (chip) {
+                if (!chip.dataset.len) chip.dataset.len = chip.textContent;
+                const text = isLive ? `${runCore.clock(Math.ceil(until - e - 1e-6))} left` : chip.dataset.len;
+                if (chip.textContent !== text) chip.textContent = text;
+                chip.classList.toggle("lv", isLive);
+              }
               const left = el.dataset.k === "rest" && el.querySelector(".rs-left");
               if (left) {
                 const secs = Math.max(0, Math.ceil(until - e - 1e-6));
@@ -2325,9 +2423,10 @@ title: 5-min Core
               return layout();
             }
             liveRest = rest;
-            // "Now": a line across the lanes, behind the cards, so it shows in
-            // the gutter and between cards but never through a card's text; a
-            // live card fills up to it. Grey, and "paused", while paused.
+            // "Now": a line across the lanes, behind the cards (live cards are
+            // opaque), so it shows in the gutter and between cards but never
+            // through a card's text; a live card's green bar grows down to it.
+            // Grey, and "paused", while paused.
             let line = lanes.querySelector(".nowh"),
               label = lanes.querySelector(".gnow");
             if (!run) {
@@ -2366,11 +2465,15 @@ title: 5-min Core
             // line does. In two columns the now line goes a third of the way
             // down the lanes. A jump, and the Jump panel opening or closing
             // (run.follow), follows again.
-            const key2 = (cols ? "c:" : "") + (run.follow || 0) + ":" + (liveSteps.map((el) => el.dataset.i).join(",") || "next:" + (upcoming ? upcoming.dataset.i : ""));
+            // A sheet fitted to the view (§9) shows the whole routine: the page
+            // keeps the lanes' top in view instead (on a phone just under the
+            // header; not while the Jump panel covers the top of the view).
+            const whole = fitted && (cols || !run.panel);
+            const key2 = (cols ? "c:" : "") + (run.follow || 0) + ":" + (liveSteps.map((el) => el.dataset.i).join(",") || "next:" + (upcoming ? upcoming.dataset.i : "")) + (whole ? ":whole" : "");
             if (key2 === followed) return;
             followed = key2;
             const tops = liveSteps.map((el) => parseFloat(el.style.top)).concat(upcoming ? [parseFloat(upcoming.style.top)] : []),
-              target = cols ? y - (run.view || window.innerHeight) / 3 : core.followTop(tops, y) - headerInset(run) - 12,
+              target = whole ? (cols ? -32 : -headerInset(run) - 12) : cols ? y - (run.view || window.innerHeight) / 3 : core.followTop(tops, y) - headerInset(run) - 12,
               base = lanes.getBoundingClientRect().top + window.scrollY;
             window.scrollTo({ top: Math.max(0, base + target), behavior: "smooth" });
           }
@@ -2480,7 +2583,9 @@ title: 5-min Core
             const box = lanes.getBoundingClientRect(),
               x = event.clientX - box.left,
               y = event.clientY - box.top;
-            if (x < 0 || x > 70) return closePop();
+            // The gutter: left of the rail (wider on a wide screen, §9).
+            const rail = lanes.querySelector(".rail");
+            if (x < 0 || x > (rail ? rail.offsetLeft : 70)) return closePop();
             let best = null;
             for (const el of lanes.querySelectorAll(".gl[data-t]")) {
               if (el.hidden) continue;
@@ -2845,6 +2950,16 @@ title: 5-min Core
             steps
               .filter((s) => s.until !== undefined && !s.rest && s.at > e)
               .sort((a, b) => a.at - b.at || a.line - b.line)[0] || null;
+          // Then (§9, the two-column view under Up next): what comes after it,
+          // at most `most` steps and moments in time order, rests left out (and
+          // a moment before Up next still counts: it has not happened yet).
+          const then = (steps, e, most = 3) => {
+            const up = upNext(steps, e);
+            return steps
+              .filter((s) => s.at > e && s !== up && !s.rest)
+              .sort((a, b) => a.at - b.at || a.line - b.line)
+              .slice(0, most);
+          };
           // What the run header says at `e` seconds. The step ending soonest
           // drives it (its countdown, its progress line); a rest reads "Rest →
           // Side plank L"; the subline is, in order, "Paused · 1:20 of 10:00",
@@ -3058,7 +3173,7 @@ title: 5-min Core
               words = pos.active.map((s) => `${saidTitle(s.title)}, ${spoken(roughly(s.until - e))} left`).join(". ");
             return { start, words };
           }
-          return { clock, length, total, spoken, elapsedMs, apply, end, position, skipTo, backTo, seek, layoutFor, upNext, header, menu, status, finished, amountOf, seekTarget, stepFor, jumpOp, undoOp, readout, ticks, snap, scrub, keyMove, nudges, saidTitle, landing };
+          return { clock, length, total, spoken, elapsedMs, apply, end, position, skipTo, backTo, seek, layoutFor, upNext, then, header, menu, status, finished, amountOf, seekTarget, stepFor, jumpOp, undoOp, readout, ticks, snap, scrub, keyMove, nudges, saidTitle, landing };
         }
         // The routine sheet's geometry: elapsed lanes under the ready card. It
         // places every step, rest, moment and section header in px from the
@@ -3071,6 +3186,9 @@ title: 5-min Core
         // seconds. Sections: { at } (a `day:` header row, at its first step).
         function routineCore() {
           const PX = 12, // px a minute on the plain scale
+            // Lanes Fill (§9): the scales tried to fit a routine to the screen's
+            // height, px a minute. Below the smallest, lengths stop reading true.
+            SCALE = { min: 6, max: 60 },
             GAP = 4, // between cards stacked in one lane
             LONG = 15 * 60, // stretches of long steps longer than this are drawn this tall
             MIN = { lane: 88, wide: 58, rest: 28, liveRest: 44, moment: 28, section: 24 },
@@ -3134,8 +3252,10 @@ title: 5-min Core
             return (rests ? `${plural(moves, "move")} · ${plural(rests, "rest")}` : plural(items.length, "step")) + (n > 1 ? ` · ${n} at once` : "");
           }
           // What you need, from the note: lines: split on commas (not inside
-          // brackets), trimmed, a final full stop dropped.
-          function chips(notes) {
+          // brackets), trimmed, a final full stop dropped. A part that reads as a
+          // sentence ("About 77 minutes including prep") is not a thing to get:
+          // it stays a line under the chips (see noteLines).
+          function parts(notes) {
             const out = [];
             for (const note of notes) {
               let depth = 0,
@@ -3144,14 +3264,26 @@ title: 5-min Core
                 if (c === "(" || c === "[") depth++;
                 if ((c === ")" || c === "]") && depth) depth--;
                 if (c === "," && !depth) {
-                  const item = word.trim().replace(/\.$/, "").trim();
-                  if (item) out.push(item);
+                  const raw = word.trim(),
+                    item = raw.replace(/\.$/, "").trim();
+                  if (item) out.push({ item, raw, line: sentence(raw) });
                   word = "";
                 } else word += c;
               }
             }
             return out;
           }
+          // A sentence: more than about 4 words that carry meaning (articles,
+          // "and", "of" and the like do not count, so "A mat and a bottle of
+          // water" is still a thing to get), or one that ends a sentence (". ! ?")
+          // with 4 words or more.
+          const SMALL = new Set(["a", "an", "the", "and", "or", "of", "with", "in", "for", "to", "on", "at", "per", "&", "+"]);
+          function sentence(text) {
+            const words = String(text).replace(/\([^)]*\)/g, " ").split(/\s+/).filter(Boolean);
+            return words.filter((w) => !SMALL.has(w.toLowerCase())).length > 4 || (/[.!?]$/.test(text) && words.length >= 4);
+          }
+          const chips = (notes) => parts(notes).filter((p) => !p.line).map((p) => p.item);
+          const noteLines = (notes) => parts(notes).filter((p) => p.line).map((p) => p.raw);
           // Lanes: steps in start order take the first free lane of two; a
           // third step running at the same time folds into the step in the
           // second lane as a mini card. A step nothing else overlaps is wide.
@@ -3174,9 +3306,13 @@ title: 5-min Core
           }
           // The geometry. `needs` maps an id to the px its card's content needs
           // (measured on the page; estimated by the renderer); the minimums
-          // above always hold.
+          // above always hold. `options.scale` is px a minute (12 unless given);
+          // `options.breaks: false` draws long steps at their full length, with
+          // no zig-zag break (Lanes Fill, when the routine fits the screen).
           function layout(items, sections = [], needs = {}, options = {}) {
-            const info = lanes(items),
+            const scale = options.scale > 0 ? options.scale : PX,
+              breaks = options.breaks !== false,
+              info = lanes(items),
               spans = spansOf(items).filter((s) => !info.get(s.id).mini),
               points = items.filter((i) => i.until === undefined).sort((a, b) => a.at - b.at || a.line - b.line),
               end = Math.max(0, ...items.map((i) => i.until ?? i.at)),
@@ -3202,7 +3338,7 @@ title: 5-min Core
             // The plain scale, then long stretches drawn shorter: where only
             // steps over 15 min are running (or nothing is), a stretch longer
             // than 15 min is drawn 15 min tall, and the steps get a break.
-            const seg = T.slice(0, -1).map((t, i) => ((T[i + 1] - t) / 60) * PX);
+            const seg = T.slice(0, -1).map((t, i) => ((T[i + 1] - t) / 60) * scale);
             const quiet = (a, b) => spans.filter((s) => s.at <= a && b <= s.until).every((s) => s.until - s.at > LONG);
             const runs = [];
             let run = null;
@@ -3214,7 +3350,7 @@ title: 5-min Core
             }
             for (const r of runs) {
               const length = T[r.to + 1] - T[r.from];
-              r.compressed = length > LONG;
+              r.compressed = breaks && length > LONG;
               if (r.compressed) for (let i = r.from; i <= r.to; i++) seg[i] *= LONG / length;
             }
             // yEnd: where time t is reached; yTop: below any rows inserted at t.
@@ -3311,7 +3447,37 @@ title: 5-min Core
               done,
               height: round(done + 34),
               map: T.map((t, i) => [t, round(yTop[i]), round(yEnd[i])]),
+              scale,
+              breaks: runs.some((r) => r.compressed),
             };
+          }
+          // Lanes Fill (§9): the largest scale whose sheet is no taller than
+          // `height` px, drawn without breaks, found by bisection (8 layouts at
+          // most, all arithmetic). A routine too long for the screen even at the
+          // smallest scale falls back to the plain 12 px a minute with long steps
+          // broken, and scrolls (`fits: false`).
+          function fit(items, sections, needs, options, height) {
+            const at = (scale) => layout(items, sections, needs, { ...options, scale, breaks: false }),
+              plain = () => ({ ...layout(items, sections, needs, options), fits: false });
+            const end = Math.max(0, ...items.map((i) => i.until ?? i.at));
+            if (!(height > 0) || !end) return plain();
+            let best = at(SCALE.min);
+            if (best.height > height) return plain();
+            // Every stretch is drawn at least its length at the scale, so the
+            // sheet is at least `scale × minutes` tall: no scale above this fits.
+            let lo = SCALE.min,
+              hi = Math.min(SCALE.max, Math.max(SCALE.min, height / (end / 60)));
+            const top = at(hi);
+            if (top.height <= height) return { ...top, fits: true };
+            for (let pass = 0; pass < 8; pass++) {
+              const mid = (lo + hi) / 2,
+                g = at(mid);
+              if (g.height <= height) {
+                lo = mid;
+                best = g;
+              } else hi = mid;
+            }
+            return { ...best, fits: true };
           }
           // The y of an elapsed time, for the "now" line.
           function yAt(map, t) {
@@ -3329,7 +3495,7 @@ title: 5-min Core
           // live step, or in a rest or a gap of the rest and the move up next;
           // with neither, a little above the now line at `y`.
           const followTop = (tops, y) => (tops.length ? Math.min(...tops) : y - 60);
-          return { chip, atLabel, sectionLength, atOnce, summary, chips, lanes, layout, yAt, followTop, MIN, GAP };
+          return { chip, atLabel, sectionLength, atOnce, summary, chips, noteLines, sentence, lanes, layout, fit, yAt, followTop, MIN, GAP, SCALE, PX, LONG };
         }
         // What the run runtime needs from a model: its steps in time order and a
         // key for the run state in localStorage (a hash of the steps, so the same
@@ -3367,6 +3533,8 @@ title: 5-min Core
             cover: pictureUrl(model, model.cover) || "",
             summary: model.events.length ? rc.summary(items) : "",
             chips: rc.chips(notes.filter((n) => !/https?:\/\//.test(n))),
+            // Parts of a note that read as a sentence: a line under the chips.
+            lines: rc.noteLines(notes.filter((n) => !/https?:\/\//.test(n))),
           };
         }
         // Run mode (docs/routines.md §7): the docked Start, the run view and the
@@ -3523,6 +3691,23 @@ title: 5-min Core
       .rc-ck svg{width:11px;height:11px;stroke-width:3;visibility:hidden}
       .rc-chip[aria-pressed="true"] .rc-ck{background:#3ecf8e;border-color:#3ecf8e;color:#08241a}
       .rc-chip[aria-pressed="true"] .rc-ck svg{visibility:visible}
+      .rc-ckl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
+      .rc-ckl .rc-chip{display:flex;gap:9px;min-height:30px;padding:0!important;border-radius:8px!important;background:none!important;color:#e9f1f5!important;font:500 14px/1.2 system-ui,sans-serif!important;overflow-wrap:anywhere}
+      .rc-ckl .rc-ck{width:18px;height:18px;border-color:#9fb3bf}
+      .rc-ckl .rc-chip[aria-pressed="true"]{color:#7d8f9a!important;text-decoration:line-through}
+      .rc-ready .rc-ckl .rc-chip{min-height:38px;font-size:16px!important}
+      .rc-ready .rc-ckl .rc-ck{width:22px;height:22px}
+      .rc-lines{margin:6px 0 0;padding-left:18px;font-size:13.5px;line-height:1.35;color:#9fb3bf}
+      .rc-then,.rc-wyn{display:grid;gap:8px}
+      .rc-then-l{display:grid;margin:0;padding:0;list-style:none}
+      .rc-then-l li{display:flex;align-items:center;gap:10px;min-height:30px;border-bottom:1px solid #1f2a31;font:600 15px/1.2 system-ui,sans-serif;color:#e9f1f5}
+      .rc-then-l li:last-child{border-bottom:0}
+      .rc-then-l em{flex:none;width:82px;font:600 12px/1 ui-monospace,Menlo,monospace;font-style:normal;color:#9fb3bf;white-space:nowrap}
+      .rc-then-l .rv-dot{width:9px;height:9px;box-sizing:border-box}
+      .rc-then-l .mk{color:#cfdde5;font-weight:500}
+      .rc-then-l .mk .rv-dot{background:transparent;border:1.5px dashed #9fb3bf}
+      .rc-then-l span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .rc-then-l b{flex:none;font:700 12px/1 ui-monospace,Menlo,monospace;color:#9fb3bf}
       .rc-gorow{display:flex;align-items:center;gap:10px}
       .rc-go{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;gap:10px;height:56px;border-radius:999px!important;background:#3ecf8e!important;color:#08241a!important;font:800 18px/1 system-ui,sans-serif!important;box-shadow:0 6px 22px #0006}
       .rc-go small{font-weight:600;font-size:15px;opacity:.8}
@@ -3556,6 +3741,14 @@ title: 5-min Core
       .run-scrub.drag .sc-fill,.run-scrub.drag .rc-meter i{transition:none}
       .sc-read{position:absolute;left:0;bottom:calc(50% + 13px);z-index:2;transform:translateX(-50%);padding:6px 9px;border-radius:9px;background:#e9f1f5;color:#10181d;font:700 13px/1 system-ui,sans-serif;white-space:nowrap;font-variant-numeric:tabular-nums;box-shadow:0 4px 14px #0008;pointer-events:none}
       .rc-all{margin:-6px 0 -2px}
+      .rc-xl .rc-ready,.rc-xl .rc-live,.rc-xl .rc-done{padding-left:max(30px,env(safe-area-inset-left));padding-right:30px}
+      .rc-xl .rc-stp{font-size:40px}
+      .rc-xl .rc-tm b{font-size:84px;letter-spacing:-3px}
+      .rc-xl .rc-tm span{font-size:17px}
+      .rc-xl .rc-desc{font-size:19px}
+      .rc-xl .rc-nts{font-size:18px}
+      .rc-xl .rc-h{font-size:38px}
+      .rc-all .sc-read{left:0!important;right:0;bottom:calc(100% - 4px);transform:none;padding:8px 0 7px;border-radius:0;background:#11181d;color:#e9f1f5;box-shadow:none;text-align:left;font-size:13px}
       .rc-sbar .rc-meter{position:absolute;left:0;right:0;top:50%;margin-top:-5px}
       .rc-at{display:grid;gap:2px}
       .rc-at-h{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px;font:600 13px/1.2 system-ui,sans-serif;color:#9fb3bf;font-variant-numeric:tabular-nums}
@@ -3658,8 +3851,8 @@ title: 5-min Core
             `</div><i class="rv-pl" aria-hidden="true"></i></div>` +
             // Wide screens: the left column.
             `<div class="rc">` +
-            `<div class="rc-ready"><div class="rc-hero" hidden><span class="rc-hero-img"></span><div class="rc-scrim"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div></div><div class="rc-plain"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div><p class="rc-kv"><b></b><span></span></p><div class="rc-need" hidden><div class="rc-kick">What you need</div><div class="rc-chips"></div></div><div class="rc-grow"></div><div class="rc-tgs">${toggles}</div><div class="rc-at"><div class="rc-at-h"><span>Start from <b class="rc-at-v"></b></span><button type="button" class="rc-at-x" hidden>From 0:00</button></div>${scrubBar("ready", "rc-atbar", "Where to start")}</div><div class="rc-gorow"><button type="button" class="rc-go">${icons.play}<span>Start</span><small></small></button><button type="button" class="rc-ed run-edit" aria-label="Edit">${icons.pencil}</button></div></div>` +
-            `<div class="rc-live"><div class="rc-top"><b class="rc-name"></b><span class="rc-of"></span></div>${scrubBar("all", "rc-all", "Jump in the routine")}<div class="rc-pic" hidden></div><div class="rc-stp" role="status"></div><div class="run-scrub rc-sbar" data-bar="step" role="slider" tabindex="0" aria-label="Jump in this step" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div class="rc-meter"><i></i></div><span class="sc-thumb"></span><output class="sc-read" hidden></output></div><div class="rc-tm"><b role="timer"></b><span></span></div><p class="rc-desc" hidden></p><ul class="rc-nts" hidden></ul><ul class="rc-also" hidden></ul><div class="rc-nx" hidden><div class="rc-kick"></div><span class="rc-nx-th" hidden></span><div class="rc-nx-t"></div><div class="rc-nx-d"></div></div><div class="rc-grow"></div><div class="rc-ctl"><button type="button" class="run-back" aria-label="Back" title="Back to the start of this step (or the previous one)">${icons.back}</button><button type="button" class="rc-pz run-pause"></button><button type="button" class="run-skip" aria-label="Skip" title="Skip to the next step">${icons.skip}</button><button type="button" class="run-stop" aria-label="Stop" title="Stop the run">${icons.stop}</button></div>${confirm}<div class="rc-tgs">${toggles}</div><div class="rc-foot"><span class="rc-fst"></span>${amber}<button type="button" class="rc-txb run-edit">${icons.pencil}<span>Edit</span></button></div></div>` +
+            `<div class="rc-ready"><div class="rc-hero" hidden><span class="rc-hero-img"></span><div class="rc-scrim"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div></div><div class="rc-plain"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div><p class="rc-kv"><b></b><span></span></p><div class="rc-need" hidden><div class="rc-kick">What you need</div><div class="rc-chips rc-ckl"></div><ul class="rc-lines" hidden></ul></div><div class="rc-grow"></div><div class="rc-tgs">${toggles}</div><div class="rc-at"><div class="rc-at-h"><span>Start from <b class="rc-at-v"></b></span><button type="button" class="rc-at-x" hidden>From 0:00</button></div>${scrubBar("ready", "rc-atbar", "Where to start")}</div><div class="rc-gorow"><button type="button" class="rc-go">${icons.play}<span>Start</span><small></small></button><button type="button" class="rc-ed run-edit" aria-label="Edit">${icons.pencil}</button></div></div>` +
+            `<div class="rc-live"><div class="rc-top"><b class="rc-name"></b><span class="rc-of"></span></div>${scrubBar("all", "rc-all", "Jump in the routine")}<div class="rc-pic" hidden></div><div class="rc-stp" role="status"></div><div class="run-scrub rc-sbar" data-bar="step" role="slider" tabindex="0" aria-label="Jump in this step" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div class="rc-meter"><i></i></div><span class="sc-thumb"></span><output class="sc-read" hidden></output></div><div class="rc-tm"><b role="timer"></b><span></span></div><p class="rc-desc" hidden></p><ul class="rc-nts" hidden></ul><ul class="rc-also" hidden></ul><div class="rc-nx" hidden><div class="rc-kick"></div><span class="rc-nx-th" hidden></span><div class="rc-nx-t"></div><div class="rc-nx-d"></div></div><div class="rc-then" hidden><div class="rc-kick">Then</div><ul class="rc-then-l"></ul></div><div class="rc-wyn" hidden><div class="rc-kick rc-wyn-k"></div><div class="rc-chips rc-ckl"></div></div><div class="rc-grow"></div><div class="rc-ctl"><button type="button" class="run-back" aria-label="Back" title="Back to the start of this step (or the previous one)">${icons.back}</button><button type="button" class="rc-pz run-pause"></button><button type="button" class="run-skip" aria-label="Skip" title="Skip to the next step">${icons.skip}</button><button type="button" class="run-stop" aria-label="Stop" title="Stop the run">${icons.stop}</button></div>${confirm}<div class="rc-tgs">${toggles}</div><div class="rc-foot"><span class="rc-fst"></span>${amber}<button type="button" class="rc-txb run-edit">${icons.pencil}<span>Edit</span></button></div></div>` +
             `<div class="rc-done"><div class="rc-top"><b class="rc-name"></b></div><div class="rc-dn"><span class="rv-ok" aria-hidden="true">${icons.check}</span><div><div class="rc-dn-t"></div><div class="rc-dn-s"></div></div></div><div class="rc-grow"></div><div class="rc-dn-act"><button type="button" class="run-restart">${icons.restart}<span>Restart</span></button><button type="button" class="run-close">Close</button></div><div class="rc-foot"><span class="rc-fst"></span><button type="button" class="rc-txb run-edit">${icons.pencil}<span>Edit</span></button></div></div>` +
             `</div>` +
             // "Jumped to 3:00 · Undo".
@@ -3684,7 +3877,14 @@ title: 5-min Core
               kv: $(".rc-kv b"),
               kvText: $(".rc-kv span"),
               need: $(".rc-need"),
-              chips: $(".rc-chips"),
+              chips: $(".rc-need .rc-chips"),
+              lines: $(".rc-lines"),
+              col: $(".rc"),
+              then: $(".rc-then"),
+              thenList: $(".rc-then-l"),
+              wyn: $(".rc-wyn"),
+              wynKick: $(".rc-wyn-k"),
+              wynList: $(".rc-wyn .rc-chips"),
               go: $(".rc-go"),
               name: $(".rc-live .rc-name"),
               of: $(".rc-of"),
@@ -3944,13 +4144,27 @@ title: 5-min Core
               width = area ? area.clientWidth : window.innerWidth,
               height = area ? area.clientHeight : window.innerHeight,
               next = core.layoutFor(width, height) === "cols";
-            doc.documentElement.style.setProperty("--run-col", width > 1100 ? "400px" : "360px");
+            // The left column grows with the screen: 480 px and larger type from
+            // about 1800 px wide (the owner's 2000 px laptop, §9's L1d).
+            doc.documentElement.style.setProperty("--run-col", width >= 1800 ? "480px" : width > 1100 ? "400px" : "360px");
+            top.classList.toggle("rc-xl", width >= 1800);
             if (next !== cols) {
               cols = next;
               if (alive) render();
             }
           };
           const viewHeight = () => (host ? (host.view ? host.view() : 0) : window.innerHeight);
+          // The height the sheet can fill (Lanes Fill, §9): the view beside the
+          // left column, or on a phone the view under the one-row header, which
+          // takes its row once a run starts (above the studio's preview; over
+          // the top of a page of its own).
+          const roomHeight = () => {
+            const view = viewHeight();
+            if (cols || !view) return view;
+            const bar = top.querySelector(".rv"),
+              shown = !top.hidden && bar && bar.offsetHeight ? bar.offsetHeight : 0;
+            return host ? view - (shown ? 0 : 57) : view - (shown || 57);
+          };
           // The sheet (this page's, or the studio's preview frame) is told where
           // the run is and which view is showing; while no run is going, only
           // when that changes.
@@ -3958,8 +4172,11 @@ title: 5-min Core
           const sheet = (next) => {
             next.cols = cols;
             next.view = viewHeight();
+            next.room = roomHeight();
+            next.vw = window.innerWidth;
+            next.panel = !!panel;
             next.sound = { beeps, voice };
-            const sig = next.active ? "" : JSON.stringify([next.cols, next.view, beeps, voice, next.finished || null]);
+            const sig = next.active ? "" : JSON.stringify([next.cols, next.view, next.room, next.vw, beeps, voice, next.finished || null]);
             if (!next.active && sig === sheetSig) return;
             sheetSig = sig;
             if (host) host.sheet(next);
@@ -4060,6 +4277,16 @@ title: 5-min Core
               return [];
             }
           };
+          // What you need as a checklist (the ready card's, and the run's under
+          // Then): one button per chip, ticked from this device's ticks. Returns
+          // how many are ticked.
+          function needList(el, chips) {
+            const ticked = readTicks(),
+              show = (text) => (/^[a-z][a-z]/.test(text) ? text[0].toUpperCase() + text.slice(1) : text);
+            setHtml(el, chips.map((c) => `<button type="button" class="rc-chip" data-chip="${esc(c)}" aria-pressed="false"><span class="rc-ck" aria-hidden="true">${icons.check}</span>${esc(show(c))}</button>`).join(""));
+            el.querySelectorAll(".rc-chip").forEach((chip) => setAttr(chip, "aria-pressed", String(ticked.includes(chip.dataset.chip))));
+            return chips.filter((c) => ticked.includes(c)).length;
+          }
           // The ready card, in the left column (the sheet's is hidden there).
           function ready() {
             const total = core.end(steps);
@@ -4074,14 +4301,11 @@ title: 5-min Core
             setText(ui.kv, core.total(total));
             setText(ui.kvText, info.summary || "");
             const chips = info.chips || [],
-              ticked = readTicks(),
-              show = (text) => (/^[a-z][a-z]/.test(text) ? text[0].toUpperCase() + text.slice(1) : text);
-            setHtml(
-              ui.chips,
-              chips.map((c) => `<button type="button" class="rc-chip" data-chip="${esc(c)}" aria-pressed="false"><span class="rc-ck" aria-hidden="true">${icons.check}</span>${esc(show(c))}</button>`).join(""),
-            );
-            ui.chips.querySelectorAll(".rc-chip").forEach((chip) => chip.setAttribute("aria-pressed", String(ticked.includes(chip.dataset.chip))));
-            ui.need.hidden = !chips.length;
+              lines = info.lines || [];
+            needList(ui.chips, chips);
+            setHtml(ui.lines, lines.map((line) => `<li>${esc(line)}</li>`).join(""));
+            ui.lines.hidden = !lines.length;
+            ui.need.hidden = !chips.length && !lines.length;
             // "Start from": a bar over the whole routine; Start then reads
             // "Start at 3:00".
             const from = barValue("ready", 0);
@@ -4225,6 +4449,38 @@ title: 5-min Core
             buzz([200, 100, 200]);
             say("Done");
           }
+          // Then and What you need show only where the left column has room
+          // for them, What you need dropping off first. Measured again only when
+          // the column or what is in it changes (not on every tick of the clock).
+          let columnKey = "";
+          function fitColumn(hasThen, hasNeed) {
+            const box = ui.col,
+              key = JSON.stringify([
+                box.clientHeight,
+                box.clientWidth,
+                hasThen,
+                hasNeed,
+                confirming,
+                ui.pic.hidden || ui.pic.dataset.src,
+                ui.stp.textContent,
+                ui.desc.hidden || ui.desc.textContent,
+                ui.notes.dataset.html,
+                ui.also.children.length,
+                ui.nx.hidden || ui.nx.className + ui.nx.textContent + ui.nxPic.hidden,
+                ui.thenList.dataset.html,
+                ui.wynList.dataset.html,
+                $$(".run-chip").map((el) => el.hidden),
+              ]);
+            if (key === columnKey) return;
+            columnKey = key;
+            ui.then.hidden = !hasThen;
+            ui.wyn.hidden = !hasNeed;
+            for (const block of [ui.wyn, ui.then]) {
+              if (block.hidden) continue;
+              if (box.scrollHeight <= box.clientHeight + 1) break;
+              block.hidden = true;
+            }
+          }
           const pct = (s, e) => Math.min(100, Math.max(0, ((e - s.at) / Math.max(0.001, s.until - s.at)) * 100)).toFixed(1) + "%";
           const left = (until, e) => core.clock(Math.ceil(until - e - 1e-6));
           const statusHtml = (parts) => parts.map(([k, v]) => (v ? `${k} <b>${esc(v)}</b>` : k)).join(" · ");
@@ -4291,6 +4547,21 @@ title: 5-min Core
                 setText(ui.nxTitle, up.title);
                 setText(ui.nxDetail, up.detail || "");
               }
+              // The column's gap (§9): Then, the next steps and moments after
+              // Up next with when they start; What you need, ticked as in the
+              // ready card. They drop off the bottom, What you need first, when
+              // the column is too short for them.
+              const later = core.then(steps, e);
+              setHtml(
+                ui.thenList,
+                later
+                  .map((s) => `<li class="${s.until === undefined ? "mk" : ""}" style="--c:${colors[s.color] || colors.sky}"><em>${esc(s.atText || "")}</em><i class="rv-dot"></i><span>${esc(s.title)}</span><b>${esc(s.lenText || "")}</b></li>`)
+                  .join(""),
+              );
+              const chips = info.chips || [],
+                got = needList(ui.wynList, chips);
+              setText(ui.wynKick, `What you need · ${got} of ${chips.length}`);
+              fitColumn(!!later.length, !!chips.length);
               setText(ui.liveFoot, status.slice(1).map(([k, v]) => (v ? `${k} ${v}` : k)).join(" · "));
             } else {
               // The one-row header.
@@ -4698,6 +4969,7 @@ title: 5-min Core
               sheetSig = "";
               sheet({ active: false });
               doc.documentElement.style.removeProperty("--run-col");
+              top.classList.remove("rc-xl");
               doc.body.classList.remove("run-active", "run-done", "run-docked", "run-routine", "run-cols");
               if (!host && window.__timelineRunApi && window.__timelineRunApi.start === start) window.__timelineRunApi = null;
               if (host) {
@@ -4818,15 +5090,20 @@ title: 5-min Core
                 html.push(`<div class="rs ${box.lane} ly"${attrs(e, i, "rest")} style="${at}">${icon(e, "rs-i")}<span class="rs-t">${escape(e.title)}</span><span class="rs-len">${length}</span><span class="rs-left"></span></div>`);
                 return;
               }
+              // A long step carries its break (the page's Lanes Fill may draw it
+              // whole, and then shows the length chip instead, class "bk" off).
               const wide = box.lane === "w",
-                brk = box.brk !== null ? `<div class="brk" style="top:${px(box.brk)}"><span>${length}</span></div>` : "",
-                dur = box.brk !== null ? "" : `<span class="dur">${length}</span>`;
+                broken = box.brk !== null,
+                brk = broken || e.until - e.at > rc.LONG ? `<div class="brk" style="top:${px(broken ? box.brk : 0)}"${broken ? "" : " hidden"}><span>${length}</span></div>` : "",
+                dur = `<span class="dur">${length}</span>`,
+                // A wide card's notes, printed in columns on a wide screen (§9).
+                inline = wide && e.notes.length ? `<ul class="cd-inl">${e.notes.map((note) => `<li>${linkify(note)}</li>`).join("")}</ul>` : "";
               html.push(
-                `<div class="cd ${box.lane} ${e.color} ly"${attrs(e, i, "card")} style="${at}">` +
+                `<div class="cd ${box.lane} ${e.color} ly${broken ? " bk" : ""}${inline ? " has-inl" : ""}"${attrs(e, i, "card")} style="${at}">` +
                   (wide
                     ? `<div class="cd-row"><h3 class="cd-t">${escape(e.title)}</h3>${stepNotes(e)}${dur}${detailHtml(e)}</div>`
-                    : `<h3 class="cd-t">${escape(e.title)}</h3>${detailHtml(e)}${box.minis.map(mini).join("")}${dur || e.notes.length ? `<div class="cd-ft">${dur}${stepNotes(e)}</div>` : ""}`) +
-                  `${thumb(e)}${brk}</div>`,
+                    : `<h3 class="cd-t">${escape(e.title)}</h3>${detailHtml(e)}${box.minis.map(mini).join("")}<div class="cd-ft">${dur}${stepNotes(e)}</div>`) +
+                  `${thumb(e)}${inline}${brk}</div>`,
               );
             });
             for (const s of g.sections) {
@@ -4839,7 +5116,7 @@ title: 5-min Core
             // this device); a note with a link stays a note.
             const notes = [...m.notes, ...m.days.flatMap((day) => day.notes)],
               chips = rc.chips(notes.filter((n) => !/https?:\/\//.test(n))),
-              linked = notes.filter((n) => /https?:\/\//.test(n)),
+              linked = [...rc.noteLines(notes.filter((n) => !/https?:\/\//.test(n))), ...notes.filter((n) => /https?:\/\//.test(n))],
               show = (text) => (/^[a-z][a-z]/.test(text) ? text[0].toUpperCase() + text.slice(1) : text);
             const heading = `<h1>${escape(m.title)}</h1>${m.subtitle ? `<p class="tagline">${escape(m.subtitle)}</p>` : ""}`;
             const play = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15L19.5 12z"/></svg>';
@@ -4887,7 +5164,7 @@ title: 5-min Core
           // Only timelines that use them carry these, so a day timeline's page is
           // unchanged.
           const relativeCss = rel
-            ? ` .sheet.routine{max-width:760px;padding:0 0 120px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;--ln:#8080803d;--chipbg:#80808024;--wash:#8080800d;--go:#3ecf8e;--go-ink:#08241a;} .sheet.routine *{box-sizing:border-box;} .ready{margin:0 0 4px;} .ready h1{margin:0;padding:0;max-width:none;text-align:left;font-size:32px;line-height:1.05;letter-spacing:-1.2px;} .ready .tagline{margin:6px 0 0;text-align:left;font-size:15px;line-height:1.3;} .hero{position:relative;height:232px;overflow:hidden;background:var(--chipbg);} .hero .pic.cover{position:absolute;inset:0;margin:0;height:100%;max-height:none;aspect-ratio:auto;} .hero .scrim{position:absolute;left:0;right:0;bottom:0;padding:70px 16px 14px;background:linear-gradient(transparent,#000d);pointer-events:none;} .hero .scrim h1{color:#fff;pointer-events:auto;text-shadow:0 1px 12px #0008;} .hero .scrim .tagline{color:#fffc;} .ready-card{margin:16px 16px 0;} .ready:not(.has-cover) .ready-card{margin:16px;padding:18px 16px 16px;border-radius:14px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));} .ready-kv{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:12px 0 0;font-size:14px;color:var(--blue);} .has-cover .ready-kv{margin-top:0;} .ready-kv b{font-size:22px;color:var(--navy);letter-spacing:-.5px;} .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0;} .chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;margin:0;padding:0 11px 0 7px;border:0;border-radius:999px;background:var(--chipbg);color:var(--navy);font:inherit;font-size:13px;line-height:1.2;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ck{display:grid;place-items:center;width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--blue);} .ck svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;visibility:hidden;} .chip.on .ck{background:var(--go);border-color:var(--go);color:var(--go-ink);} .chip.on .ck svg{visibility:visible;} .ready-notes{margin:10px 0 0;padding-left:18px;font-size:13px;color:var(--blue);} .ready-row{display:flex;gap:10px;margin:16px 0 2px;} .ready-go{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;gap:10px;height:56px;margin:0;border:0;border-radius:999px;background:var(--go);color:var(--go-ink);font:800 18px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;box-shadow:0 6px 22px #0003;-webkit-tap-highlight-color:transparent;} .ready-go svg{width:20px;height:20px;fill:currentColor;} .ready-go small{font-weight:600;font-size:15px;opacity:.8;} body.run-on .ready-go,body.run-on .ready-edit{visibility:hidden;} .ready-edit{flex:none;height:56px;margin:0;padding:0 18px;border:1px solid var(--ln);border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 15px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-edit[hidden]{display:none;} .lanes{position:relative;display:block;margin:18px 16px 0 0;} .lanes .rail{position:absolute;left:70px;top:0;bottom:0;width:2px;background:var(--ln);} .ly{position:absolute;} .w{left:80px;right:0;} .l0{left:80px;width:calc((100% - 86px) / 2);} .l1{left:calc(80px + (100% - 86px) / 2 + 6px);right:0;} .gl{left:0;width:64px;text-align:right;font:600 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:-.3px;color:var(--blue);white-space:nowrap;} .gl b{color:var(--navy);font-weight:700;} .gl[hidden]{display:none;} .cd{z-index:1;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));padding:8px 9px 8px 12px;overflow:hidden;color:var(--navy);text-align:left;--c:#5f8fb0;} .cd::before,.mini::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);} .sky{--c:#5f8fb0;} .sand{--c:#c08a44;} .sage{--c:#6f9a5e;} .cd-t{margin:0;padding-right:46px;font-size:14px;font-weight:700;line-height:1.2;letter-spacing:-.1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-d{margin:2px 0 0;padding-right:46px;font-size:12px;line-height:1.25;color:var(--blue);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-ft{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:auto;padding-top:6px;} .dur{flex:none;padding:4px 6px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:0;white-space:nowrap;} .cd-th{position:absolute;right:8px;top:8px;width:40px;height:40px;border-radius:8px;overflow:hidden;} .cd-th.icon,.mo-i,.rs-i{display:grid;place-items:center;color:var(--blue);} .cd-th.icon{background:var(--chipbg);} .cd-th.icon svg{width:22px;height:22px;fill:currentColor;} .icon img{width:100%;height:100%;object-fit:cover;} .cd.w{padding-top:7px;} .cd-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding-right:48px;min-width:0;} .cd.w .cd-t{flex:0 1 auto;min-width:0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd.w .dur{margin-left:auto;} .cd.w .cd-d{order:3;flex-basis:100%;min-width:0;margin:-2px 0 0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd .step-notes{margin:0;flex:none;order:1;} .cd.w .dur{order:2;} .cd .step-notes summary{padding:2px 7px;border-color:var(--ln);font-size:11px;font-weight:500;line-height:16px;letter-spacing:0;opacity:1;} .cd .step-notes[open]{order:4;flex-basis:100%;} .cd .step-notes ul{margin:4px 0 2px;padding-left:16px;font-size:13px;line-height:1.3;} .cd .map-link{font-size:10px;} .brk{position:absolute;left:-2px;right:-2px;height:34px;display:grid;place-items:center;background:var(--paper);z-index:1;} .brk::before,.brk::after{content:'';position:absolute;left:0;right:0;height:8px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M0 6.5 6 1.5 12 6.5' fill='none' stroke='%238a8a86' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x;} .brk::before{top:-4px;} .brk::after{bottom:-4px;} .brk span{padding:5px 9px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 12px/1 ui-monospace,Menlo,monospace;} .mini{position:relative;display:flex;align-items:center;gap:4px;flex:none;height:30px;margin:6px -5px 0 -8px;padding:0 4px 0 8px;border-radius:8px;border:1px solid var(--blue);background:var(--paper);font-size:11.5px;white-space:nowrap;overflow:hidden;box-shadow:0 -5px 0 -2px var(--ln),0 6px 14px #0003;cursor:pointer;} .mini b{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:600;} .mini .dur{margin-left:auto;padding:3px 4px;font-size:10px;} .mark{z-index:2;height:0;border-top:1px dashed var(--navy);cursor:pointer;} .mark span{position:absolute;right:6px;top:-10px;max-width:calc(100% - 12px);padding:1px 6px;border-radius:6px;border:1px solid var(--ln);background:var(--paper);color:var(--navy);font-size:12px;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .rs,.mo{z-index:1;display:flex;align-items:center;gap:8px;height:28px;padding:0 10px 0 12px;border-radius:7px;border:1px dashed var(--ln);background-color:var(--paper);color:var(--blue);font:600 12px/1 ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;cursor:pointer;} .rs-i svg,.mo-i svg{width:14px;height:14px;fill:currentColor;} .rs-i,.mo-i{width:14px;height:14px;flex:none;} .rs-t{text-transform:lowercase;} .rs-left:empty{display:none;} .mo{border-style:solid;color:var(--navy);font-family:inherit;font-size:13px;} .mo span{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--blue);font-weight:400;} .lsec{left:80px;right:0;display:flex;align-items:center;gap:8px;height:24px;color:var(--blue);font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;} .lsec em{font-style:normal;font-weight:600;letter-spacing:0;text-transform:none;font-family:ui-monospace,Menlo,monospace;} .lsec::after{content:'';flex:1;border-top:1px solid var(--ln);} .dn{left:80px;right:0;display:flex;align-items:center;gap:10px;height:28px;color:var(--blue);font-size:14px;font-weight:600;} .dn-ck{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:1px dashed var(--ln);} .dn-ck svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.live .cd,body.live .lsec[data-line]{cursor:pointer;} .run-on .cd.done,.run-on .rs.done,.run-on .mo.done,.run-on .mark.done{opacity:.42;} .lanes .cd.live{border:2px solid #3ecf8e99;padding:7px 8px 7px 11px;background-image:linear-gradient(#3ecf8e24 0 var(--fy,0px),var(--wash) var(--fy,0px));} .lanes .cd.live .cd-d{display:block;-webkit-line-clamp:none;white-space:normal;} .lanes .cd.upnext{border-style:dashed;border-color:var(--c);} .lanes .rs.live{align-items:flex-end;padding-bottom:8px;border:2px solid #3ecf8e;background-color:var(--paper);background-image:linear-gradient(#3ecf8e1c,#3ecf8e1c);color:var(--navy);} .nowh{position:absolute;left:66px;right:-8px;height:2px;z-index:0;background:var(--navy);box-shadow:0 0 6px var(--navy);pointer-events:none;} .nowh::before{content:'';position:absolute;left:0;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--navy);} .gl.gnow{color:var(--navy);font-weight:700;} .nowh.pz{background:#9fb3bf;box-shadow:none;} .run-fin .cd,.run-fin .rs,.run-fin .mo,.run-fin .mark,.run-fin .lsec{opacity:.42;} .run-fin .dn{color:var(--navy);font-weight:700;} .run-fin .dn small{font-size:13px;font-weight:500;color:var(--blue);} .run-fin .dn-ck{background:#3ecf8e;border:0;color:#08241a;} .nowh.pz::before{background:#9fb3bf;} .upk{flex:none;order:2;align-self:center;padding:3px 5px;border:1px solid var(--ln);border-radius:5px;color:var(--navy);font:700 9.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;} .upk-len{display:none;} .lanes .cd.grow{min-height:128px;} .cd.grow .upk{display:inline-block;align-self:flex-start;margin:2px 0 8px;} .cd.grow .upk-len{display:inline;} .cd.grow .cd-row{display:block;padding-right:118px;} .cd.grow .dur{display:none;} .cd.grow .cd-t{padding-right:118px;font-size:17px;white-space:normal;} .cd.grow .cd-row .cd-t{padding-right:0;} .cd.grow .cd-d{padding-right:118px;white-space:normal;} .cd.grow .cd-row .cd-d{padding-right:0;margin-top:2px;} .cd.grow .cd-th{width:110px;height:110px;border-radius:10px;} .cd.grow .cd-th.icon svg{width:56px;height:56px;} body.run-cols .ready{display:none;} body.run-cols .lanes{margin-top:24px;} .ready-sound{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0;} .ready-sound[hidden]{display:none;} .ready-tg{display:flex;flex:1 1 auto;min-width:0;align-items:center;gap:6px;height:40px;margin:0;padding:0 6px 0 8px;border:1px solid var(--ln);border-radius:12px;background:var(--chipbg);color:var(--navy);font:700 13.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-tg svg{width:19px;height:19px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} .ready-sw{position:relative;flex:none;width:34px;height:20px;margin-left:auto;border-radius:10px;background:var(--ln);} .ready-sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004;transition:left .15s;} .ready-tg[aria-pressed="true"] .ready-sw{background:var(--go);} .ready-tg[aria-pressed="true"] .ready-sw::after{left:16px;} .sheet.routine footer{margin-top:10px;} body.theme-future .sheet.routine{--ln:#29e2ff2e;--chipbg:#0f2a4a;--wash:#ffffff06;} body.theme-future .sky{--c:#29e2ff;} body.theme-future .sand{--c:#ff4fd8;} body.theme-future .sage{--c:#5dffb8;} body.theme-future .ready:not(.has-cover) .ready-card{border-color:#29e2ff55;background:linear-gradient(160deg,#12305a88,#0a0f1c);box-shadow:0 0 30px -12px #29e2ff;} body.theme-future .ready h1{font-size:27px;letter-spacing:4px;line-height:1.1;} body.theme-future .ready .tagline{font-size:11px;letter-spacing:2px;} body.theme-future .ready-kv{color:#8fb8d8;font-size:13px;} body.theme-future .ready-kv b{color:#fff;} body.theme-future .chip{background:#ffffff0a;border:1px solid #29e2ff44;} body.theme-future .lanes .rail{background:linear-gradient(#29e2ff,#ff4fd8);box-shadow:0 0 10px #29e2ff66;} body.theme-future .cd{border-color:var(--c);background-color:#0c1322;box-shadow:0 0 14px -8px var(--c);} body.theme-future .cd-t{color:#fff;} body.theme-future .dur{background:transparent;border:1px solid var(--c);color:#fff;} body.theme-future .cd-th.icon{background:#ffffff0a;border:1px solid var(--c);color:#fff;} body.theme-future .rs{border-color:#5dffb855;color:#9fd8c0;} body.theme-future .gl{color:#8fb8d8;} body.theme-code .sheet.routine{font-family:inherit;--ln:#30363d;--chipbg:#161b22;--wash:#161b22;} body.theme-code .sky{--c:#79c0ff;} body.theme-code .sand{--c:#ffa657;} body.theme-code .sage{--c:#7ee787;} body.theme-code .cd{border-radius:6px;} body.theme-code .cd-t{color:var(--c);} body.theme-code .ready h1{font-size:26px;letter-spacing:-.5px;} body.theme-retro .sheet.routine{--ln:#3b241699;--chipbg:#f0b45a55;--wash:#fbf1de00;} body.theme-retro .sky{--c:#e9a15a;} body.theme-retro .sand{--c:#c9512c;} body.theme-retro .sage{--c:#5f8a63;} body.theme-retro .cd,body.theme-retro .ready:not(.has-cover) .ready-card{border:2px solid #3b2416;box-shadow:3px 3px 0 #3b2416;} body.theme-retro .ready h1{font-size:30px;letter-spacing:-.5px;} body.theme-travel .ready h1{font-size:34px;letter-spacing:-1px;} body.theme-travel .sky{--c:#4f9fd0;} body.theme-travel .sand{--c:#e0a13a;} body.theme-travel .sage{--c:#5f9a6e;} body.theme-minimal .ready h1{letter-spacing:-1.5px;} @media(min-width:700px){.lanes{margin-right:24px;} .ready-card{margin-left:24px;margin-right:24px;} .ready:not(.has-cover) .ready-card{margin:24px;} .ready h1{font-size:40px;} .hero{height:300px;}} .ready-at{display:inline-flex;align-items:center;gap:8px;height:44px;margin:4px 0 0 -6px;padding:0 14px 0 8px;border:0;border-radius:999px;background:transparent;color:var(--navy);font:700 14px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-at[hidden]{display:none;} .ready-at svg,.gl-pop svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.run-on .ready-at{visibility:hidden;} body.seekable .gl[data-t]{cursor:pointer;} .gl-pop{left:72px;z-index:6;display:inline-flex;align-items:center;gap:8px;height:44px;margin:0;padding:0 16px 0 12px;border:0;border-radius:999px;background:#10181d;color:#e9f1f5;font:700 14px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;box-shadow:0 0 0 1px #ffffff2e,0 6px 20px #0006;cursor:pointer;-webkit-tap-highlight-color:transparent;} .nowh.pv{background:#e8a33d;box-shadow:0 0 6px #e8a33d;} .nowh.pv::before{background:#e8a33d;} @media print{.ready-go,.ready-edit,.ready-sound,.ready-at{display:none;} .sheet.routine{padding-bottom:0;}}`
+            ? ` .sheet.routine{max-width:760px;padding:0 0 120px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;--ln:#8080803d;--chipbg:#80808024;--wash:#8080800d;--go:#3ecf8e;--go-ink:#08241a;} .sheet.routine *{box-sizing:border-box;} .ready{margin:0 0 4px;} .ready h1{margin:0;padding:0;max-width:none;text-align:left;font-size:32px;line-height:1.05;letter-spacing:-1.2px;} .ready .tagline{margin:6px 0 0;text-align:left;font-size:15px;line-height:1.3;} .hero{position:relative;height:232px;overflow:hidden;background:var(--chipbg);} .hero .pic.cover{position:absolute;inset:0;margin:0;height:100%;max-height:none;aspect-ratio:auto;} .hero .scrim{position:absolute;left:0;right:0;bottom:0;padding:70px 16px 14px;background:linear-gradient(transparent,#000d);pointer-events:none;} .hero .scrim h1{color:#fff;pointer-events:auto;text-shadow:0 1px 12px #0008;} .hero .scrim .tagline{color:#fffc;} .ready-card{margin:16px 16px 0;} .ready:not(.has-cover) .ready-card{margin:16px;padding:18px 16px 16px;border-radius:14px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));} .ready-kv{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:12px 0 0;font-size:14px;color:var(--blue);} .has-cover .ready-kv{margin-top:0;} .ready-kv b{font-size:22px;color:var(--navy);letter-spacing:-.5px;} .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0;} .chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;margin:0;padding:0 11px 0 7px;border:0;border-radius:999px;background:var(--chipbg);color:var(--navy);font:inherit;font-size:13px;line-height:1.2;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ck{display:grid;place-items:center;width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--blue);} .ck svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;visibility:hidden;} .chip.on .ck{background:var(--go);border-color:var(--go);color:var(--go-ink);} .chip.on .ck svg{visibility:visible;} .ready-notes{margin:10px 0 0;padding-left:18px;font-size:13px;color:var(--blue);} .ready-row{display:flex;gap:10px;margin:16px 0 2px;} .ready-go{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;gap:10px;height:56px;margin:0;border:0;border-radius:999px;background:var(--go);color:var(--go-ink);font:800 18px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;box-shadow:0 6px 22px #0003;-webkit-tap-highlight-color:transparent;} .ready-go svg{width:20px;height:20px;fill:currentColor;} .ready-go small{font-weight:600;font-size:15px;opacity:.8;} body.run-on .ready-go,body.run-on .ready-edit{visibility:hidden;} .ready-edit{flex:none;height:56px;margin:0;padding:0 18px;border:1px solid var(--ln);border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 15px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-edit[hidden]{display:none;} .lanes{position:relative;display:block;margin:18px 16px 0 0;} .lanes .rail{position:absolute;left:70px;top:0;bottom:0;width:2px;background:var(--ln);} .ly{position:absolute;} .w{left:80px;right:0;} .l0{left:80px;width:calc((100% - 86px) / 2);} .l1{left:calc(80px + (100% - 86px) / 2 + 6px);right:0;} .gl{left:0;width:64px;text-align:right;font:600 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:-.3px;color:var(--blue);white-space:nowrap;} .gl b{color:var(--navy);font-weight:700;} .gl[hidden]{display:none;} .cd{z-index:1;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));padding:8px 9px 8px 12px;overflow:hidden;color:var(--navy);text-align:left;--c:#5f8fb0;} .cd::before,.mini::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);} .sky{--c:#5f8fb0;} .sand{--c:#c08a44;} .sage{--c:#6f9a5e;} .cd-t{margin:0;padding-right:46px;font-size:14px;font-weight:700;line-height:1.2;letter-spacing:-.1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-d{margin:2px 0 0;padding-right:46px;font-size:12px;line-height:1.25;color:var(--blue);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-ft{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:auto;padding-top:6px;} .dur{flex:none;padding:4px 6px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:0;white-space:nowrap;} .cd-th{position:absolute;right:8px;top:8px;width:40px;height:40px;border-radius:8px;overflow:hidden;} .cd-th.icon,.mo-i,.rs-i{display:grid;place-items:center;color:var(--blue);} .cd-th.icon{background:var(--chipbg);} .cd-th.icon svg{width:22px;height:22px;fill:currentColor;} .icon img{width:100%;height:100%;object-fit:cover;} .cd.w{padding-top:7px;} .cd-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding-right:48px;min-width:0;} .cd.w .cd-t{flex:0 1 auto;min-width:0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd.w .dur{margin-left:auto;} .cd.w .cd-d{order:3;flex-basis:100%;min-width:0;margin:-2px 0 0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd .step-notes{margin:0;flex:none;order:1;} .cd.w .dur{order:2;} .cd .step-notes summary{padding:2px 7px;border-color:var(--ln);font-size:11px;font-weight:500;line-height:16px;letter-spacing:0;opacity:1;} .cd .step-notes[open]{order:4;flex-basis:100%;} .cd .step-notes ul{margin:4px 0 2px;padding-left:16px;font-size:13px;line-height:1.3;} .cd .map-link{font-size:10px;} .brk{position:absolute;left:-2px;right:-2px;height:34px;display:grid;place-items:center;background:var(--paper);z-index:1;} .brk::before,.brk::after{content:'';position:absolute;left:0;right:0;height:8px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M0 6.5 6 1.5 12 6.5' fill='none' stroke='%238a8a86' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x;} .brk::before{top:-4px;} .brk::after{bottom:-4px;} .brk span{padding:5px 9px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 12px/1 ui-monospace,Menlo,monospace;} .mini{position:relative;display:flex;align-items:center;gap:4px;flex:none;height:30px;margin:6px -5px 0 -8px;padding:0 4px 0 8px;border-radius:8px;border:1px solid var(--blue);background:var(--paper);font-size:11.5px;white-space:nowrap;overflow:hidden;box-shadow:0 -5px 0 -2px var(--ln),0 6px 14px #0003;cursor:pointer;} .mini b{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:600;} .mini .dur{margin-left:auto;padding:3px 4px;font-size:10px;} .mark{z-index:2;height:0;border-top:1px dashed var(--navy);cursor:pointer;} .mark span{position:absolute;right:6px;top:-10px;max-width:calc(100% - 12px);padding:1px 6px;border-radius:6px;border:1px solid var(--ln);background:var(--paper);color:var(--navy);font-size:12px;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .rs,.mo{z-index:1;display:flex;align-items:center;gap:8px;height:28px;padding:0 10px 0 12px;border-radius:7px;border:1px dashed var(--ln);background-color:var(--paper);color:var(--blue);font:600 12px/1 ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;cursor:pointer;} .rs-i svg,.mo-i svg{width:14px;height:14px;fill:currentColor;} .rs-i,.mo-i{width:14px;height:14px;flex:none;} .rs-t{text-transform:lowercase;} .rs-left:empty{display:none;} .mo{border-style:solid;color:var(--navy);font-family:inherit;font-size:13px;} .mo span{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--blue);font-weight:400;} .lsec{left:80px;right:0;display:flex;align-items:center;gap:8px;height:24px;color:var(--blue);font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;} .lsec em{font-style:normal;font-weight:600;letter-spacing:0;text-transform:none;font-family:ui-monospace,Menlo,monospace;} .lsec::after{content:'';flex:1;border-top:1px solid var(--ln);} .dn{left:80px;right:0;display:flex;align-items:center;gap:10px;height:28px;color:var(--blue);font-size:14px;font-weight:600;} .dn-ck{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:1px dashed var(--ln);} .dn-ck svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.live .cd,body.live .lsec[data-line]{cursor:pointer;} .run-on .cd.done,.run-on .rs.done,.run-on .mo.done,.run-on .mark.done{opacity:.42;} .lanes .cd.live{border:2px solid #3ecf8e99;padding:7px 8px 7px 11px;} .lanes .cd.live::after{content:'';position:absolute;left:0;top:0;width:5px;height:var(--fy,0px);max-height:100%;border-radius:0 0 3px 0;background:#3ecf8e;z-index:2;pointer-events:none;} .dur.lv{background:#3ecf8e;color:#08241a;font-variant-numeric:tabular-nums;} .brk[hidden]{display:none;} .cd.bk>.cd-row>.dur:not(.lv),.cd.bk>.cd-ft>.dur:not(.lv){display:none;} .cd-inl{display:none;} .cd-inl li{break-inside:avoid;margin:0 0 3px;}.lanes .cd.live .cd-d{display:block;-webkit-line-clamp:none;white-space:normal;} .lanes .cd.upnext{border-style:dashed;border-color:var(--c);} .lanes .rs.live{align-items:flex-end;padding-bottom:8px;border:2px solid #3ecf8e;background-color:var(--paper);background-image:linear-gradient(#3ecf8e1c,#3ecf8e1c);color:var(--navy);} .nowh{position:absolute;left:66px;right:-8px;height:2px;z-index:0;background:var(--navy);box-shadow:0 0 6px var(--navy);pointer-events:none;} .nowh::before{content:'';position:absolute;left:0;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--navy);} .gl.gnow{color:var(--navy);font-weight:700;} .nowh.pz{background:#9fb3bf;box-shadow:none;} .run-fin .cd,.run-fin .rs,.run-fin .mo,.run-fin .mark,.run-fin .lsec{opacity:.42;} .run-fin .dn{color:var(--navy);font-weight:700;} .run-fin .dn small{font-size:13px;font-weight:500;color:var(--blue);} .run-fin .dn-ck{background:#3ecf8e;border:0;color:#08241a;} .nowh.pz::before{background:#9fb3bf;} .upk{flex:none;order:2;align-self:center;padding:3px 5px;border:1px solid var(--ln);border-radius:5px;color:var(--navy);font:700 9.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;} .upk-len{display:none;} .lanes .cd.grow{min-height:128px;} .cd.grow .upk{display:inline-block;align-self:flex-start;margin:2px 0 8px;} .cd.grow .upk-len{display:inline;} .cd.grow .cd-row{display:block;padding-right:118px;} .cd.grow .dur{display:none;} .cd.grow .cd-t{padding-right:118px;font-size:17px;white-space:normal;} .cd.grow .cd-row .cd-t{padding-right:0;} .cd.grow .cd-d{padding-right:118px;white-space:normal;} .cd.grow .cd-row .cd-d{padding-right:0;margin-top:2px;} .cd.grow .cd-th{width:110px;height:110px;border-radius:10px;} .cd.grow .cd-th.icon svg{width:56px;height:56px;} body.run-cols .ready{display:none;} body.run-cols .sheet.routine{max-width:none;margin:0;padding:0 32px 24px;--gut:clamp(100px,calc(6.4 * var(--vw,1vw)),128px);--th:clamp(40px,min(calc(5 * var(--vw,1vw)),calc(8 * var(--vh,1vh))),96px);--thw:clamp(40px,min(calc(3.6 * var(--vw,1vw)),calc(5.76 * var(--vh,1vh))),72px);} body.run-cols .lanes{margin:28px 0 0;} body.run-cols .lanes .rail{left:calc(var(--gut) - 10px);} body.run-cols .w,body.run-cols .lsec,body.run-cols .dn{left:var(--gut);} body.run-cols .l0{left:var(--gut);width:calc((100% - var(--gut) - 6px) / 2);} body.run-cols .l1{left:calc(var(--gut) + (100% - var(--gut) - 6px) / 2 + 6px);} body.run-cols .gl{width:calc(var(--gut) - 18px);font-size:clamp(13px,calc(.75 * var(--vw,1vw)),15px);} body.run-cols .nowh{left:calc(var(--gut) - 14px);} body.run-cols .gl-pop{left:calc(var(--gut) - 8px);} body.run-cols .dn{font-size:16px;} body.run-cols .lsec{font-size:12px;} body.run-cols .cd{min-height:calc(var(--th) + 26px);border-radius:12px;padding:12px 14px 12px 18px;} body.run-cols .cd.w{min-height:calc(var(--thw) + 26px);} body.run-cols .lanes .cd.live{padding:11px 13px 11px 17px;} body.run-cols .cd::before{width:5px;} body.run-cols .cd-t{font-size:clamp(14px,min(calc(1.4 * var(--vw,1vw)),calc(2.24 * var(--vh,1vh))),24px);letter-spacing:-.3px;padding-right:calc(var(--th) + 12px);} body.run-cols .cd-d{margin-top:3px;font-size:clamp(12px,min(calc(1.05 * var(--vw,1vw)),calc(1.68 * var(--vh,1vh))),17px);line-height:1.3;padding-right:calc(var(--th) + 12px);} body.run-cols .cd-th{right:12px;top:12px;width:var(--th);height:var(--th);border-radius:10px;} body.run-cols .cd.w .cd-th{width:var(--thw);height:var(--thw);} body.run-cols .cd-th.icon svg{width:48%;height:48%;} body.run-cols .cd-row{gap:4px 8px;padding-right:calc(var(--thw) + 12px);} body.run-cols .cd-ft{gap:8px;padding-top:8px;} body.run-cols .dur{padding:5px 8px;font-size:13px;} body.run-cols .mini{height:34px;font-size:13px;} body.run-cols .mini .dur{padding:3px 5px;font-size:11px;} body.run-cols .cd .step-notes summary{padding:3px 10px;font-size:13px;line-height:18px;} body.run-cols .cd .step-notes ul{font-size:14px;} body.run-cols .upk{padding:4px 6px;font-size:10.5px;} body.run-cols .mark span{top:-12px;font-size:14px;line-height:20px;} .tk{position:absolute;left:5px;width:10px;height:0;border-top:1px solid var(--blue);opacity:.75;z-index:1;pointer-events:none;} .tk b{position:absolute;left:14px;top:-7px;color:var(--blue);font:600 clamp(11px,calc(.72 * var(--vw,1vw)),13px)/1 ui-monospace,Menlo,monospace;letter-spacing:0;white-space:nowrap;} body.run-cols .cd.w.has-inl:not(.live){display:grid;grid-template-columns:minmax(0,36%) minmax(0,1fr) auto auto;grid-template-rows:auto 1fr;align-content:start;padding-right:calc(var(--thw) + 26px);} body.run-cols .cd.w.has-inl:not(.live)>.cd-row{display:contents;} body.run-cols .cd.w.has-inl:not(.live) .cd-t{grid-area:1/1;} body.run-cols .cd.w.has-inl:not(.live) .cd-d{grid-area:2/1;align-self:start;} body.run-cols .cd.w.has-inl:not(.live) .step-notes{display:none;} body.run-cols .cd.w.has-inl:not(.live) .upk{grid-area:1/3;align-self:start;margin:1px 8px 0 0;} body.run-cols .cd.w.has-inl:not(.live) .dur{grid-area:1/4;align-self:start;margin:0;} body.run-cols .cd.w.has-inl:not(.live)>.cd-inl{display:block;grid-area:1/2/3/3;align-self:start;columns:170px 3;column-gap:22px;margin:2px 16px 0 22px;padding:0 0 0 16px;color:var(--navy);font-size:clamp(13px,calc(.95 * var(--vw,1vw)),15px);line-height:1.3;}.ready-sound{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0;} .ready-sound[hidden]{display:none;} .ready-tg{display:flex;flex:1 1 auto;min-width:0;align-items:center;gap:6px;height:40px;margin:0;padding:0 6px 0 8px;border:1px solid var(--ln);border-radius:12px;background:var(--chipbg);color:var(--navy);font:700 13.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-tg svg{width:19px;height:19px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} .ready-sw{position:relative;flex:none;width:34px;height:20px;margin-left:auto;border-radius:10px;background:var(--ln);} .ready-sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004;transition:left .15s;} .ready-tg[aria-pressed="true"] .ready-sw{background:var(--go);} .ready-tg[aria-pressed="true"] .ready-sw::after{left:16px;} .sheet.routine footer{margin-top:10px;} body.theme-future .sheet.routine{--ln:#29e2ff2e;--chipbg:#0f2a4a;--wash:#ffffff06;} body.theme-future .sky{--c:#29e2ff;} body.theme-future .sand{--c:#ff4fd8;} body.theme-future .sage{--c:#5dffb8;} body.theme-future .ready:not(.has-cover) .ready-card{border-color:#29e2ff55;background:linear-gradient(160deg,#12305a88,#0a0f1c);box-shadow:0 0 30px -12px #29e2ff;} body.theme-future .ready h1{font-size:27px;letter-spacing:4px;line-height:1.1;} body.theme-future .ready .tagline{font-size:11px;letter-spacing:2px;} body.theme-future .ready-kv{color:#8fb8d8;font-size:13px;} body.theme-future .ready-kv b{color:#fff;} body.theme-future .chip{background:#ffffff0a;border:1px solid #29e2ff44;} body.theme-future .lanes .rail{background:linear-gradient(#29e2ff,#ff4fd8);box-shadow:0 0 10px #29e2ff66;} body.theme-future .cd{border-color:var(--c);background-color:#0c1322;box-shadow:0 0 14px -8px var(--c);} body.theme-future .cd-t{color:#fff;} body.theme-future .dur{background:transparent;border:1px solid var(--c);color:#fff;} body.theme-future .cd-th.icon{background:#ffffff0a;border:1px solid var(--c);color:#fff;} body.theme-future .rs{border-color:#5dffb855;color:#9fd8c0;} body.theme-future .gl{color:#8fb8d8;} body.theme-code .sheet.routine{font-family:inherit;--ln:#30363d;--chipbg:#161b22;--wash:#161b22;} body.theme-code .sky{--c:#79c0ff;} body.theme-code .sand{--c:#ffa657;} body.theme-code .sage{--c:#7ee787;} body.theme-code .cd{border-radius:6px;} body.theme-code .cd-t{color:var(--c);} body.theme-code .ready h1{font-size:26px;letter-spacing:-.5px;} body.theme-retro .sheet.routine{--ln:#3b241699;--chipbg:#f0b45a55;--wash:#fbf1de00;} body.theme-retro .sky{--c:#e9a15a;} body.theme-retro .sand{--c:#c9512c;} body.theme-retro .sage{--c:#5f8a63;} body.theme-retro .cd,body.theme-retro .ready:not(.has-cover) .ready-card{border:2px solid #3b2416;box-shadow:3px 3px 0 #3b2416;} body.theme-retro .ready h1{font-size:30px;letter-spacing:-.5px;} body.theme-travel .ready h1{font-size:34px;letter-spacing:-1px;} body.theme-travel .sky{--c:#4f9fd0;} body.theme-travel .sand{--c:#e0a13a;} body.theme-travel .sage{--c:#5f9a6e;} body.theme-minimal .ready h1{letter-spacing:-1.5px;} @media(min-width:700px){.lanes{margin-right:24px;} .ready-card{margin-left:24px;margin-right:24px;} .ready:not(.has-cover) .ready-card{margin:24px;} .ready h1{font-size:40px;} .hero{height:300px;}} .ready-at{display:inline-flex;align-items:center;gap:8px;height:44px;margin:4px 0 0 -6px;padding:0 14px 0 8px;border:0;border-radius:999px;background:transparent;color:var(--navy);font:700 14px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-at[hidden]{display:none;} .ready-at svg,.gl-pop svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.run-on .ready-at{visibility:hidden;} body.seekable .gl[data-t]{cursor:pointer;} .gl-pop{left:72px;z-index:6;display:inline-flex;align-items:center;gap:8px;height:44px;margin:0;padding:0 16px 0 12px;border:0;border-radius:999px;background:#10181d;color:#e9f1f5;font:700 14px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;box-shadow:0 0 0 1px #ffffff2e,0 6px 20px #0006;cursor:pointer;-webkit-tap-highlight-color:transparent;} .nowh.pv{background:#e8a33d;box-shadow:0 0 6px #e8a33d;} .nowh.pv::before{background:#e8a33d;} @media print{.ready-go,.ready-edit,.ready-sound,.ready-at{display:none;} .sheet.routine{padding-bottom:0;}}`
             : "";
           const pictureCss = pictured
             ? ` .pic{display:block;overflow:hidden;background:var(--sky);-webkit-tap-highlight-color:transparent;} .pic img{display:block;width:100%;height:100%;object-fit:cover;} .pic.cover{margin:-30px -34px 22px;aspect-ratio:16/7;max-height:380px;} .event-body.has-pic{min-height:80px;padding-right:86px;} .pic.thumb{position:absolute;right:7px;top:50%;width:64px;height:64px;transform:translateY(-50%);border-radius:12px;box-shadow:0 1px 4px #0002;} .event-body.has-pic .until{right:84px;} .pic-view{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);background:#000000eb;cursor:zoom-out;} .pic-view img{max-width:100vw;max-height:100vh;max-height:100dvh;object-fit:contain;} @media(max-width:850px){.pic.cover{margin:-25px -22px 18px;}} @media(max-width:580px){.pic.cover{margin:-27px -14px 16px;aspect-ratio:16/10;} .event-body.has-pic{min-height:76px;padding-right:64px;} .pic.thumb{right:6px;width:52px;height:52px;border-radius:10px;} .event-body.has-pic .until{right:62px;}} @media print{.pic.cover{margin-top:0;}}`

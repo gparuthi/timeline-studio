@@ -92,7 +92,7 @@ test("initialize negotiates the version and carries the instructions", async () 
   assert.equal(known.result.protocolVersion, "2025-06-18", "a version we speak is echoed");
   assert.deepEqual(known.result.capabilities, { tools: { listChanged: false } });
   assert.equal(known.result.serverInfo.name, "timeline-studio");
-  assert.equal(known.result.serverInfo.version, "1.2.0", "bumped for control_run seek, so clients that cache by version refetch tools");
+  assert.equal(known.result.serverInfo.version, "1.2.1", "bumped for the picture guidance in upload_image (1.2.0 was control_run seek), so clients that cache by version refetch tools");
   assert.match(known.result.instructions, /Pick the kind first/);
   assert.match(known.result.instructions, /format_guide/);
   assert.match(known.result.instructions, /\+45s \| Plank/);
@@ -153,6 +153,9 @@ test("format_guide comes from llms.txt, per kind, without the #text= link recipe
   assert.match(recipe, /## Routines: workouts and recipes/);
   assert.match(recipe, /15:00 \+25m {3}\| Roast/);
   assert.doesNotMatch(recipe, /### Several days|### Places and links/);
+  // Pictures (§9): one per step, never a collage, the whole dish as the cover.
+  assert.match(recipe, /One picture per step, of that step/);
+  assert.match(recipe, /Never a collage or grid of several steps in one picture/);
   // Every section of llms.txt but the link recipe is in the whole guide.
   const all = formatGuide(LLMS);
   for (const s of sections(LLMS)) if (s.level > 1 && s.title !== "What to send back") assert.ok(all.includes(s.body), s.title);
