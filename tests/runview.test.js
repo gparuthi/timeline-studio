@@ -82,10 +82,11 @@ test("up next: the next move to start, never a rest or a moment", () => {
   assert.equal(core.upNext(workout, 590), null);
 });
 
-test("the ⋯ menu: status, Back / Skip / Stop, the switches, Edit; Back and Skip close it", () => {
+test("the ⋯ menu: status, Back / Skip / Stop, Jump…, the switches, Edit; Back, Skip and Jump close it", () => {
   const items = core.menu();
-  assert.deepEqual(items.map((i) => i.id), ["status", "back", "skip", "stop", "beeps", "announce", "edit"]);
-  assert.deepEqual(items.filter((i) => i.closes).map((i) => i.id), ["back", "skip", "edit"]);
+  assert.deepEqual(items.map((i) => i.id), ["status", "back", "skip", "stop", "jump", "beeps", "announce", "edit"]);
+  assert.deepEqual(items.filter((i) => i.closes).map((i) => i.id), ["back", "skip", "jump", "edit"]);
+  assert.equal(items.find((i) => i.id === "jump").label, "Jump…");
   assert.deepEqual(items.filter((i) => i.toggle).map((i) => i.label), ["Beeps", "Announce steps"]);
   assert.equal(items.find((i) => i.id === "stop").confirm, true, "Stop asks first");
   // The page builds the menu in that order.

@@ -92,6 +92,7 @@ test("initialize negotiates the version and carries the instructions", async () 
   assert.equal(known.result.protocolVersion, "2025-06-18", "a version we speak is echoed");
   assert.deepEqual(known.result.capabilities, { tools: { listChanged: false } });
   assert.equal(known.result.serverInfo.name, "timeline-studio");
+  assert.equal(known.result.serverInfo.version, "1.2.0", "bumped for control_run seek, so clients that cache by version refetch tools");
   assert.match(known.result.instructions, /Pick the kind first/);
   assert.match(known.result.instructions, /format_guide/);
   assert.match(known.result.instructions, /\+45s \| Plank/);
@@ -124,7 +125,10 @@ test("tools/list: six tools with schemas, descriptions and annotations", async (
   assert.equal(by.create_timeline.annotations.readOnlyHint, false);
   assert.equal(by.update_timeline.annotations.destructiveHint, false);
   assert.deepEqual(by.create_timeline.inputSchema.required, ["text"]);
-  assert.deepEqual(by.control_run.inputSchema.properties.op.enum, ["start", "pause", "resume", "stop", "status"]);
+  assert.deepEqual(by.control_run.inputSchema.properties.op.enum, ["start", "pause", "resume", "stop", "seek", "status"]);
+  assert.match(by.control_run.description, /seek sets the run to where the person really is/);
+  assert.equal(by.control_run.inputSchema.properties.to.type, "string");
+  assert.equal(by.control_run.inputSchema.properties.step.type, "string");
 });
 
 test("format_guide comes from llms.txt, per kind, without the #text= link recipe", async () => {
@@ -270,6 +274,66 @@ test("control_run drives a routine's RunRoom and refuses a day plan", async () =
   assert.equal(refused.isError, true);
   assert.match(refused.content[0].text, /day plan/);
   assert.equal((await call("control_run", { name: "core-test", op: "explode" })).isError, true);
+});
+
+test("control_run seek: to as M:SS, H:MM:SS, seconds or +/- from now, or a step; clamped; paused stays paused", async () => {
+  const { call, advance } = setup();
+  const recipe = (await call("create_timeline", { text: RECIPE, name: "pan-seek" })).structuredContent;
+  const seek = async (args) => (await call("control_run", { name: recipe.name, op: "seek", ...args })).structuredContent;
+  // No run going: seek starts one at that point ("I'm 3 minutes in").
+  let at = await seek({ to: "3:00" });
+  assert.equal(at.state, "running");
+  assert.equal(at.elapsed, "3:00");
+  assert.equal(at.jumped_from, null);
+  assert.equal(at.jumped_to, "3:00");
+  assert.equal(at.current_step.title, "Chop");
+  advance(22 * 60 * 1000); // 25:00
+  at = await seek({ to: "3:00" });
+  assert.equal(at.jumped_from, "25:00");
+  assert.equal(at.elapsed, "3:00");
+  const text = (await call("control_run", { name: recipe.name, op: "seek", to: "+30s" })).content[0].text;
+  assert.match(text, /^Jumped from 3:00 to 3:30\. Running\. 3:30 of 45 min\. Now: Chop/);
+  assert.equal((await seek({ to: "-2m" })).elapsed, "1:30");
+  assert.equal((await seek({ to: "180" })).elapsed, "3:00");
+  assert.equal((await seek({ to: 600 })).elapsed, "10:00", "a number is seconds");
+  assert.equal((await seek({ to: "0:12:30" })).elapsed, "12:30");
+  advance(1000); // the room takes at most 10 ops a second
+  assert.equal((await seek({ to: "-2h" })).elapsed, "0:00", "clamped at the start");
+  assert.equal((await seek({ step: "Roast" })).elapsed, "15:00");
+  assert.equal((await seek({ step: "season" })).elapsed, "10:00", "a unique start of a title");
+  assert.equal((await seek({ step: "13" })).elapsed, "40:00", "a line number");
+  // Paused stays paused, at the new point.
+  await call("control_run", { name: recipe.name, op: "pause" });
+  at = await seek({ to: "20:00" });
+  assert.equal(at.state, "paused");
+  advance(60_000);
+  assert.equal((await call("control_run", { name: recipe.name, op: "status" })).structuredContent.elapsed, "20:00");
+  await call("control_run", { name: recipe.name, op: "resume" });
+  // To the end: the run is over.
+  assert.equal((await seek({ to: "2:00:00" })).state, "finished");
+});
+
+test("control_run seek errors: a missing or double target, a bad time, an unknown or ambiguous step", async () => {
+  const { call } = setup();
+  const workout = (await call("create_timeline", { text: WORKOUT, name: "core-seek" })).structuredContent;
+  const fails = async (args, pattern) => {
+    const result = await call("control_run", { name: workout.name, ...args });
+    assert.equal(result.isError, true, JSON.stringify(args));
+    assert.match(result.content[0].text, pattern);
+  };
+  await fails({ op: "seek" }, /seek needs to \(such as "3:00", "180" or "\+30s"\) or step/);
+  await fails({ op: "seek", to: "1:00", step: "Plank" }, /Give to or step, not both/);
+  await fails({ op: "seek", to: "soon" }, /“soon” is not a time in the run/);
+  await fails({ op: "seek", to: "5:99" }, /not a time in the run/);
+  await fails({ op: "seek", step: "Burpees" }, /No step is called “Burpees”\. Steps: Jog in place \(line 8\)/);
+  await fails({ op: "seek", step: "Side plank" }, /matches more than one step \(Side plank L, Side plank R\)/);
+  await fails({ op: "seek", step: "Rest" }, /More than one step is called “Rest”: give its line number/);
+  await fails({ op: "seek", step: "3" }, /Line 3 is not a step/);
+  await fails({ op: "pause", to: "1:00" }, /to and step are only for op seek/);
+  // Nothing was started by the failed calls.
+  assert.equal((await call("control_run", { name: workout.name, op: "status" })).structuredContent.state, "idle");
+  // A rest by its line is fine.
+  assert.equal((await call("control_run", { name: workout.name, op: "seek", step: "16" })).structuredContent.elapsed, "2:45");
 });
 
 test("batches, notifications and malformed messages", async () => {

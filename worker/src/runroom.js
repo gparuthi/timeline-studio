@@ -3,7 +3,9 @@
 //   GET  /run/<name>        WebSocket (hibernation API). The server sends
 //                           { state, now } on connect and after every change;
 //                           a client sends { op: "start" | "pause" | "resume"
-//                           | "seek" | "stop", shiftMs? }, or { op: "ping", t }
+//                           | "seek" | "stop", shiftMs? } (a seek's is the
+//                           new shift; a start's, optional, starts partway
+//                           in), or { op: "ping", t }
 //                           which is answered { pong: t, now } so the client
 //                           can estimate its clock skew from the round trip.
 //   GET  /run/<name>.json   { state, now }: the polling fallback for a page
@@ -34,13 +36,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const MAX_SOCKETS = 20;
 export const MAX_OPS_PER_SECOND = 10;
 
-// A well-formed op, or null.
+// A well-formed op, or null. A seek carries the run's new shift; a start
+// may carry one too ("Start at 3:00", docs/routines.md §8), at most a day.
 export function checkOp(op) {
   if (!op || typeof op !== "object" || !OPS.has(op.op)) return null;
-  if (op.op !== "seek") return { op: op.op };
+  if (op.op === "start" && (op.shiftMs === undefined || op.shiftMs === null || op.shiftMs === 0)) return { op: "start" };
+  if (op.op !== "seek" && op.op !== "start") return { op: op.op };
   const shiftMs = Number(op.shiftMs);
   if (!Number.isFinite(shiftMs) || Math.abs(shiftMs) > DAY_MS) return null;
-  return { op: "seek", shiftMs: Math.round(shiftMs) };
+  if (op.op === "start" && shiftMs < 0) return null;
+  return { op: op.op, shiftMs: Math.round(shiftMs) };
 }
 
 export class RunRoom {

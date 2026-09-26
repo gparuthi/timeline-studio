@@ -31,14 +31,14 @@ const LEGACY_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 const MODERN_VERSIONS = ["2026-07-28"];
 const META_VERSION = "io.modelcontextprotocol/protocolVersion";
 const META_SERVER = "io.modelcontextprotocol/serverInfo";
-const SERVER_INFO = { name: "timeline-studio", title: "Timeline Studio", version: "1.0.0", websiteUrl: "https://tl.gaup.uk/" };
+const SERVER_INFO = { name: "timeline-studio", title: "Timeline Studio", version: "1.2.0", websiteUrl: "https://tl.gaup.uk/" };
 const MAX_TEXT = 100 * 1024; // bytes of timeline text
 const MAX_BODY = 2.5 * 1024 * 1024; // a request: room for one base64 picture (upload_image)
 const MAX_PAYLOAD = 64 * 1024; // what the studio's own save (PUT) accepts
 const NAME = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
 const HOSTS = new Set(["tl.gaup.uk", "www.tl.gaup.uk"]);
 const DATA_URI = /\bdata:[a-z]+\/[a-z0-9.+-]+[;,]/i;
-const OPS = ["start", "pause", "resume", "stop", "status"];
+const OPS = ["start", "pause", "resume", "stop", "seek", "status"];
 const KINDS = ["day", "trip", "workout", "recipe"];
 
 export const INSTRUCTIONS = `Timeline Studio turns a small plain-text format into a timeline page with a short link (https://tl.gaup.uk/<name>) that works on any phone.
@@ -48,7 +48,7 @@ export const INSTRUCTIONS = `Timeline Studio turns a small plain-text format int
 - create_timeline checks and saves the text and returns its link. To change a timeline, call get_timeline, edit the text (keep every line you do not need to change exactly as it was), then update_timeline with the version you read. On a conflict, redo your change on the current text it returns.
 - If a call says "Line N: …", fix that line and call again.
 - Always give the person the returned link as a Markdown link. Do not paste the whole text unless they ask.
-- control_run starts, pauses, resumes, stops or reads the live run of a routine; every phone or TV with the link open follows it.
+- control_run starts, pauses, resumes, stops, seeks or reads the live run of a routine; every phone or TV with the link open follows it. "I'm 3 minutes in" is op seek with to "3:00".
 - upload_image stores a picture (base64 or an https URL) and can put it on a step or as the cover in one call. Send JPEG or WebP, at most about 1280 px on the long edge.`;
 
 const nameProperty = {
@@ -126,12 +126,20 @@ export const TOOLS = [
     name: "control_run",
     title: "Control a routine's run",
     description:
-      "Starts, pauses, resumes or stops the live run of a routine (a workout or recipe), or reads where it is (status). Every phone, tablet or TV with the timeline's link open follows the run with its countdown and beeps. Only for routines, not day plans. start begins from the first step (it does nothing while a run is already going; stop first to restart).",
+      "Starts, pauses, resumes, stops or seeks the live run of a routine (a workout or recipe), or reads where it is (status). Every phone, tablet or TV with the timeline's link open follows the run with its countdown and beeps. Only for routines, not day plans. start begins from the first step (it does nothing while a run is already going; stop first to restart). seek sets the run to where the person really is, with exactly one of to or step: \"I'm 3 minutes in\" is to \"3:00\", \"skip ahead 30 seconds\" is to \"+30s\", \"go back to the plank\" is step \"Plank\". A paused run stays paused; with no run going, seek starts one at that point. The point is kept within the routine (0:00 to its end).",
     inputSchema: {
       type: "object",
       properties: {
         name: nameProperty,
-        op: { type: "string", enum: OPS, description: "start, pause, resume, stop, or status to read where the run is." },
+        op: { type: "string", enum: OPS, description: "start, pause, resume, stop, seek (with to or step), or status to read where the run is." },
+        to: {
+          type: "string",
+          description: 'For seek: where to go, as elapsed time from Start ("3:00", "1:02:03", or seconds such as "180") or from where the run is now ("+30s", "-2m", "+1:30").',
+        },
+        step: {
+          type: "string",
+          description: 'For seek, instead of to: go to the start of this step, by its title (case-insensitive; an exact title wins, then a unique start of one) or its 1-based line number in the text, such as "7".',
+        },
       },
       required: ["name", "op"],
       additionalProperties: false,
@@ -273,7 +281,7 @@ async function method(name, params, context, modern) {
         supportedVersions: [...MODERN_VERSIONS, ...LEGACY_VERSIONS],
         capabilities: { tools: {} },
         instructions: INSTRUCTIONS,
-        ttlMs: 3600000,
+        ttlMs: 300000,
         cacheScope: "public",
       };
     case "notifications/initialized":
@@ -281,7 +289,7 @@ async function method(name, params, context, modern) {
     case "ping":
       return {};
     case "tools/list":
-      return modern ? { tools: TOOLS, ttlMs: 3600000, cacheScope: "public" } : { tools: TOOLS };
+      return modern ? { tools: TOOLS, ttlMs: 300000, cacheScope: "public" } : { tools: TOOLS };
     case "tools/call": {
       const tool = TOOLS.find((t) => t.name === params.name);
       if (!tool) throw new RpcError(-32602, `Unknown tool: ${params.name}. Tools: ${TOOLS.map((t) => t.name).join(", ")}`);
@@ -413,15 +421,37 @@ const CALLS = {
       if (!response.ok) throw new ToolError(body.error || "The run did not answer.");
       return body;
     };
+    const core = TimelineText.runCore();
+    const hasTo = args.to !== undefined && args.to !== null && String(args.to).trim() !== "",
+      hasStep = args.step !== undefined && args.step !== null && String(args.step).trim() !== "";
+    if (op !== "seek" && (hasTo || hasStep)) throw new ToolError("to and step are only for op seek.");
+    if (op === "seek" && hasTo === hasStep)
+      throw new ToolError(hasTo ? "Give to or step, not both." : 'seek needs to (such as "3:00", "180" or "+30s") or step (a step\'s title or line number).');
+    const send = async (body) => read(await stub.fetch(new Request("https://run/op", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } })));
     let room = await read(await stub.fetch(new Request("https://run/state")));
     let note = "";
-    if (op !== "status") {
+    let jumped = null;
+    if (op === "seek") {
+      // One op: a seek on the run's own clock (a paused run stays paused),
+      // or with no run going a start that begins at that point.
+      const total = core.end(steps),
+        state = room.state || null,
+        now = typeof room.now === "number" ? room.now : Date.now(),
+        e = state ? Math.min(total, Math.max(0, core.elapsedMs(state, now) / 1000)) : 0;
+      let target;
+      try {
+        target = hasStep ? core.seekTarget(core.stepFor(steps, typeof args.step === "number" ? args.step : String(args.step)).at, e, total) : core.seekTarget(typeof args.to === "number" ? args.to : String(args.to), e, total);
+      } catch (error) {
+        throw new ToolError(error.message);
+      }
+      jumped = { from: state ? Math.floor(e) : null, to: target };
+      room = await send(core.jumpOp(state, now, target));
+    } else if (op !== "status") {
       const before = where(room, steps);
       if (op === "start" && room.state && before.state !== "finished") note = "A run was already going, so it was left as it is (stop it first to start over).";
-      else room = await read(await stub.fetch(new Request("https://run/op", { method: "POST", body: JSON.stringify({ op }), headers: { "content-type": "application/json" } })));
+      else room = await send({ op });
     }
     const at = where(room, steps);
-    const core = TimelineText.runCore();
     const structured = {
       url,
       name,
@@ -432,9 +462,11 @@ const CALLS = {
       total: core.total(core.end(steps)),
       current_step: at.current,
       next_step: at.next,
+      ...(jumped ? { jumped_from: jumped.from === null ? null : core.clock(jumped.from), jumped_to: core.clock(jumped.to) } : {}),
       ...(note ? { note } : {}),
     };
     const parts = [
+      jumped ? (jumped.from === null ? `Started at ${core.clock(jumped.to)}.` : `Jumped from ${core.clock(jumped.from)} to ${core.clock(jumped.to)}.`) : "",
       { idle: "Not running.", running: "Running.", paused: "Paused.", finished: "Finished." }[at.state],
       at.state === "idle" ? `It takes ${structured.total}.` : `${structured.elapsed} of ${structured.total}.`,
       at.current ? `Now: ${at.current.title}${at.current.left ? ` (${at.current.left} left)` : ""}.` : "",

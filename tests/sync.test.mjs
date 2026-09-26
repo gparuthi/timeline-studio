@@ -34,6 +34,11 @@ test("ops are checked before they reach the room", () => {
   assert.deepEqual(checkOp({ op: "start", runId: "x" }), { op: "start" });
   assert.deepEqual(checkOp({ op: "seek", shiftMs: "1500.4" }), { op: "seek", shiftMs: 1500 });
   for (const bad of [null, "start", {}, { op: "explode" }, { op: "seek" }, { op: "seek", shiftMs: 1e12 }, { op: "ping" }]) assert.equal(checkOp(bad), null);
+  // "Start at 3:00" (docs/routines.md §8): a start may carry a shift, never a negative one.
+  assert.deepEqual(checkOp({ op: "start", shiftMs: 180000 }), { op: "start", shiftMs: 180000 });
+  assert.deepEqual(checkOp({ op: "start", shiftMs: 0 }), { op: "start" });
+  for (const bad of [{ op: "start", shiftMs: -1000 }, { op: "start", shiftMs: "soon" }, { op: "start", shiftMs: 1e12 }]) assert.equal(checkOp(bad), null);
+  assert.deepEqual(checkOp({ op: "pause", shiftMs: 5 }), { op: "pause" }, "other ops drop it");
 });
 
 test("the room applies ops on its own clock, keeps the state and tells every page", async () => {
@@ -61,6 +66,28 @@ test("the room applies ops on its own clock, keeps the state and tells every pag
   await instance.webSocketMessage(b, JSON.stringify({ op: "stop" }));
   assert.equal(data.has("state"), false);
   assert.equal(a.sent.at(-1).state, null, "stop ends it everywhere");
+});
+
+test("a jump is one seek, and every page follows it; Start at is one start already in", async () => {
+  const core = TimelineText.runCore();
+  let now = 2_000_000;
+  const { instance, socket } = room(() => now);
+  const phone = socket(),
+    tv = socket();
+  await instance.webSocketMessage(phone, JSON.stringify(core.jumpOp(null, now, 180)));
+  const started = tv.sent.at(-1);
+  assert.equal(core.elapsedMs(started.state, started.now), 180_000, "the TV starts at 3:00 too");
+  now += 22 * 60 * 1000; // 25:00 on the room's clock
+  const before = tv.sent.length;
+  await instance.webSocketMessage(phone, JSON.stringify(core.jumpOp(started.state, now, 180)));
+  assert.equal(tv.sent.length, before + 1, "one op, one broadcast");
+  const moved = tv.sent.at(-1);
+  assert.equal(core.elapsedMs(moved.state, moved.now), 180_000, "the TV follows to 3:00");
+  assert.equal(moved.state.runId, started.state.runId, "the same run");
+  // Undo from the TV puts both back.
+  await instance.webSocketMessage(tv, JSON.stringify(core.undoOp(started.state.shiftMs)));
+  const undone = phone.sent.at(-1);
+  assert.equal(core.elapsedMs(undone.state, undone.now), 25 * 60 * 1000);
 });
 
 // A fake Durable Object namespace whose stubs are RunRooms.

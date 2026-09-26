@@ -1093,9 +1093,14 @@
         label.innerHTML = "<b>now</b>";
         lanes.append(line, label);
       }
-      const paused = run.running === false;
+      // A jump being chosen (§8) moves the line to the landing point,
+      // labelled with its time.
+      const preview = !!run.preview,
+        paused = !preview && run.running === false,
+        word = preview ? runCore.clock(e) : paused ? "paused" : "now";
       line.classList.toggle("pz", paused);
-      if (label.textContent !== (paused ? "paused" : "now")) label.innerHTML = paused ? "<b>paused</b>" : "<b>now</b>";
+      line.classList.toggle("pv", preview);
+      if (label.textContent !== word) label.innerHTML = `<b>${word}</b>`;
       line.style.top = y - 1 + "px";
       label.style.top = y - 5 + "px";
       lanes.querySelectorAll(".gl[data-t]").forEach((el) => (el.hidden = el.dataset.hidden === "1" || Math.abs(parseFloat(el.style.top) - (y - 5)) < 13));
@@ -1105,8 +1110,9 @@
       // the top live card (or, in a rest or a gap, the rest and the move up
       // next) sits just under the run header; with nothing live, the now
       // line does. In two columns the now line goes a third of the way
-      // down the lanes.
-      const key2 = (cols ? "c:" : "") + (liveSteps.map((el) => el.dataset.i).join(",") || "next:" + (upcoming ? upcoming.dataset.i : ""));
+      // down the lanes. A jump, and the Jump panel opening or closing
+      // (run.follow), follows again.
+      const key2 = (cols ? "c:" : "") + (run.follow || 0) + ":" + (liveSteps.map((el) => el.dataset.i).join(",") || "next:" + (upcoming ? upcoming.dataset.i : ""));
       if (key2 === followed) return;
       followed = key2;
       const tops = liveSteps.map((el) => parseFloat(el.style.top)).concat(upcoming ? [parseFloat(upcoming.style.top)] : []),
@@ -1122,7 +1128,8 @@
     function headerInset(run) {
       if (run.cols) return 0;
       const header = doc.querySelector(".run-doc.run-top");
-      if (header && !header.hidden) return header.getBoundingClientRect().height;
+      // run.inset counts the Jump panel under the header while it is open.
+      if (header && !header.hidden) return Math.max(header.getBoundingClientRect().height, run.inset || 0);
       return run.inset || 0;
     }
     const onRun = (run) => {
@@ -1197,11 +1204,70 @@
       event.stopPropagation();
       post({ type: "timeline:edit", pane: true });
     };
+    // Seek (§8). A tap by a gutter label ("at 10 min") offers "Jump to
+    // 10:00" ("Start at 10:00" before Start); the label is small, so a tap
+    // in the gutter within 22 px of one counts. A card keeps its own tap.
+    let pop = null,
+      popTimer = null;
+    const closePop = () => {
+      clearTimeout(popTimer);
+      pop?.remove();
+      pop = null;
+    };
+    const seekTo = (t) => (inPreview ? post({ type: "timeline:seek", t }) : window.__timelineRunApi?.jump(t));
+    const onGutter = (event) => {
+      const offer = event.target.closest(".gl-pop");
+      if (offer) {
+        event.preventDefault();
+        event.stopPropagation();
+        seekTo(Number(offer.dataset.t));
+        return closePop();
+      }
+      const box = lanes.getBoundingClientRect(),
+        x = event.clientX - box.left,
+        y = event.clientY - box.top;
+      if (x < 0 || x > 70) return closePop();
+      let best = null;
+      for (const el of lanes.querySelectorAll(".gl[data-t]")) {
+        if (el.hidden) continue;
+        const gap = Math.abs(parseFloat(el.style.top) + 5 - y);
+        if (gap <= 22 && (!best || gap < best.gap)) best = { el, gap };
+      }
+      if (!best) return closePop();
+      event.preventDefault();
+      event.stopPropagation();
+      closePop();
+      const t = Number(best.el.dataset.t),
+        info = window.__timelineRun,
+        going = !!(info && info.active && !info.idle);
+      pop = doc.createElement("button");
+      pop.type = "button";
+      pop.className = "gl-pop ly";
+      pop.dataset.t = String(t);
+      pop.style.top = Math.max(0, parseFloat(best.el.style.top) - 17) + "px";
+      pop.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h13"/><path d="m11 7 5 5-5 5"/><path d="M20 5v14"/></svg>${going ? "Jump to" : "Start at"} ${runCore.clock(t)}`;
+      lanes.append(pop);
+      popTimer = setTimeout(closePop, 5000);
+    };
+    // "Start at…" in the ready card opens the Jump panel before Start.
+    const startAt = doc.querySelector(".ready-at");
+    const onStartAt = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (inPreview) post({ type: "timeline:jump" });
+      else window.__timelineRunApi?.openJump();
+    };
     let observer = null;
     const paper = () => getComputedStyle(doc.querySelector(".sheet")).getPropertyValue("--paper").trim();
     if (!quiet) {
       chips?.addEventListener("click", onChip);
       go?.addEventListener("click", onGo);
+      lanes.addEventListener("click", onGutter);
+      doc.body.classList.add("seekable");
+      if (startAt) {
+        startAt.hidden = false;
+        startAt.addEventListener("click", onStartAt);
+      }
       if (inPreview && edit) {
         edit.hidden = false;
         edit.addEventListener("click", onEdit);
@@ -1247,6 +1313,9 @@
       observer?.disconnect();
       chips?.removeEventListener("click", onChip);
       go?.removeEventListener("click", onGo);
+      lanes.removeEventListener("click", onGutter);
+      startAt?.removeEventListener("click", onStartAt);
+      closePop();
       edit?.removeEventListener("click", onEdit);
       window.removeEventListener("message", onMessage);
       sounds?.removeEventListener("click", onSound);
@@ -1467,8 +1536,9 @@
       state ? (state.pausedAt ?? now) - state.startedAt - state.pausedMs + state.shiftMs : 0;
     function apply(state, op, now) {
       const at = { updatedAt: now };
+      // A start may begin partway in ("Start at 3:00", docs/routines.md §8).
       if (op.op === "start")
-        return { runId: Math.random().toString(36).slice(2, 10), startedAt: now, pausedAt: null, pausedMs: 0, shiftMs: 0, ...at };
+        return { runId: Math.random().toString(36).slice(2, 10), startedAt: now, pausedAt: null, pausedMs: 0, shiftMs: Math.round(Number(op.shiftMs) || 0), ...at };
       if (!state || op.op === "stop") return null;
       if (op.op === "pause") return state.pausedAt == null ? { ...state, pausedAt: now, ...at } : state;
       if (op.op === "resume")
@@ -1563,16 +1633,21 @@
         label: paused ? "paused" : rest || !lead ? (coming ? `then ${coming.title}` : "left") : `left of ${total(lead.until - lead.at)}`,
         of,
         sub,
+        // What the step bar spans (a scrubber for this step on a wide screen).
+        from,
+        target,
       };
     }
     // The ⋯ menu on a phone, in order: the status line, Back / Skip / Stop
-    // (Stop asks first), the two sound switches, Edit. Back, Skip and Edit
-    // close the menu; the switches leave it open.
+    // (Stop asks first), Jump… (the Jump panel, §8), the two sound
+    // switches, Edit. Back, Skip, Jump and Edit close the menu; the switches
+    // leave it open.
     const menu = () => [
       { id: "status" },
       { id: "back", label: "Back", closes: true },
       { id: "skip", label: "Skip", closes: true },
       { id: "stop", label: "Stop", confirm: true },
+      { id: "jump", label: "Jump…", closes: true },
       { id: "beeps", label: "Beeps", toggle: true },
       { id: "announce", label: "Announce steps", toggle: true },
       { id: "edit", label: "Edit the text", closes: true },
@@ -1586,7 +1661,150 @@
     ];
     // The finished run: "Done · 10:14" (what it really took) over "planned 10 min".
     const finished = (wallMs, last) => ({ title: `Done · ${clock(wallMs / 1000)}`, sub: `planned ${total(last)}` });
-    return { clock, length, total, spoken, elapsedMs, apply, end, position, skipTo, backTo, seek, layoutFor, upNext, header, menu, status, finished };
+    // Seek (docs/routines.md §8): set the run to where you really are.
+    //
+    // A length or a place in the run, as a person or a chat writes it:
+    // "5:30" (M:SS), "1:02:03" (H:MM:SS), "180" (seconds), "3m", "1m30s",
+    // "2 min". null when it is none of these.
+    function amountOf(text) {
+      const colon = text.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/);
+      if (colon) {
+        const parts = colon.slice(1).filter((p) => p !== undefined).map(Number);
+        if (parts.slice(1).some((n) => n >= 60)) return null;
+        return parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+      }
+      if (/^\d+(\.\d+)?$/.test(text)) return Number(text);
+      const units = { h: 3600, hr: 3600, hrs: 3600, hour: 3600, hours: 3600, m: 60, min: 60, mins: 60, minute: 60, minutes: 60, s: 1, sec: 1, secs: 1, second: 1, seconds: 1 };
+      const part = /(\d+(?:\.\d+)?)\s*([a-z]+)\s*/y;
+      let sum = 0,
+        match;
+      while (part.lastIndex < text.length) {
+        const from = part.lastIndex;
+        match = part.exec(text);
+        if (!match || !(match[2] in units)) return null;
+        sum += Number(match[1]) * units[match[2]];
+        if (part.lastIndex === from) return null;
+      }
+      return text ? sum : null;
+    }
+    // Where a seek lands, in whole seconds within [0, total]: an elapsed
+    // time (a number is seconds), or "+30s" / "-2m" / "+1:30" from `e`.
+    function seekTarget(value, e, total) {
+      let t = null;
+      if (typeof value === "number") t = Number.isFinite(value) ? value : null;
+      else {
+        const raw = String(value ?? "").trim().toLowerCase(),
+          signed = raw.match(/^([+-])\s*(.+)$/),
+          amount = amountOf(signed ? signed[2].trim() : raw);
+        if (amount !== null) t = signed ? e + (signed[1] === "-" ? -amount : amount) : amount;
+      }
+      if (t === null || !Number.isFinite(t))
+        throw new Error(`“${value}” is not a time in the run: write 3:00, 1:02:03 or seconds (180), or +30s / -2m from where it is now.`);
+      return Math.min(total, Math.max(0, Math.round(t)));
+    }
+    // The step a person or a chat names: its title (an exact match,
+    // case-insensitive, then a unique start of one) or its 1-based line
+    // in the text. A number, or digits that are no step's title, is a line
+    // number. Anything else throws, listing the steps.
+    function stepFor(steps, value) {
+      const raw = String(value ?? "").trim(),
+        wanted = raw.toLowerCase(),
+        list = () => steps.map((s) => `${s.title} (line ${s.line})`).join("; ");
+      if (!raw) throw new Error(`Name a step by its title or line number. Steps: ${list()}.`);
+      const byLine = () => {
+        const step = steps.find((s) => s.line === Number(raw));
+        if (!step) throw new Error(`Line ${raw} is not a step. Steps: ${list()}.`);
+        return step;
+      };
+      if (typeof value === "number") return byLine();
+      const exact = steps.filter((s) => s.title.toLowerCase() === wanted);
+      if (exact.length === 1) return exact[0];
+      if (exact.length > 1) throw new Error(`More than one step is called “${raw}”: give its line number instead. Steps: ${list()}.`);
+      if (/^\d+$/.test(raw)) return byLine();
+      const prefix = steps.filter((s) => s.title.toLowerCase().startsWith(wanted));
+      if (prefix.length === 1) return prefix[0];
+      if (prefix.length > 1) throw new Error(`“${raw}” matches more than one step (${prefix.map((s) => s.title).join(", ")}): give the whole title or the line number. Steps: ${list()}.`);
+      throw new Error(`No step is called “${raw}”. Steps: ${list()}.`);
+    }
+    // The one op a jump sends: a seek during a run, or before Start a
+    // start that begins partway in ("Start at 3:00"). Undo sends the shift
+    // the run had before the jump, so it goes back to where it was (plus
+    // the time that has passed since, if it is running).
+    const jumpOp = (state, now, target) => (state ? seek(state, now, target) : { op: "start", shiftMs: Math.round(target * 1000) });
+    const undoOp = (shiftMs) => ({ op: "seek", shiftMs });
+    // "12:30 · Simmer chicken": a landing point and the step there (the one
+    // ending soonest, as the countdown), "before Roast" in a gap.
+    function readout(steps, t) {
+      const pos = position(steps, t),
+        name = pos.ending ? pos.ending.title : pos.done ? "Done" : pos.next ? `before ${pos.next.title}` : "";
+      return name ? `${clock(t)} · ${name}` : clock(t);
+    }
+    // Tick marks on the whole-routine bar: where steps start (not 0:00).
+    const ticks = (steps) => [...new Set(steps.filter((s) => s.until !== undefined && s.at > 0).map((s) => s.at))].sort((a, b) => a - b);
+    // A drag lands on a step's start when it comes within `within` seconds
+    // of one.
+    const snap = (t, marks, within) => {
+      const near = marks.reduce((best, m) => (Math.abs(m - t) < Math.abs(best - t) ? m : best), Infinity);
+      return Math.abs(near - t) <= within ? near : t;
+    };
+    // A drag on a bar spanning [lo, hi] seconds: every move (the pointer's
+    // position as a fraction of the bar) previews a point; nothing is sent
+    // until the release, which gives the one point to jump to. A cancel
+    // gives none.
+    function scrub(lo, hi, { marks = [], within = 0 } = {}) {
+      let value = null;
+      return {
+        move(fraction) {
+          const f = Math.min(1, Math.max(0, Number(fraction) || 0));
+          value = Math.round(snap(lo + f * (hi - lo), marks, within));
+          return value;
+        },
+        value: () => value,
+        end() {
+          const v = value;
+          value = null;
+          return v;
+        },
+        cancel() {
+          value = null;
+        },
+      };
+    }
+    // Keys on a bar: ←/→ (and ↓/↑) move 10 s, with Shift 1 min; Page Down
+    // / Page Up 1 min; Home and End go to the ends. null for other keys.
+    function keyMove(key, shift) {
+      const by = shift ? 60 : 10;
+      if (key === "ArrowRight" || key === "ArrowUp") return by;
+      if (key === "ArrowLeft" || key === "ArrowDown") return -by;
+      if (key === "PageUp") return 60;
+      if (key === "PageDown") return -60;
+      if (key === "Home") return "home";
+      if (key === "End") return "end";
+      return null;
+    }
+    // The Jump panel's buttons.
+    const nudges = () => [
+      { by: -60, label: "−1 min" },
+      { by: -10, label: "−10 s" },
+      { by: 10, label: "+10 s" },
+      { by: 60, label: "+1 min" },
+    ];
+    // "Side plank L" is said "Side plank left".
+    const saidTitle = (title) => String(title).replace(/\s+L$/, " left").replace(/\s+R$/, " right");
+    // Time left as Announce says it after a jump: exact under a minute,
+    // to 10 s under 10 minutes, then to the minute.
+    const roughly = (sec) => (sec < 60 ? Math.max(1, Math.ceil(sec - 1e-6)) : sec < 600 ? Math.round(sec / 10) * 10 : Math.round(sec / 60) * 60);
+    // After a jump the cues are silent for the steps passed over. Landing
+    // on a step's start (Skip, Back, a step chip) gets the usual new-step
+    // cue (`start`); landing inside steps, Announce says them with their
+    // time left: "Saute onion, 4 minutes 30 seconds left".
+    function landing(steps, e) {
+      const pos = position(steps, e),
+        start = steps.some((s) => s.at <= e && e - s.at < 1),
+        words = pos.active.map((s) => `${saidTitle(s.title)}, ${spoken(roughly(s.until - e))} left`).join(". ");
+      return { start, words };
+    }
+    return { clock, length, total, spoken, elapsedMs, apply, end, position, skipTo, backTo, seek, layoutFor, upNext, header, menu, status, finished, amountOf, seekTarget, stepFor, jumpOp, undoOp, readout, ticks, snap, scrub, keyMove, nudges, saidTitle, landing };
   }
   // The routine sheet's geometry: elapsed lanes under the ready card. It
   // places every step, rest, moment and section header in px from the
@@ -2064,7 +2282,53 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
 .rc-dn-act .run-restart{flex:1;background:#3ecf8e!important;color:#08241a!important}
 .run-start{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:10px;height:56px;padding:0 20px;border-radius:999px;background:#3ecf8e;color:#08241a;font-size:18px;font-weight:800;white-space:nowrap;box-shadow:0 6px 22px #0006;pointer-events:auto}
 .run-start small{font-weight:600;font-size:15px;opacity:.8}
-@media(max-width:359px){.rv-ct{min-width:56px;font-size:26px}.rv-live,.rv-done{gap:6px}}`;
+.rv-pl{pointer-events:none}
+.rv-row{pointer-events:none}.rv-row>*,.rv-live>*{pointer-events:auto}.rv-row>.rv-live{pointer-events:none}
+.rv-ctb{flex:none;align-self:stretch;display:flex;align-items:center;margin-left:-8px!important;padding:0 8px!important;border-radius:12px!important}
+.rv-ctb:active,.rv-ctb[aria-expanded="true"]{background:#24313a!important}
+.rv-plb{display:none;position:absolute;left:0;right:0;bottom:0;height:8px}
+.run-top[data-view="bar-run"] .rv-plb{display:block}
+.rv-at{display:none;align-items:center;gap:10px;height:56px}
+.run-top[data-view="bar-at"] .rv-at{display:flex}
+.run-top[data-view="bar-at"] .rv-pl{display:none}
+.rv-at .rv-ok{color:#9fb3bf}
+.run-scrub{position:relative;display:block;flex:none;height:24px;touch-action:none;cursor:pointer;-webkit-user-select:none;user-select:none;outline:none;-webkit-tap-highlight-color:transparent}
+.run-scrub:focus-visible{outline:2px solid #3ecf8e88;outline-offset:3px;border-radius:8px}
+.sc-track{position:absolute;left:0;right:0;top:50%;height:4px;margin-top:-2px;border-radius:999px;background:#26323a}
+.sc-fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:inherit;background:#3ecf8e99}
+.sc-ticks i{position:absolute;top:-3px;width:2px;height:10px;margin-left:-1px;border-radius:1px;background:#51646f}
+.sc-thumb{position:absolute;left:0;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#e9f1f5;box-shadow:0 1px 4px #000a;pointer-events:none}
+.run-scrub.drag .sc-thumb,.run-scrub:focus-visible .sc-thumb{box-shadow:0 0 0 6px #3ecf8e44,0 1px 4px #000a}
+.run-scrub.drag .sc-fill,.run-scrub.drag .rc-meter i{transition:none}
+.sc-read{position:absolute;left:0;bottom:calc(50% + 13px);z-index:2;transform:translateX(-50%);padding:6px 9px;border-radius:9px;background:#e9f1f5;color:#10181d;font:700 13px/1 system-ui,sans-serif;white-space:nowrap;font-variant-numeric:tabular-nums;box-shadow:0 4px 14px #0008;pointer-events:none}
+.rc-all{margin:-6px 0 -2px}
+.rc-sbar .rc-meter{position:absolute;left:0;right:0;top:50%;margin-top:-5px}
+.rc-at{display:grid;gap:2px}
+.rc-at-h{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px;font:600 13px/1.2 system-ui,sans-serif;color:#9fb3bf;font-variant-numeric:tabular-nums}
+.rc-at-h b{color:#e9f1f5}
+.rc-at-x{flex:none;height:32px;padding:0 11px!important;border-radius:999px!important;background:#24313a!important;font:700 12.5px/1 system-ui,sans-serif!important}
+.rv-jp{position:absolute;z-index:29;top:100%;left:0;right:0;display:grid;gap:12px;box-sizing:border-box;max-height:calc(100vh - 64px);overflow-y:auto;padding:14px 14px 16px;background:#1b2530;border:1px solid #34495a;border-top:0;border-radius:0 0 16px 16px;box-shadow:0 18px 44px #000c}
+.jp-read{display:flex;align-items:baseline;gap:10px;min-width:0}
+.jp-t{flex:none;font:800 30px/1 system-ui,sans-serif;letter-spacing:-.8px;font-variant-numeric:tabular-nums}
+.jp-s{min-width:0;font:700 16px/1.25 system-ui,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jp-from{margin-top:-8px;font:600 12.5px/1.2 system-ui,sans-serif;color:#9fb3bf;font-variant-numeric:tabular-nums}
+.run-scrub.jp-bar{height:44px}
+.jp-nudge{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.jp-nudge button,.jp-act button{height:44px;border-radius:12px!important;background:#24313a!important;font:700 14px/1 system-ui,sans-serif!important;font-variant-numeric:tabular-nums;white-space:nowrap}
+.jp-steps{display:flex;gap:6px;margin:0 -14px;padding:0 14px 2px;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain}
+.jp-steps::-webkit-scrollbar{display:none}
+.jp-chip{flex:none;display:flex;flex-direction:column;justify-content:center;gap:4px;height:44px;max-width:170px;padding:0 12px!important;border:1px solid transparent!important;border-radius:12px!important;background:#24313a!important;text-align:left}
+.jp-chip span{font:700 13.5px/1 system-ui,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jp-chip small{font:600 11px/1 system-ui,sans-serif;color:#9fb3bf;font-variant-numeric:tabular-nums}
+.jp-chip.on{border-color:#3ecf8e!important;background:#1d3a30!important}
+.jp-act{display:grid;grid-template-columns:1fr 2fr;gap:8px}
+.jp-act .jp-go{background:#3ecf8e!important;color:#08241a!important;font-weight:800!important;font-size:15px!important}
+.run-toast{position:fixed;left:50%;bottom:max(18px,calc(env(safe-area-inset-bottom) + 10px));z-index:41;display:flex;align-items:center;gap:8px;max-width:min(92vw,420px);height:52px;box-sizing:border-box;padding:0 4px 0 18px;border-radius:999px;background:#e9f1f5;color:#10181d;font:700 14px/1.2 system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap;transform:translateX(-50%);box-shadow:0 8px 28px #000a}
+.run-toast button{display:inline-flex;align-items:center;gap:6px;height:44px;padding:0 16px 0 12px!important;border-radius:999px!important;background:#10181d!important;color:#e9f1f5!important;font-weight:800!important}
+.run-toast svg{width:18px;height:18px}
+body.run-cols .run-toast{left:calc(var(--run-col,360px) + (100% - var(--run-col,360px)) / 2)}
+@media(pointer:coarse){.run-scrub{height:44px}.rc-at-x{height:44px}}
+@media(max-width:359px){.rv-ct{min-width:56px;font-size:26px}.rv-live,.rv-done{gap:6px}.jp-nudge button{font-size:13px!important}}`;
     if (!doc.getElementById("run-css")) {
       const style = doc.createElement("style");
       style.id = "run-css";
@@ -2098,7 +2362,14 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
         restart: icon('<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/>'),
         pencil: icon('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'),
         check: icon('<path d="m5 12.5 4.5 4.5L19 7"/>'),
+        jump: icon('<path d="M3 12h13"/><path d="m11 7 5 5-5 5"/><path d="M20 5v14"/>'),
+        undo: icon('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
+        close: icon('<path d="M6 6l12 12M18 6 6 18"/>'),
       };
+    // A scrubber (§8): a slider over part of the run, with a thumb, tick
+    // marks at step starts and, while it is dragged, the landing readout.
+    const scrubBar = (bar, cls, label) =>
+      `<div class="run-scrub ${cls}" data-bar="${bar}" role="slider" tabindex="0" aria-label="${label}" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div class="sc-track"><i class="sc-fill"></i><span class="sc-ticks"></span></div><span class="sc-thumb"></span><output class="sc-read" hidden></output></div>`;
     const toggles = `<button type="button" class="run-tg run-beeps" aria-pressed="true">${icons.beep}<span>Beeps</span><span class="run-sw" aria-hidden="true"></span></button><button type="button" class="run-tg run-announce" aria-pressed="false">${icons.voice}<span>Announce steps</span><span class="run-sw" aria-hidden="true"></span></button>`,
       confirm = '<div class="run-confirm" hidden><span>End this run?</span><button type="button" class="run-stop-yes">Stop</button><button type="button" class="run-stop-no">Keep going</button></div>',
       amber = `<button type="button" class="run-chip rv-amber" hidden>${icons.mute}<span>Tap for sound</span></button>`;
@@ -2112,22 +2383,33 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
           return `<button type="button" class="run-${item.id}">${icons[item.id]}<span>${item.label}</span></button>`;
         if (item.id === "beeps") return toggles.split("</button>")[0] + "</button>";
         if (item.id === "announce") return toggles.split("</button>")[1] + "</button>";
+        if (item.id === "jump") return `<button type="button" class="rv-mrow run-jump">${icons.jump}<span>${item.label}</span></button>`;
         return `<button type="button" class="rv-mrow run-edit">${icons.pencil}<span>${item.label}</span></button>`;
       })
       .join("")
       .replace(/(<button type="button" class="run-back">[\s\S]*?class="run-stop">[\s\S]*?<\/button>)/, `<div class="rv-trio">$1</div>${confirm}`);
     top.innerHTML =
       // Phones: one 56 px row.
-      `<div class="rv" role="region" aria-label="Run"><div class="rv-row">` +
-      `<div class="rv-live"><b class="rv-ct" role="timer"></b><div class="rv-hk"><div class="rv-ti" role="status"></div><div class="rv-sub"></div></div><button type="button" class="rv-pz run-pause"></button><button type="button" class="rv-more" aria-label="More" aria-haspopup="true" aria-expanded="false">${icons.more}</button>${amber}</div>` +
+      `<div class="rv" role="region" aria-label="Run"><button type="button" class="rv-plb run-jump" tabindex="-1" aria-label="Jump to a time"></button><div class="rv-row">` +
+      `<div class="rv-live"><button type="button" class="rv-ctb run-jump" aria-label="Jump to a time" aria-haspopup="dialog" aria-expanded="false"><b class="rv-ct" role="timer"></b></button><div class="rv-hk"><div class="rv-ti" role="status"></div><div class="rv-sub"></div></div><button type="button" class="rv-pz run-pause"></button><button type="button" class="rv-more" aria-label="More" aria-haspopup="true" aria-expanded="false">${icons.more}</button>${amber}</div>` +
       `<div class="rv-done"><span class="rv-ok" aria-hidden="true">${icons.check}</span><div class="rv-hk"><div class="rv-ti rv-dn-t"></div><div class="rv-sub rv-dn-s"></div></div><button type="button" class="rv-rst run-restart">${icons.restart}<span>Restart</span></button><button type="button" class="rv-ib run-edit" aria-label="Edit">${icons.pencil}</button><button type="button" class="rv-txb run-close">Close</button></div>` +
-      `<div class="rv-menu" role="menu" hidden>${menuHtml}</div></div><i class="rv-pl" aria-hidden="true"></i></div>` +
+      // Before Start on a phone, "Start at…" opens the Jump panel under this row.
+      `<div class="rv-at"><span class="rv-ok" aria-hidden="true">${icons.jump}</span><div class="rv-hk"><div class="rv-ti">Start partway in</div><div class="rv-sub">Pick where you are, then start</div></div><button type="button" class="rv-ib run-jcancel" aria-label="Close">${icons.close}</button></div>` +
+      `<div class="rv-menu" role="menu" hidden>${menuHtml}</div>` +
+      // The Jump panel (§8): the whole routine as a slider, nudges, the steps, Jump / Cancel.
+      `<div class="rv-jp" role="dialog" aria-label="Jump to a time" hidden><div class="jp-read"><b class="jp-t"></b><span class="jp-s"></span></div><div class="jp-from"></div>${scrubBar("panel", "jp-bar", "Where to jump")}<div class="jp-nudge">${core
+        .nudges()
+        .map((n) => `<button type="button" class="jp-n" data-by="${n.by}">${n.label}</button>`)
+        .join("")}</div><div class="jp-steps"></div><div class="jp-act"><button type="button" class="jp-cancel">Cancel</button><button type="button" class="jp-go"></button></div></div>` +
+      `</div><i class="rv-pl" aria-hidden="true"></i></div>` +
       // Wide screens: the left column.
       `<div class="rc">` +
-      `<div class="rc-ready"><div class="rc-hero" hidden><span class="rc-hero-img"></span><div class="rc-scrim"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div></div><div class="rc-plain"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div><p class="rc-kv"><b></b><span></span></p><div class="rc-need" hidden><div class="rc-kick">What you need</div><div class="rc-chips"></div></div><div class="rc-grow"></div><div class="rc-tgs">${toggles}</div><div class="rc-gorow"><button type="button" class="rc-go">${icons.play}<span>Start</span><small></small></button><button type="button" class="rc-ed run-edit" aria-label="Edit">${icons.pencil}</button></div></div>` +
-      `<div class="rc-live"><div class="rc-top"><b class="rc-name"></b><span class="rc-of"></span></div><div class="rc-pic" hidden></div><div class="rc-stp" role="status"></div><div class="rc-meter"><i></i></div><div class="rc-tm"><b role="timer"></b><span></span></div><p class="rc-desc" hidden></p><ul class="rc-nts" hidden></ul><ul class="rc-also" hidden></ul><div class="rc-nx" hidden><div class="rc-kick"></div><span class="rc-nx-th" hidden></span><div class="rc-nx-t"></div><div class="rc-nx-d"></div></div><div class="rc-grow"></div><div class="rc-ctl"><button type="button" class="run-back" aria-label="Back" title="Back to the start of this step (or the previous one)">${icons.back}</button><button type="button" class="rc-pz run-pause"></button><button type="button" class="run-skip" aria-label="Skip" title="Skip to the next step">${icons.skip}</button><button type="button" class="run-stop" aria-label="Stop" title="Stop the run">${icons.stop}</button></div>${confirm}<div class="rc-tgs">${toggles}</div><div class="rc-foot"><span class="rc-fst"></span>${amber}<button type="button" class="rc-txb run-edit">${icons.pencil}<span>Edit</span></button></div></div>` +
+      `<div class="rc-ready"><div class="rc-hero" hidden><span class="rc-hero-img"></span><div class="rc-scrim"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div></div><div class="rc-plain"><h3 class="rc-h"></h3><p class="rc-tag" hidden></p></div><p class="rc-kv"><b></b><span></span></p><div class="rc-need" hidden><div class="rc-kick">What you need</div><div class="rc-chips"></div></div><div class="rc-grow"></div><div class="rc-tgs">${toggles}</div><div class="rc-at"><div class="rc-at-h"><span>Start from <b class="rc-at-v"></b></span><button type="button" class="rc-at-x" hidden>From 0:00</button></div>${scrubBar("ready", "rc-atbar", "Where to start")}</div><div class="rc-gorow"><button type="button" class="rc-go">${icons.play}<span>Start</span><small></small></button><button type="button" class="rc-ed run-edit" aria-label="Edit">${icons.pencil}</button></div></div>` +
+      `<div class="rc-live"><div class="rc-top"><b class="rc-name"></b><span class="rc-of"></span></div>${scrubBar("all", "rc-all", "Jump in the routine")}<div class="rc-pic" hidden></div><div class="rc-stp" role="status"></div><div class="run-scrub rc-sbar" data-bar="step" role="slider" tabindex="0" aria-label="Jump in this step" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div class="rc-meter"><i></i></div><span class="sc-thumb"></span><output class="sc-read" hidden></output></div><div class="rc-tm"><b role="timer"></b><span></span></div><p class="rc-desc" hidden></p><ul class="rc-nts" hidden></ul><ul class="rc-also" hidden></ul><div class="rc-nx" hidden><div class="rc-kick"></div><span class="rc-nx-th" hidden></span><div class="rc-nx-t"></div><div class="rc-nx-d"></div></div><div class="rc-grow"></div><div class="rc-ctl"><button type="button" class="run-back" aria-label="Back" title="Back to the start of this step (or the previous one)">${icons.back}</button><button type="button" class="rc-pz run-pause"></button><button type="button" class="run-skip" aria-label="Skip" title="Skip to the next step">${icons.skip}</button><button type="button" class="run-stop" aria-label="Stop" title="Stop the run">${icons.stop}</button></div>${confirm}<div class="rc-tgs">${toggles}</div><div class="rc-foot"><span class="rc-fst"></span>${amber}<button type="button" class="rc-txb run-edit">${icons.pencil}<span>Edit</span></button></div></div>` +
       `<div class="rc-done"><div class="rc-top"><b class="rc-name"></b></div><div class="rc-dn"><span class="rv-ok" aria-hidden="true">${icons.check}</span><div><div class="rc-dn-t"></div><div class="rc-dn-s"></div></div></div><div class="rc-grow"></div><div class="rc-dn-act"><button type="button" class="run-restart">${icons.restart}<span>Restart</span></button><button type="button" class="run-close">Close</button></div><div class="rc-foot"><span class="rc-fst"></span><button type="button" class="rc-txb run-edit">${icons.pencil}<span>Edit</span></button></div></div>` +
-      `</div>`;
+      `</div>` +
+      // "Jumped to 3:00 · Undo".
+      `<div class="run-toast" role="status" aria-live="polite" hidden><span class="run-toast-t"></span><button type="button" class="run-undo">${icons.undo}<span>Undo</span></button></div>`;
     startSlot.innerHTML = `<button type="button" class="run-start">${icons.play}<span>Start</span><small></small></button>`;
     [top, startSlot].forEach((el) => el.setAttribute("data-html2canvas-ignore", ""));
     const $ = (selector) => top.querySelector(selector),
@@ -2172,6 +2454,23 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
         colDoneTitle: $(".rc-dn-t"),
         colDoneSub: $(".rc-dn-s"),
         start: startSlot.querySelector(".run-start"),
+        ctb: $(".rv-ctb"),
+        allBar: $(".rc-all"),
+        stepBar: $(".rc-sbar"),
+        atBar: $(".rc-atbar"),
+        atValue: $(".rc-at-v"),
+        atReset: $(".rc-at-x"),
+        goText: $(".rc-go span"),
+        goLength: $(".rc-go small"),
+        jp: $(".rv-jp"),
+        jpTime: $(".jp-t"),
+        jpStep: $(".jp-s"),
+        jpFrom: $(".jp-from"),
+        jpBar: $(".jp-bar"),
+        jpSteps: $(".jp-steps"),
+        jpGo: $(".jp-go"),
+        toast: $(".run-toast"),
+        toastText: $(".run-toast-t"),
       };
 
     // The run state, locally: localStorage under the routine's key.
@@ -2422,6 +2721,20 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
       announce = false,
       confirming = false,
       menuOpen = false,
+      // Seek (§8). `scrubbing`: a bar being dragged or moved by keys ({ el,
+      // bar, lo, hi, t, via }), previewed until it is let go; `panel`: the
+      // phone's Jump panel ({ mode: "run" | "start", t }); `pending`: where
+      // the two-column ready card's bar says to start; `undo`: the shift the
+      // run had before the last jump, while its toast shows.
+      scrubbing = null,
+      panel = null,
+      pending = null,
+      undo = null,
+      keyTimer = null,
+      toastTimer = null,
+      // Bumped when the Jump panel opens or closes and on every jump, so
+      // the sheet follows the run again (under the panel while it is open).
+      follow = 0,
       // The sheet's own Start is on screen: no docked one. The page says
       // when it scrolls away (routineRuntime, or the studio's preview).
       docked = !host && window.__timelineDocked === true;
@@ -2463,10 +2776,14 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
       if (!menuOpen && confirming) confirming = false;
     };
     function show(mode) {
-      const view = mode === "idle" ? (cols ? "cols-ready" : "") : (cols ? "cols-" : "bar-") + mode;
+      // The Jump panel is the phone's; a panel for another mode closes.
+      if (panel && (cols || mode !== (panel.mode === "run" ? "run" : "idle"))) panel = null;
+      const view = mode === "idle" ? (cols ? "cols-ready" : panel ? "bar-at" : "") : (cols ? "cols-" : "bar-") + mode;
       if ((top.dataset.view || "") !== view) top.dataset.view = view;
       top.hidden = !view;
-      startSlot.hidden = mode !== "idle" || !docked || cols;
+      startSlot.hidden = mode !== "idle" || !docked || cols || !!panel;
+      ui.jp.hidden = !panel;
+      ui.ctb.setAttribute("aria-expanded", String(!!panel));
       doc.body.classList.toggle("run-active", mode === "run");
       doc.body.classList.toggle("run-done", mode === "done");
       doc.body.classList.toggle("run-cols", cols);
@@ -2511,7 +2828,92 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
       );
       ui.chips.querySelectorAll(".rc-chip").forEach((chip) => chip.setAttribute("aria-pressed", String(ticked.includes(chip.dataset.chip))));
       ui.need.hidden = !chips.length;
-      setText(ui.go.lastChild, `· ${core.total(total)}`);
+      // "Start from": a bar over the whole routine; Start then reads
+      // "Start at 3:00".
+      const from = barValue("ready", 0);
+      paintBar(ui.atBar, 0, total, from, true);
+      setText(ui.atValue, from ? core.readout(steps, from) : "the top");
+      ui.atReset.hidden = !pending;
+      setText(ui.goText, pending ? `Start at ${core.clock(pending)}` : "Start");
+      setText(ui.goLength, `· ${core.total(total)}`);
+      ui.goLength.hidden = !!pending;
+    }
+    // Where a bar stands: while it is dragged, the point it previews.
+    const barValue = (bar, otherwise) => (scrubbing && scrubbing.bar === bar && scrubbing.t !== null ? scrubbing.t : bar === "ready" ? pending || 0 : bar === "panel" && panel ? panel.t : otherwise);
+    // The point the sheet previews (its now line and live cards move
+    // there), or null: a bar being dragged, the open Jump panel, or the
+    // ready card's "Start from".
+    const previewAt = (state) =>
+      scrubbing && scrubbing.t !== null ? scrubbing.t : panel ? panel.t : !state && cols && pending ? pending : null;
+    const setAttr = (el, name, value) => {
+      if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+    };
+    // A bar over [lo, hi] at `value`: the fill and thumb, the slider's
+    // values for a screen reader, the tick marks, and while it is being
+    // moved the landing readout above the thumb.
+    function paintBar(el, lo, hi, value, marks) {
+      const span = Math.max(0.001, hi - lo),
+        f = Math.min(1, Math.max(0, (value - lo) / span)),
+        at = (f * 100).toFixed(2) + "%",
+        text = core.readout(steps, value);
+      el.querySelector(".sc-fill, .rc-meter i").style.width = at;
+      el.querySelector(".sc-thumb").style.left = at;
+      setAttr(el, "aria-valuemin", String(Math.round(lo)));
+      setAttr(el, "aria-valuemax", String(Math.round(hi)));
+      setAttr(el, "aria-valuenow", String(Math.round(Math.min(hi, Math.max(lo, value)))));
+      setAttr(el, "aria-valuetext", text);
+      if (marks)
+        setHtml(
+          el.querySelector(".sc-ticks"),
+          core
+            .ticks(steps)
+            .filter((t) => t > lo && t < hi)
+            .map((t) => `<i style="left:${(((t - lo) / span) * 100).toFixed(2)}%"></i>`)
+            .join(""),
+        );
+      const read = el.querySelector(".sc-read"),
+        on = !!scrubbing && scrubbing.el === el && scrubbing.t !== null && el !== ui.jpBar;
+      read.hidden = !on;
+      if (on) {
+        setText(read, text);
+        const width = el.clientWidth,
+          half = read.offsetWidth / 2;
+        read.style.left = Math.min(width - half, Math.max(half, f * width)) + "px";
+      }
+    }
+    // The Jump panel: the landing point in words, the slider, the steps as
+    // chips (the one it lands in outlined), and Jump (or Start at) with it.
+    let chipKey = "",
+      chipOn = null;
+    function paintPanel(e) {
+      const total = core.end(steps),
+        t = barValue("panel", panel.t),
+        words = core.readout(steps, t),
+        cut = words.indexOf(" · ");
+      setText(ui.jpTime, core.clock(t));
+      setText(ui.jpStep, cut < 0 ? "" : words.slice(cut + 3));
+      setText(ui.jpFrom, e === null ? `of ${core.clock(total)}` : `now ${core.clock(Math.floor(e))} · of ${core.clock(total)}`);
+      paintBar(ui.jpBar, 0, total, t, true);
+      const moves = steps.filter((s) => s.until !== undefined && !s.rest),
+        key = JSON.stringify(moves.map((s) => [s.at, s.title]));
+      if (key !== chipKey) {
+        chipKey = key;
+        ui.jpSteps.innerHTML = moves.map((s) => `<button type="button" class="jp-chip" data-at="${s.at}"><span>${esc(s.title)}</span><small>${core.clock(s.at)}</small></button>`).join("");
+      }
+      const here = moves.filter((s) => s.at <= t && t < s.until).at(-1);
+      ui.jpSteps.querySelectorAll(".jp-chip").forEach((chip) => chip.classList.toggle("on", !!here && Number(chip.dataset.at) === here.at && chip.textContent.startsWith(here.title)));
+      // The step it lands in stays in view in the row of chips.
+      const onKey = here ? here.at + ":" + here.title : "",
+        chip = ui.jpSteps.querySelector(".jp-chip.on");
+      if (onKey !== chipOn) {
+        chipOn = onKey;
+        if (chip) {
+          const row = ui.jpSteps.getBoundingClientRect(),
+            box = chip.getBoundingClientRect();
+          if (box.left < row.left || box.right > row.right) ui.jpSteps.scrollLeft += box.left - row.left - (row.width - box.width) / 2;
+        }
+      }
+      setText(ui.jpGo, `${panel.mode === "start" ? "Start at" : "Jump to"} ${core.clock(t)}`);
     }
     function render() {
       if (!alive) return;
@@ -2531,8 +2933,9 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
           transport.send({ op: "stop" });
           return;
         }
+        const prev = lastRun;
         lastRun = { state, e };
-        return running(state, e, total);
+        return running(state, e, total, prev);
       }
       // The run ended elsewhere (another device, another tab). At its end,
       // that page finished it first: this one shows Done too.
@@ -2544,7 +2947,6 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
       lastKey = lastCount = null;
       confirming = false;
       wake(false);
-      if (!done) sheet({ active: false });
       if (done) {
         const f = core.finished(done.wall, total);
         sheetDone(f);
@@ -2554,7 +2956,14 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
         return show("done");
       }
       show("idle");
+      if (panel) paintPanel(null);
+      // Before Start the sheet can preview a "Start at" point.
+      const before = previewAt(null);
+      sheet(before === null ? { active: false } : { active: true, elapsed: before, running: false, preview: true, idle: true, inset: panelInset(), follow });
     }
+    // How far down the Jump panel reaches below the header (the sheet keeps
+    // the preview's live steps clear of it).
+    const panelInset = () => (panel && !ui.jp.hidden ? ui.jp.offsetHeight : 0) + (host || cols ? 0 : top.getBoundingClientRect().height);
     // How long the run really took: its length plus pauses, less skips.
     const wallTime = (state, total) => Math.max(0, total * 1000 + state.pausedMs - state.shiftMs);
     function finishCue() {
@@ -2565,7 +2974,7 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
     const pct = (s, e) => Math.min(100, Math.max(0, ((e - s.at) / Math.max(0.001, s.until - s.at)) * 100)).toFixed(1) + "%";
     const left = (until, e) => core.clock(Math.ceil(until - e - 1e-6));
     const statusHtml = (parts) => parts.map(([k, v]) => (v ? `${k} <b>${esc(v)}</b>` : k)).join(" · ");
-    function running(state, e, total) {
+    function running(state, e, total, prev) {
       const paused = state.pausedAt != null,
         h = core.header(steps, e, { paused }),
         lead = h.lead,
@@ -2595,7 +3004,12 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
         setText(ui.stp, h.title);
         ui.stp.classList.toggle("isrest", h.rest || !lead);
         ui.meter.classList.toggle("grey", h.grey);
-        ui.fill.style.width = h.pct.toFixed(2) + "%";
+        // Both bars are scrubbers: the whole routine, and this step (its
+        // span held while it is dragged, so the bar does not change under
+        // the pointer).
+        paintBar(ui.allBar, 0, total, barValue("all", e), true);
+        const held = scrubbing && scrubbing.bar === "step";
+        paintBar(ui.stepBar, held ? scrubbing.lo : h.from, held ? scrubbing.hi : h.target, barValue("step", e), false);
         setText(ui.secs, h.countdown);
         ui.secs.classList.toggle("pz", paused);
         setText(ui.secsLabel, h.label);
@@ -2642,15 +3056,23 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
         ui.pl.style.width = h.pct.toFixed(2) + "%";
         ui.pl.classList.toggle("grey", h.grey);
         if (menuOpen) setHtml(ui.st, statusHtml(status));
+        if (panel) paintPanel(e);
       }
       // Cues, only while running and in view: a long beep whenever a step
       // starts, and with Announce the step that started (all of them when
       // two start together); short beeps at 3, 2, 1.
+      // After a jump (here or on another device) the steps passed over
+      // are silent: landing inside a step, Announce says it with its time
+      // left; landing on a step's start gets the usual new-step cue.
       const latest = steps.filter((s) => s.at <= e).at(-1),
         cueKey = latest ? steps.indexOf(latest) : -1,
         count = Math.ceil(h.remaining - 1e-6),
-        cue = !paused && !doc.hidden;
-      if (cue && cueKey >= 0 && (announce || (lastKey !== null && cueKey !== lastKey))) {
+        cue = !paused && !doc.hidden,
+        jumped = announce === "jump" || (!!prev && prev.state.runId === state.runId && prev.state.shiftMs !== state.shiftMs),
+        land = jumped ? core.landing(steps, e) : null;
+      if (land && !land.start) {
+        if (cue && land.words) say(land.words);
+      } else if (cue && cueKey >= 0 && (announce || (lastKey !== null && cueKey !== lastKey))) {
         tone(660, 0.45);
         buzz(200);
         say(
@@ -2659,7 +3081,7 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
             .map(spokenStep)
             .join(". "),
         );
-      } else if (cue && lastCount === count + 1 && count >= 1 && count <= 3) {
+      } else if (!land && cue && lastCount === count + 1 && count >= 1 && count <= 3) {
         tone(880, 0.14);
         buzz(60);
       }
@@ -2667,13 +3089,15 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
       lastKey = cueKey;
       lastCount = count;
       wake(!paused);
-      sheet({ active: true, elapsed: e, running: !paused, inset: host || cols ? 0 : top.getBoundingClientRect().height });
+      const at = previewAt(state);
+      sheet({ active: true, elapsed: at === null ? e : at, running: !paused, preview: at !== null, inset: panelInset(), follow });
     }
     const act = (op) => {
       const state = transport.get();
       if (op === "start") {
         done = null;
         announce = true;
+        pending = panel = null;
         return transport.send({ op: "start" });
       }
       if (!state) return;
@@ -2690,6 +3114,184 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
       unlock();
       act("start");
     };
+    // Seek (§8): one op per jump, never during a drag. During a run it is a
+    // seek (paused stays paused); before Start, a start already `t` in. A
+    // toast offers Undo for 6 s.
+    function jump(t) {
+      const state = transport.get(),
+        total = core.end(steps);
+      t = Math.min(total, Math.max(0, Math.round(Number(t) || 0)));
+      clearTimeout(keyTimer);
+      scrubbing = panel = pending = null;
+      follow++;
+      top.querySelectorAll(".run-scrub.drag").forEach((el) => el.classList.remove("drag"));
+      if (!state) {
+        if (!t) return start();
+        unlock();
+        done = null;
+        announce = "jump";
+        transport.send(core.jumpOp(null, transport.now(), t));
+        return notice(`Started at ${core.clock(t)}`, 0);
+      }
+      const before = state.shiftMs;
+      transport.send(core.jumpOp(state, transport.now(), t));
+      notice(`Jumped to ${core.clock(t)}`, before);
+    }
+    function notice(text, before) {
+      undo = before;
+      setText(ui.toastText, text);
+      ui.toast.hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(hideNotice, 6000);
+    }
+    function hideNotice() {
+      clearTimeout(toastTimer);
+      ui.toast.hidden = true;
+      undo = null;
+    }
+    // Undo puts the run back where it was (one seek).
+    function undoJump() {
+      const state = transport.get(),
+        shift = undo;
+      hideNotice();
+      if (state && shift !== null) transport.send(core.undoOp(shift));
+    }
+    // The Jump panel on a phone: at the run's current second, or before
+    // Start at 0:00 ("Start at…"). Its slider, nudges and step chips move
+    // the point (the sheet previews it); Jump or Start at sends it.
+    function openPanel() {
+      if (cols) return;
+      const state = transport.get();
+      if (!state && done) return;
+      panel = { mode: state ? "run" : "start", t: state ? Math.max(0, Math.floor(core.elapsedMs(state, transport.now()) / 1000)) : 0 };
+      chipOn = null;
+      follow++;
+      openMenu(false);
+      render();
+      try {
+        ui.jpBar.focus({ preventScroll: true });
+      } catch (error) {}
+    }
+    function closePanel() {
+      panel = null;
+      follow++;
+      if (scrubbing && scrubbing.bar === "panel") scrubbing = null;
+      render();
+    }
+    const clampT = (t) => Math.min(core.end(steps), Math.max(0, Math.round(t)));
+    // Where a bar is let go: the run's bars jump; the panel's and the
+    // ready card's only move their point.
+    function land(bar, t) {
+      if (t === null || t === undefined) return render();
+      if (bar === "panel") {
+        if (panel) panel.t = clampT(t);
+      } else if (bar === "ready") pending = clampT(t) || null;
+      else return jump(t);
+      render();
+    }
+    const elapsedNow = () => {
+      const state = transport.get();
+      return state ? core.elapsedMs(state, transport.now()) / 1000 : 0;
+    };
+    // The span a bar covers: this step's (or the gap's) for the step bar,
+    // else the whole routine.
+    function barRange(bar) {
+      if (bar !== "step") return [0, core.end(steps)];
+      if (!transport.get()) return null;
+      const h = core.header(steps, elapsedNow());
+      return [h.from, h.target];
+    }
+    // Pointer events (touch, pen and mouse alike): the drag previews,
+    // the release lands, a cancel lands nowhere.
+    const fractionAt = (el, x) => {
+      const box = el.getBoundingClientRect();
+      return (x - box.left) / Math.max(1, box.width);
+    };
+    const onBarDown = (event) => {
+      const el = event.target.closest?.(".run-scrub");
+      if (!el || !top.contains(el) || event.button > 0) return;
+      const range = barRange(el.dataset.bar);
+      if (!range) return;
+      // No preventDefault: the press focuses the bar the browser's way (a
+      // ring only for keyboard users); touch-action and user-select keep
+      // the page from scrolling or selecting under the drag.
+      try {
+        el.setPointerCapture(event.pointerId);
+      } catch (error) {}
+      clearTimeout(keyTimer);
+      // Near a step's start (6 px), a drag lands on it.
+      const width = Math.max(1, el.getBoundingClientRect().width),
+        session = core.scrub(range[0], range[1], { marks: el.dataset.bar === "step" ? [] : core.ticks(steps), within: ((range[1] - range[0]) * 6) / width });
+      scrubbing = { el, bar: el.dataset.bar, lo: range[0], hi: range[1], session, pointer: event.pointerId, via: "pointer", t: session.move(fractionAt(el, event.clientX)) };
+      el.classList.add("drag");
+      render();
+    };
+    const onBarMove = (event) => {
+      if (!scrubbing || scrubbing.pointer !== event.pointerId) return;
+      scrubbing.t = scrubbing.session.move(fractionAt(scrubbing.el, event.clientX));
+      render();
+    };
+    const onBarUp = (event) => {
+      if (!scrubbing || scrubbing.pointer !== event.pointerId) return;
+      const s = scrubbing;
+      scrubbing = null;
+      s.el.classList.remove("drag");
+      if (event.type === "pointerup") land(s.bar, s.session.end());
+      else {
+        s.session.cancel();
+        render();
+      }
+    };
+    // Keys on a bar: ←/→ 10 s, Shift 1 min (keyMove). On the run's bars the
+    // moves preview and the jump goes once the keys rest (or on Enter), so
+    // holding a key sends one seek; Escape puts it back.
+    function settleKeys() {
+      clearTimeout(keyTimer);
+      if (!scrubbing || scrubbing.via !== "key") return;
+      const s = scrubbing;
+      scrubbing = null;
+      s.el.classList.remove("drag");
+      land(s.bar, s.t);
+    }
+    const onBarKey = (event) => {
+      const el = event.target.closest?.(".run-scrub");
+      if (!el || !top.contains(el)) return;
+      const bar = el.dataset.bar,
+        mine = scrubbing && scrubbing.el === el && scrubbing.via === "key";
+      if (event.key === "Enter" && mine) {
+        event.preventDefault();
+        return settleKeys();
+      }
+      if (event.key === "Escape" && mine) {
+        event.preventDefault();
+        event.stopPropagation();
+        clearTimeout(keyTimer);
+        scrubbing = null;
+        el.classList.remove("drag");
+        return render();
+      }
+      const move = core.keyMove(event.key, event.shiftKey),
+        range = barRange(bar);
+      if (move === null || !range) return;
+      event.preventDefault();
+      const base = mine ? scrubbing.t : barValue(bar, elapsedNow()),
+        t = move === "home" ? range[0] : move === "end" ? range[1] : clampT(base + move);
+      if (bar === "panel" || bar === "ready") return land(bar, t);
+      scrubbing = { el, bar, lo: mine ? scrubbing.lo : range[0], hi: mine ? scrubbing.hi : range[1], via: "key", t };
+      el.classList.add("drag");
+      clearTimeout(keyTimer);
+      keyTimer = setTimeout(settleKeys, 900);
+      render();
+    };
+    const onBarBlur = (event) => {
+      if (scrubbing && scrubbing.via === "key" && event.target === scrubbing.el) settleKeys();
+    };
+    top.addEventListener("pointerdown", onBarDown);
+    top.addEventListener("pointermove", onBarMove);
+    top.addEventListener("pointerup", onBarUp);
+    top.addEventListener("pointercancel", onBarUp);
+    top.addEventListener("keydown", onBarKey);
+    top.addEventListener("focusout", onBarBlur);
     function sound(which) {
       if (which === "beeps") beeps = !beeps;
       else voice = !voice;
@@ -2717,7 +3319,15 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
       [".run-restart", start],
       [".run-close", () => ((done = null), render())],
       [".rv-more", () => (openMenu(!menuOpen), render())],
-      [".rc-go", start],
+      [".run-jump", () => (panel ? closePanel() : openPanel())],
+      [".run-jcancel", closePanel],
+      [".jp-cancel", closePanel],
+      [".jp-go", () => panel && jump(barValue("panel", panel.t))],
+      [".jp-n", (el) => panel && ((panel.t = clampT(panel.t + Number(el.dataset.by))), render())],
+      [".jp-chip", (el) => panel && ((panel.t = clampT(Number(el.dataset.at))), render())],
+      [".run-undo", undoJump],
+      [".rc-at-x", () => ((pending = null), render())],
+      [".rc-go", () => (pending ? jump(pending) : start())],
       [
         ".rc-chip",
         (chip) => {
@@ -2757,6 +3367,7 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
     };
     const onKey = (event) => {
       if (menuOpen && event.key === "Escape") openMenu(false);
+      else if (panel && event.key === "Escape") closePanel();
     };
     const onBlur = () => menuOpen && openMenu(false);
     doc.addEventListener("pointerdown", onOutside);
@@ -2770,7 +3381,7 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
       doc.body.classList.toggle("run-docked", docked);
       render();
     };
-    if (!host) window.__timelineRunApi = { start, dock, sound };
+    if (!host) window.__timelineRunApi = { start, dock, sound, jump, openJump: openPanel };
     transport.subscribe(() => render());
     const resized = typeof ResizeObserver === "function" && host && host.area ? new ResizeObserver(measure) : null;
     resized?.observe(host.area);
@@ -2789,12 +3400,18 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
           if (transport.rekey) transport.rekey(key, next.key);
           key = next.key;
         }
+        if (panel) panel.t = clampT(panel.t);
+        if (pending) pending = clampT(pending) || null;
         render();
       },
       start,
       dock,
       sound,
       unlock,
+      // Seek (§8): jump to `t` seconds (before Start, start there), and
+      // open the Jump panel (a phone's; "Start at…" before Start).
+      jump,
+      openJump: openPanel,
       // The preview frame loaded afresh: tell it again.
       resync() {
         sheetSig = "";
@@ -2806,6 +3423,14 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
       destroy() {
         alive = false;
         clearInterval(timer);
+        clearTimeout(keyTimer);
+        clearTimeout(toastTimer);
+        top.removeEventListener("pointerdown", onBarDown);
+        top.removeEventListener("pointermove", onBarMove);
+        top.removeEventListener("pointerup", onBarUp);
+        top.removeEventListener("pointercancel", onBarUp);
+        top.removeEventListener("keydown", onBarKey);
+        top.removeEventListener("focusout", onBarBlur);
         resized?.disconnect();
         window.removeEventListener("resize", measure);
         doc.removeEventListener("visibilitychange", render);
@@ -2973,7 +3598,7 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
           : "") +
         `<div class="ready-sound" hidden data-html2canvas-ignore><button type="button" class="ready-tg" data-sound="beeps" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/></svg><span>Beeps</span><span class="ready-sw" aria-hidden="true"></span></button><button type="button" class="ready-tg" data-sound="announce" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21v-3h2a1.5 1.5 0 0 0 1.5-1.5V14l1.4-.6-1.4-3A5.3 5.3 0 1 0 2.5 14.3V21"/><path d="M16.8 9.2a3.8 3.8 0 0 1 0 5.6"/><path d="M19.8 6.3a8 8 0 0 1 0 11.4"/></svg><span>Announce steps</span><span class="ready-sw" aria-hidden="true"></span></button></div>` +
         (linked.length ? `<ul class="ready-notes">${linked.map((n) => `<li>${linkify(n)}</li>`).join("")}</ul>` : "") +
-        `<div class="ready-row"><button type="button" class="ready-go" data-html2canvas-ignore>${play}Start <small>· ${core.total(m.total)}</small></button><button type="button" class="ready-edit" data-html2canvas-ignore hidden>✎ Edit</button></div></div></header>`;
+        `<div class="ready-row"><button type="button" class="ready-go" data-html2canvas-ignore>${play}Start <small>· ${core.total(m.total)}</small></button><button type="button" class="ready-edit" data-html2canvas-ignore hidden>✎ Edit</button></div><button type="button" class="ready-at" data-html2canvas-ignore hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h13"/><path d="m11 7 5 5-5 5"/><path d="M20 5v14"/></svg>Start at…</button></div></header>`;
       return `${ready}<section class="lanes" style="height:${px(g.height)}" aria-label="Steps, from Start"><div class="rail" aria-hidden="true"></div>${html.join("")}</section>`;
     };
     const days = rel
@@ -3008,7 +3633,7 @@ body.run-cols>.run-doc.run-top{position:fixed;left:0;top:0;bottom:0;width:var(--
     // Only timelines that use them carry these, so a day timeline's page is
     // unchanged.
     const relativeCss = rel
-      ? ` .sheet.routine{max-width:760px;padding:0 0 120px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;--ln:#8080803d;--chipbg:#80808024;--wash:#8080800d;--go:#3ecf8e;--go-ink:#08241a;} .sheet.routine *{box-sizing:border-box;} .ready{margin:0 0 4px;} .ready h1{margin:0;padding:0;max-width:none;text-align:left;font-size:32px;line-height:1.05;letter-spacing:-1.2px;} .ready .tagline{margin:6px 0 0;text-align:left;font-size:15px;line-height:1.3;} .hero{position:relative;height:232px;overflow:hidden;background:var(--chipbg);} .hero .pic.cover{position:absolute;inset:0;margin:0;height:100%;max-height:none;aspect-ratio:auto;} .hero .scrim{position:absolute;left:0;right:0;bottom:0;padding:70px 16px 14px;background:linear-gradient(transparent,#000d);pointer-events:none;} .hero .scrim h1{color:#fff;pointer-events:auto;text-shadow:0 1px 12px #0008;} .hero .scrim .tagline{color:#fffc;} .ready-card{margin:16px 16px 0;} .ready:not(.has-cover) .ready-card{margin:16px;padding:18px 16px 16px;border-radius:14px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));} .ready-kv{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:12px 0 0;font-size:14px;color:var(--blue);} .has-cover .ready-kv{margin-top:0;} .ready-kv b{font-size:22px;color:var(--navy);letter-spacing:-.5px;} .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0;} .chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;margin:0;padding:0 11px 0 7px;border:0;border-radius:999px;background:var(--chipbg);color:var(--navy);font:inherit;font-size:13px;line-height:1.2;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ck{display:grid;place-items:center;width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--blue);} .ck svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;visibility:hidden;} .chip.on .ck{background:var(--go);border-color:var(--go);color:var(--go-ink);} .chip.on .ck svg{visibility:visible;} .ready-notes{margin:10px 0 0;padding-left:18px;font-size:13px;color:var(--blue);} .ready-row{display:flex;gap:10px;margin:16px 0 2px;} .ready-go{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;gap:10px;height:56px;margin:0;border:0;border-radius:999px;background:var(--go);color:var(--go-ink);font:800 18px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;box-shadow:0 6px 22px #0003;-webkit-tap-highlight-color:transparent;} .ready-go svg{width:20px;height:20px;fill:currentColor;} .ready-go small{font-weight:600;font-size:15px;opacity:.8;} body.run-on .ready-go,body.run-on .ready-edit{visibility:hidden;} .ready-edit{flex:none;height:56px;margin:0;padding:0 18px;border:1px solid var(--ln);border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 15px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-edit[hidden]{display:none;} .lanes{position:relative;display:block;margin:18px 16px 0 0;} .lanes .rail{position:absolute;left:70px;top:0;bottom:0;width:2px;background:var(--ln);} .ly{position:absolute;} .w{left:80px;right:0;} .l0{left:80px;width:calc((100% - 86px) / 2);} .l1{left:calc(80px + (100% - 86px) / 2 + 6px);right:0;} .gl{left:0;width:64px;text-align:right;font:600 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:-.3px;color:var(--blue);white-space:nowrap;} .gl b{color:var(--navy);font-weight:700;} .gl[hidden]{display:none;} .cd{z-index:1;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));padding:8px 9px 8px 12px;overflow:hidden;color:var(--navy);text-align:left;--c:#5f8fb0;} .cd::before,.mini::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);} .sky{--c:#5f8fb0;} .sand{--c:#c08a44;} .sage{--c:#6f9a5e;} .cd-t{margin:0;padding-right:46px;font-size:14px;font-weight:700;line-height:1.2;letter-spacing:-.1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-d{margin:2px 0 0;padding-right:46px;font-size:12px;line-height:1.25;color:var(--blue);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-ft{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:auto;padding-top:6px;} .dur{flex:none;padding:4px 6px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:0;white-space:nowrap;} .cd-th{position:absolute;right:8px;top:8px;width:40px;height:40px;border-radius:8px;overflow:hidden;} .cd-th.icon,.mo-i,.rs-i{display:grid;place-items:center;color:var(--blue);} .cd-th.icon{background:var(--chipbg);} .cd-th.icon svg{width:22px;height:22px;fill:currentColor;} .icon img{width:100%;height:100%;object-fit:cover;} .cd.w{padding-top:7px;} .cd-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding-right:48px;min-width:0;} .cd.w .cd-t{flex:0 1 auto;min-width:0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd.w .dur{margin-left:auto;} .cd.w .cd-d{order:3;flex-basis:100%;min-width:0;margin:-2px 0 0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd .step-notes{margin:0;flex:none;order:1;} .cd.w .dur{order:2;} .cd .step-notes summary{padding:2px 7px;border-color:var(--ln);font-size:11px;font-weight:500;line-height:16px;letter-spacing:0;opacity:1;} .cd .step-notes[open]{order:4;flex-basis:100%;} .cd .step-notes ul{margin:4px 0 2px;padding-left:16px;font-size:13px;line-height:1.3;} .cd .map-link{font-size:10px;} .brk{position:absolute;left:-2px;right:-2px;height:34px;display:grid;place-items:center;background:var(--paper);z-index:1;} .brk::before,.brk::after{content:'';position:absolute;left:0;right:0;height:8px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M0 6.5 6 1.5 12 6.5' fill='none' stroke='%238a8a86' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x;} .brk::before{top:-4px;} .brk::after{bottom:-4px;} .brk span{padding:5px 9px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 12px/1 ui-monospace,Menlo,monospace;} .mini{position:relative;display:flex;align-items:center;gap:4px;flex:none;height:30px;margin:6px -5px 0 -8px;padding:0 4px 0 8px;border-radius:8px;border:1px solid var(--blue);background:var(--paper);font-size:11.5px;white-space:nowrap;overflow:hidden;box-shadow:0 -5px 0 -2px var(--ln),0 6px 14px #0003;cursor:pointer;} .mini b{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:600;} .mini .dur{margin-left:auto;padding:3px 4px;font-size:10px;} .mark{z-index:2;height:0;border-top:1px dashed var(--navy);cursor:pointer;} .mark span{position:absolute;right:6px;top:-10px;max-width:calc(100% - 12px);padding:1px 6px;border-radius:6px;border:1px solid var(--ln);background:var(--paper);color:var(--navy);font-size:12px;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .rs,.mo{z-index:1;display:flex;align-items:center;gap:8px;height:28px;padding:0 10px 0 12px;border-radius:7px;border:1px dashed var(--ln);background-color:var(--paper);color:var(--blue);font:600 12px/1 ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;cursor:pointer;} .rs-i svg,.mo-i svg{width:14px;height:14px;fill:currentColor;} .rs-i,.mo-i{width:14px;height:14px;flex:none;} .rs-t{text-transform:lowercase;} .rs-left:empty{display:none;} .mo{border-style:solid;color:var(--navy);font-family:inherit;font-size:13px;} .mo span{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--blue);font-weight:400;} .lsec{left:80px;right:0;display:flex;align-items:center;gap:8px;height:24px;color:var(--blue);font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;} .lsec em{font-style:normal;font-weight:600;letter-spacing:0;text-transform:none;font-family:ui-monospace,Menlo,monospace;} .lsec::after{content:'';flex:1;border-top:1px solid var(--ln);} .dn{left:80px;right:0;display:flex;align-items:center;gap:10px;height:28px;color:var(--blue);font-size:14px;font-weight:600;} .dn-ck{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:1px dashed var(--ln);} .dn-ck svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.live .cd,body.live .lsec[data-line]{cursor:pointer;} .run-on .cd.done,.run-on .rs.done,.run-on .mo.done,.run-on .mark.done{opacity:.42;} .lanes .cd.live{border:2px solid #3ecf8e99;padding:7px 8px 7px 11px;background-image:linear-gradient(#3ecf8e24 0 var(--fy,0px),var(--wash) var(--fy,0px));} .lanes .cd.live .cd-d{display:block;-webkit-line-clamp:none;white-space:normal;} .lanes .cd.upnext{border-style:dashed;border-color:var(--c);} .lanes .rs.live{align-items:flex-end;padding-bottom:8px;border:2px solid #3ecf8e;background-color:var(--paper);background-image:linear-gradient(#3ecf8e1c,#3ecf8e1c);color:var(--navy);} .nowh{position:absolute;left:66px;right:-8px;height:2px;z-index:0;background:var(--navy);box-shadow:0 0 6px var(--navy);pointer-events:none;} .nowh::before{content:'';position:absolute;left:0;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--navy);} .gl.gnow{color:var(--navy);font-weight:700;} .nowh.pz{background:#9fb3bf;box-shadow:none;} .run-fin .cd,.run-fin .rs,.run-fin .mo,.run-fin .mark,.run-fin .lsec{opacity:.42;} .run-fin .dn{color:var(--navy);font-weight:700;} .run-fin .dn small{font-size:13px;font-weight:500;color:var(--blue);} .run-fin .dn-ck{background:#3ecf8e;border:0;color:#08241a;} .nowh.pz::before{background:#9fb3bf;} .upk{flex:none;order:2;align-self:center;padding:3px 5px;border:1px solid var(--ln);border-radius:5px;color:var(--navy);font:700 9.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;} .upk-len{display:none;} .lanes .cd.grow{min-height:128px;} .cd.grow .upk{display:inline-block;align-self:flex-start;margin:2px 0 8px;} .cd.grow .upk-len{display:inline;} .cd.grow .cd-row{display:block;padding-right:118px;} .cd.grow .dur{display:none;} .cd.grow .cd-t{padding-right:118px;font-size:17px;white-space:normal;} .cd.grow .cd-row .cd-t{padding-right:0;} .cd.grow .cd-d{padding-right:118px;white-space:normal;} .cd.grow .cd-row .cd-d{padding-right:0;margin-top:2px;} .cd.grow .cd-th{width:110px;height:110px;border-radius:10px;} .cd.grow .cd-th.icon svg{width:56px;height:56px;} body.run-cols .ready{display:none;} body.run-cols .lanes{margin-top:24px;} .ready-sound{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0;} .ready-sound[hidden]{display:none;} .ready-tg{display:flex;flex:1 1 auto;min-width:0;align-items:center;gap:6px;height:40px;margin:0;padding:0 6px 0 8px;border:1px solid var(--ln);border-radius:12px;background:var(--chipbg);color:var(--navy);font:700 13.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-tg svg{width:19px;height:19px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} .ready-sw{position:relative;flex:none;width:34px;height:20px;margin-left:auto;border-radius:10px;background:var(--ln);} .ready-sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004;transition:left .15s;} .ready-tg[aria-pressed="true"] .ready-sw{background:var(--go);} .ready-tg[aria-pressed="true"] .ready-sw::after{left:16px;} .sheet.routine footer{margin-top:10px;} body.theme-future .sheet.routine{--ln:#29e2ff2e;--chipbg:#0f2a4a;--wash:#ffffff06;} body.theme-future .sky{--c:#29e2ff;} body.theme-future .sand{--c:#ff4fd8;} body.theme-future .sage{--c:#5dffb8;} body.theme-future .ready:not(.has-cover) .ready-card{border-color:#29e2ff55;background:linear-gradient(160deg,#12305a88,#0a0f1c);box-shadow:0 0 30px -12px #29e2ff;} body.theme-future .ready h1{font-size:27px;letter-spacing:4px;line-height:1.1;} body.theme-future .ready .tagline{font-size:11px;letter-spacing:2px;} body.theme-future .ready-kv{color:#8fb8d8;font-size:13px;} body.theme-future .ready-kv b{color:#fff;} body.theme-future .chip{background:#ffffff0a;border:1px solid #29e2ff44;} body.theme-future .lanes .rail{background:linear-gradient(#29e2ff,#ff4fd8);box-shadow:0 0 10px #29e2ff66;} body.theme-future .cd{border-color:var(--c);background-color:#0c1322;box-shadow:0 0 14px -8px var(--c);} body.theme-future .cd-t{color:#fff;} body.theme-future .dur{background:transparent;border:1px solid var(--c);color:#fff;} body.theme-future .cd-th.icon{background:#ffffff0a;border:1px solid var(--c);color:#fff;} body.theme-future .rs{border-color:#5dffb855;color:#9fd8c0;} body.theme-future .gl{color:#8fb8d8;} body.theme-code .sheet.routine{font-family:inherit;--ln:#30363d;--chipbg:#161b22;--wash:#161b22;} body.theme-code .sky{--c:#79c0ff;} body.theme-code .sand{--c:#ffa657;} body.theme-code .sage{--c:#7ee787;} body.theme-code .cd{border-radius:6px;} body.theme-code .cd-t{color:var(--c);} body.theme-code .ready h1{font-size:26px;letter-spacing:-.5px;} body.theme-retro .sheet.routine{--ln:#3b241699;--chipbg:#f0b45a55;--wash:#fbf1de00;} body.theme-retro .sky{--c:#e9a15a;} body.theme-retro .sand{--c:#c9512c;} body.theme-retro .sage{--c:#5f8a63;} body.theme-retro .cd,body.theme-retro .ready:not(.has-cover) .ready-card{border:2px solid #3b2416;box-shadow:3px 3px 0 #3b2416;} body.theme-retro .ready h1{font-size:30px;letter-spacing:-.5px;} body.theme-travel .ready h1{font-size:34px;letter-spacing:-1px;} body.theme-travel .sky{--c:#4f9fd0;} body.theme-travel .sand{--c:#e0a13a;} body.theme-travel .sage{--c:#5f9a6e;} body.theme-minimal .ready h1{letter-spacing:-1.5px;} @media(min-width:700px){.lanes{margin-right:24px;} .ready-card{margin-left:24px;margin-right:24px;} .ready:not(.has-cover) .ready-card{margin:24px;} .ready h1{font-size:40px;} .hero{height:300px;}} @media print{.ready-go,.ready-edit,.ready-sound{display:none;} .sheet.routine{padding-bottom:0;}}`
+      ? ` .sheet.routine{max-width:760px;padding:0 0 120px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;--ln:#8080803d;--chipbg:#80808024;--wash:#8080800d;--go:#3ecf8e;--go-ink:#08241a;} .sheet.routine *{box-sizing:border-box;} .ready{margin:0 0 4px;} .ready h1{margin:0;padding:0;max-width:none;text-align:left;font-size:32px;line-height:1.05;letter-spacing:-1.2px;} .ready .tagline{margin:6px 0 0;text-align:left;font-size:15px;line-height:1.3;} .hero{position:relative;height:232px;overflow:hidden;background:var(--chipbg);} .hero .pic.cover{position:absolute;inset:0;margin:0;height:100%;max-height:none;aspect-ratio:auto;} .hero .scrim{position:absolute;left:0;right:0;bottom:0;padding:70px 16px 14px;background:linear-gradient(transparent,#000d);pointer-events:none;} .hero .scrim h1{color:#fff;pointer-events:auto;text-shadow:0 1px 12px #0008;} .hero .scrim .tagline{color:#fffc;} .ready-card{margin:16px 16px 0;} .ready:not(.has-cover) .ready-card{margin:16px;padding:18px 16px 16px;border-radius:14px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));} .ready-kv{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:12px 0 0;font-size:14px;color:var(--blue);} .has-cover .ready-kv{margin-top:0;} .ready-kv b{font-size:22px;color:var(--navy);letter-spacing:-.5px;} .chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0;} .chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;margin:0;padding:0 11px 0 7px;border:0;border-radius:999px;background:var(--chipbg);color:var(--navy);font:inherit;font-size:13px;line-height:1.2;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ck{display:grid;place-items:center;width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--blue);} .ck svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;visibility:hidden;} .chip.on .ck{background:var(--go);border-color:var(--go);color:var(--go-ink);} .chip.on .ck svg{visibility:visible;} .ready-notes{margin:10px 0 0;padding-left:18px;font-size:13px;color:var(--blue);} .ready-row{display:flex;gap:10px;margin:16px 0 2px;} .ready-go{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;gap:10px;height:56px;margin:0;border:0;border-radius:999px;background:var(--go);color:var(--go-ink);font:800 18px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;box-shadow:0 6px 22px #0003;-webkit-tap-highlight-color:transparent;} .ready-go svg{width:20px;height:20px;fill:currentColor;} .ready-go small{font-weight:600;font-size:15px;opacity:.8;} body.run-on .ready-go,body.run-on .ready-edit{visibility:hidden;} .ready-edit{flex:none;height:56px;margin:0;padding:0 18px;border:1px solid var(--ln);border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 15px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-edit[hidden]{display:none;} .lanes{position:relative;display:block;margin:18px 16px 0 0;} .lanes .rail{position:absolute;left:70px;top:0;bottom:0;width:2px;background:var(--ln);} .ly{position:absolute;} .w{left:80px;right:0;} .l0{left:80px;width:calc((100% - 86px) / 2);} .l1{left:calc(80px + (100% - 86px) / 2 + 6px);right:0;} .gl{left:0;width:64px;text-align:right;font:600 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:-.3px;color:var(--blue);white-space:nowrap;} .gl b{color:var(--navy);font-weight:700;} .gl[hidden]{display:none;} .cd{z-index:1;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--ln);background-color:var(--paper);background-image:linear-gradient(var(--wash),var(--wash));padding:8px 9px 8px 12px;overflow:hidden;color:var(--navy);text-align:left;--c:#5f8fb0;} .cd::before,.mini::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);} .sky{--c:#5f8fb0;} .sand{--c:#c08a44;} .sage{--c:#6f9a5e;} .cd-t{margin:0;padding-right:46px;font-size:14px;font-weight:700;line-height:1.2;letter-spacing:-.1px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-d{margin:2px 0 0;padding-right:46px;font-size:12px;line-height:1.25;color:var(--blue);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;} .cd-ft{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:auto;padding-top:6px;} .dur{flex:none;padding:4px 6px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:0;white-space:nowrap;} .cd-th{position:absolute;right:8px;top:8px;width:40px;height:40px;border-radius:8px;overflow:hidden;} .cd-th.icon,.mo-i,.rs-i{display:grid;place-items:center;color:var(--blue);} .cd-th.icon{background:var(--chipbg);} .cd-th.icon svg{width:22px;height:22px;fill:currentColor;} .icon img{width:100%;height:100%;object-fit:cover;} .cd.w{padding-top:7px;} .cd-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding-right:48px;min-width:0;} .cd.w .cd-t{flex:0 1 auto;min-width:0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd.w .dur{margin-left:auto;} .cd.w .cd-d{order:3;flex-basis:100%;min-width:0;margin:-2px 0 0;padding-right:0;display:block;white-space:nowrap;text-overflow:ellipsis;} .cd .step-notes{margin:0;flex:none;order:1;} .cd.w .dur{order:2;} .cd .step-notes summary{padding:2px 7px;border-color:var(--ln);font-size:11px;font-weight:500;line-height:16px;letter-spacing:0;opacity:1;} .cd .step-notes[open]{order:4;flex-basis:100%;} .cd .step-notes ul{margin:4px 0 2px;padding-left:16px;font-size:13px;line-height:1.3;} .cd .map-link{font-size:10px;} .brk{position:absolute;left:-2px;right:-2px;height:34px;display:grid;place-items:center;background:var(--paper);z-index:1;} .brk::before,.brk::after{content:'';position:absolute;left:0;right:0;height:8px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M0 6.5 6 1.5 12 6.5' fill='none' stroke='%238a8a86' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x;} .brk::before{top:-4px;} .brk::after{bottom:-4px;} .brk span{padding:5px 9px;border-radius:999px;background:var(--chipbg);color:var(--navy);font:700 12px/1 ui-monospace,Menlo,monospace;} .mini{position:relative;display:flex;align-items:center;gap:4px;flex:none;height:30px;margin:6px -5px 0 -8px;padding:0 4px 0 8px;border-radius:8px;border:1px solid var(--blue);background:var(--paper);font-size:11.5px;white-space:nowrap;overflow:hidden;box-shadow:0 -5px 0 -2px var(--ln),0 6px 14px #0003;cursor:pointer;} .mini b{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:600;} .mini .dur{margin-left:auto;padding:3px 4px;font-size:10px;} .mark{z-index:2;height:0;border-top:1px dashed var(--navy);cursor:pointer;} .mark span{position:absolute;right:6px;top:-10px;max-width:calc(100% - 12px);padding:1px 6px;border-radius:6px;border:1px solid var(--ln);background:var(--paper);color:var(--navy);font-size:12px;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .rs,.mo{z-index:1;display:flex;align-items:center;gap:8px;height:28px;padding:0 10px 0 12px;border-radius:7px;border:1px dashed var(--ln);background-color:var(--paper);color:var(--blue);font:600 12px/1 ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;cursor:pointer;} .rs-i svg,.mo-i svg{width:14px;height:14px;fill:currentColor;} .rs-i,.mo-i{width:14px;height:14px;flex:none;} .rs-t{text-transform:lowercase;} .rs-left:empty{display:none;} .mo{border-style:solid;color:var(--navy);font-family:inherit;font-size:13px;} .mo span{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--blue);font-weight:400;} .lsec{left:80px;right:0;display:flex;align-items:center;gap:8px;height:24px;color:var(--blue);font:700 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;} .lsec em{font-style:normal;font-weight:600;letter-spacing:0;text-transform:none;font-family:ui-monospace,Menlo,monospace;} .lsec::after{content:'';flex:1;border-top:1px solid var(--ln);} .dn{left:80px;right:0;display:flex;align-items:center;gap:10px;height:28px;color:var(--blue);font-size:14px;font-weight:600;} .dn-ck{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:1px dashed var(--ln);} .dn-ck svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.live .cd,body.live .lsec[data-line]{cursor:pointer;} .run-on .cd.done,.run-on .rs.done,.run-on .mo.done,.run-on .mark.done{opacity:.42;} .lanes .cd.live{border:2px solid #3ecf8e99;padding:7px 8px 7px 11px;background-image:linear-gradient(#3ecf8e24 0 var(--fy,0px),var(--wash) var(--fy,0px));} .lanes .cd.live .cd-d{display:block;-webkit-line-clamp:none;white-space:normal;} .lanes .cd.upnext{border-style:dashed;border-color:var(--c);} .lanes .rs.live{align-items:flex-end;padding-bottom:8px;border:2px solid #3ecf8e;background-color:var(--paper);background-image:linear-gradient(#3ecf8e1c,#3ecf8e1c);color:var(--navy);} .nowh{position:absolute;left:66px;right:-8px;height:2px;z-index:0;background:var(--navy);box-shadow:0 0 6px var(--navy);pointer-events:none;} .nowh::before{content:'';position:absolute;left:0;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--navy);} .gl.gnow{color:var(--navy);font-weight:700;} .nowh.pz{background:#9fb3bf;box-shadow:none;} .run-fin .cd,.run-fin .rs,.run-fin .mo,.run-fin .mark,.run-fin .lsec{opacity:.42;} .run-fin .dn{color:var(--navy);font-weight:700;} .run-fin .dn small{font-size:13px;font-weight:500;color:var(--blue);} .run-fin .dn-ck{background:#3ecf8e;border:0;color:#08241a;} .nowh.pz::before{background:#9fb3bf;} .upk{flex:none;order:2;align-self:center;padding:3px 5px;border:1px solid var(--ln);border-radius:5px;color:var(--navy);font:700 9.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;} .upk-len{display:none;} .lanes .cd.grow{min-height:128px;} .cd.grow .upk{display:inline-block;align-self:flex-start;margin:2px 0 8px;} .cd.grow .upk-len{display:inline;} .cd.grow .cd-row{display:block;padding-right:118px;} .cd.grow .dur{display:none;} .cd.grow .cd-t{padding-right:118px;font-size:17px;white-space:normal;} .cd.grow .cd-row .cd-t{padding-right:0;} .cd.grow .cd-d{padding-right:118px;white-space:normal;} .cd.grow .cd-row .cd-d{padding-right:0;margin-top:2px;} .cd.grow .cd-th{width:110px;height:110px;border-radius:10px;} .cd.grow .cd-th.icon svg{width:56px;height:56px;} body.run-cols .ready{display:none;} body.run-cols .lanes{margin-top:24px;} .ready-sound{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0;} .ready-sound[hidden]{display:none;} .ready-tg{display:flex;flex:1 1 auto;min-width:0;align-items:center;gap:6px;height:40px;margin:0;padding:0 6px 0 8px;border:1px solid var(--ln);border-radius:12px;background:var(--chipbg);color:var(--navy);font:700 13.5px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-tg svg{width:19px;height:19px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} .ready-sw{position:relative;flex:none;width:34px;height:20px;margin-left:auto;border-radius:10px;background:var(--ln);} .ready-sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004;transition:left .15s;} .ready-tg[aria-pressed="true"] .ready-sw{background:var(--go);} .ready-tg[aria-pressed="true"] .ready-sw::after{left:16px;} .sheet.routine footer{margin-top:10px;} body.theme-future .sheet.routine{--ln:#29e2ff2e;--chipbg:#0f2a4a;--wash:#ffffff06;} body.theme-future .sky{--c:#29e2ff;} body.theme-future .sand{--c:#ff4fd8;} body.theme-future .sage{--c:#5dffb8;} body.theme-future .ready:not(.has-cover) .ready-card{border-color:#29e2ff55;background:linear-gradient(160deg,#12305a88,#0a0f1c);box-shadow:0 0 30px -12px #29e2ff;} body.theme-future .ready h1{font-size:27px;letter-spacing:4px;line-height:1.1;} body.theme-future .ready .tagline{font-size:11px;letter-spacing:2px;} body.theme-future .ready-kv{color:#8fb8d8;font-size:13px;} body.theme-future .ready-kv b{color:#fff;} body.theme-future .chip{background:#ffffff0a;border:1px solid #29e2ff44;} body.theme-future .lanes .rail{background:linear-gradient(#29e2ff,#ff4fd8);box-shadow:0 0 10px #29e2ff66;} body.theme-future .cd{border-color:var(--c);background-color:#0c1322;box-shadow:0 0 14px -8px var(--c);} body.theme-future .cd-t{color:#fff;} body.theme-future .dur{background:transparent;border:1px solid var(--c);color:#fff;} body.theme-future .cd-th.icon{background:#ffffff0a;border:1px solid var(--c);color:#fff;} body.theme-future .rs{border-color:#5dffb855;color:#9fd8c0;} body.theme-future .gl{color:#8fb8d8;} body.theme-code .sheet.routine{font-family:inherit;--ln:#30363d;--chipbg:#161b22;--wash:#161b22;} body.theme-code .sky{--c:#79c0ff;} body.theme-code .sand{--c:#ffa657;} body.theme-code .sage{--c:#7ee787;} body.theme-code .cd{border-radius:6px;} body.theme-code .cd-t{color:var(--c);} body.theme-code .ready h1{font-size:26px;letter-spacing:-.5px;} body.theme-retro .sheet.routine{--ln:#3b241699;--chipbg:#f0b45a55;--wash:#fbf1de00;} body.theme-retro .sky{--c:#e9a15a;} body.theme-retro .sand{--c:#c9512c;} body.theme-retro .sage{--c:#5f8a63;} body.theme-retro .cd,body.theme-retro .ready:not(.has-cover) .ready-card{border:2px solid #3b2416;box-shadow:3px 3px 0 #3b2416;} body.theme-retro .ready h1{font-size:30px;letter-spacing:-.5px;} body.theme-travel .ready h1{font-size:34px;letter-spacing:-1px;} body.theme-travel .sky{--c:#4f9fd0;} body.theme-travel .sand{--c:#e0a13a;} body.theme-travel .sage{--c:#5f9a6e;} body.theme-minimal .ready h1{letter-spacing:-1.5px;} @media(min-width:700px){.lanes{margin-right:24px;} .ready-card{margin-left:24px;margin-right:24px;} .ready:not(.has-cover) .ready-card{margin:24px;} .ready h1{font-size:40px;} .hero{height:300px;}} .ready-at{display:inline-flex;align-items:center;gap:8px;height:44px;margin:4px 0 0 -6px;padding:0 14px 0 8px;border:0;border-radius:999px;background:transparent;color:var(--navy);font:700 14px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;-webkit-tap-highlight-color:transparent;} .ready-at[hidden]{display:none;} .ready-at svg,.gl-pop svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;} body.run-on .ready-at{visibility:hidden;} body.seekable .gl[data-t]{cursor:pointer;} .gl-pop{left:72px;z-index:6;display:inline-flex;align-items:center;gap:8px;height:44px;margin:0;padding:0 16px 0 12px;border:0;border-radius:999px;background:#10181d;color:#e9f1f5;font:700 14px/1 system-ui,-apple-system,sans-serif;letter-spacing:0;text-transform:none;white-space:nowrap;box-shadow:0 0 0 1px #ffffff2e,0 6px 20px #0006;cursor:pointer;-webkit-tap-highlight-color:transparent;} .nowh.pv{background:#e8a33d;box-shadow:0 0 6px #e8a33d;} .nowh.pv::before{background:#e8a33d;} @media print{.ready-go,.ready-edit,.ready-sound,.ready-at{display:none;} .sheet.routine{padding-bottom:0;}}`
       : "";
     const pictureCss = pictured
       ? ` .pic{display:block;overflow:hidden;background:var(--sky);-webkit-tap-highlight-color:transparent;} .pic img{display:block;width:100%;height:100%;object-fit:cover;} .pic.cover{margin:-30px -34px 22px;aspect-ratio:16/7;max-height:380px;} .event-body.has-pic{min-height:80px;padding-right:86px;} .pic.thumb{position:absolute;right:7px;top:50%;width:64px;height:64px;transform:translateY(-50%);border-radius:12px;box-shadow:0 1px 4px #0002;} .event-body.has-pic .until{right:84px;} .pic-view{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);background:#000000eb;cursor:zoom-out;} .pic-view img{max-width:100vw;max-height:100vh;max-height:100dvh;object-fit:contain;} @media(max-width:850px){.pic.cover{margin:-25px -22px 18px;}} @media(max-width:580px){.pic.cover{margin:-27px -14px 16px;aspect-ratio:16/10;} .event-body.has-pic{min-height:76px;padding-right:64px;} .pic.thumb{right:6px;width:52px;height:52px;border-radius:10px;} .event-body.has-pic .until{right:62px;}} @media print{.pic.cover{margin-top:0;}}`

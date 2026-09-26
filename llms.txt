@@ -192,7 +192,9 @@ the same and is optional.) The page then shows a ready card with the total
 time, what you need and a Start button, the steps in lanes (steps that
 overlap sit side by side), and while running a countdown with beeps and the
 steps announced; on a saved link every device with the link open follows the
-same run.
+same run. The person can jump to where they really are (tap the countdown,
+or drag the bar on a wide screen), or start partway in with Start at…, so a
+routine they began before opening the page still lines up.
 
 - `+45s | Plank` is a step that starts when the line above it (in the text)
   ends, or at 0:00 if it is the first. Durations take `s`, `m`, `h` and
