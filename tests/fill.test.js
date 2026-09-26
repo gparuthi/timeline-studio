@@ -17,7 +17,8 @@ const byTitle = (model, g) => Object.fromEntries(model.events.map((e, i) => [e.t
 // Every card measured at `px` (a wide screen's cards need about 76).
 const needsOf = (model, px) => Object.fromEntries(model.events.map((e, i) => [String(i), e.until === undefined || isRest(e) ? 0 : px]));
 
-// The owner's soup, one step at a time (1 h 27 min, nothing overlaps).
+// The owner's soup as the MCP wrote it, one step at a time (1 h 27 min,
+// nothing overlaps).
 const SOUP = `title: Yemeni Chicken Soup
 note: 1 kg chicken thighs, 1 onion, 4 garlic cloves, 2 tomatoes, 2 carrots, 2 potatoes, Hawaij, Turmeric, Coriander, Lemon
 note: About 87 minutes including prep
@@ -29,8 +30,8 @@ note: About 87 minutes including prep
 +8m | Sauté onion | Soft and golden in the oil | | sand
 +1m | Bloom spices | Garlic and hawaij, stir until fragrant | | sand
 +3m | Cook tomato | Until it breaks down | | sand
-+5m | Brown chicken | Turn the pieces once | | sand
-+5m | Add water | 1.5 l, bring to the boil | | sky
++5m | Sauté chicken | Turn the pieces once | | sand
++5m | Bring to boil | 1.5 l water | | sky
 +25m | Simmer chicken | Chicken and water, lid ajar | | sand
 - Skim the foam in the first 5 minutes
 +22m | Add carrots | Carrots and potatoes in, keep simmering | | sage
@@ -70,19 +71,72 @@ test("fill: the largest scale whose sheet fits the view, drawn whole", () => {
   assert.ok(phone.scale > core.PX, `phone at ${phone.scale}`);
 });
 
-test("fill: a routine too long for the view keeps 12 px a minute and its breaks, and scrolls", () => {
-  // The 17-step workout: its moves' minimum heights alone overflow 900 px.
+test("fill tier 2: one-line cards (not the live step or up next) let the owner's soup fit 2000 x 1034", () => {
+  const soup = parse(SOUP),
+    items = itemsOf(soup),
+    id = (title) => String(soup.events.findIndex((e) => e.title === title)),
+    // Full cards need 86 px at 2000 x 1034, one-line ones 61.
+    needs = needsOf(soup, 86),
+    compact = needsOf(soup, 61),
+    room = 1034 - 28 - 16;
+  // Full cards alone do not fit, even at 6 px a minute.
+  assert.ok(core.layout(items, [], needs, { scale: core.SCALE.min, breaks: false }).height > room);
+  // Running at 32:35: the simmer is live and the carrots are up next; both stay full.
+  const keep = [id("Simmer chicken"), id("Add carrots")],
+    g = core.fit(items, [], needs, {}, room, { compact, keep }),
+    box = byTitle(soup, g);
+  assert.equal(g.tier, 2);
+  assert.equal(g.fits, true);
+  assert.ok(g.height <= room);
+  assert.ok(g.scale >= core.SCALE.compactMin, `the soup at ${g.scale} px a minute`);
+  assert.ok(soup.events.every((e, i) => g.boxes.get(String(i)).brk === null), "drawn whole");
+  assert.ok(box["Simmer chicken"].height >= 2.5 * box["Sauté onion"].height, `simmer ${box["Simmer chicken"].height} vs sauté ${box["Sauté onion"].height}`);
+  assert.ok(box["Simmer chicken"].height >= 86 && box["Add carrots"].height >= 86, "the live step and up next are full cards");
+  assert.ok(g.compact.includes(id("Sauté onion")) && g.compact.includes(id("Bloom spices")));
+  assert.ok(!g.compact.includes(id("Simmer chicken")) && !g.compact.includes(id("Add carrots")));
+  // Before Start (nothing kept full) and at 1440 x 900 (78 / 55 px cards) it fits too.
+  assert.equal(core.fit(items, [], needs, {}, room, { compact }).fits, true);
+  const small = core.fit(items, [], needsOf(soup, 78), {}, 900 - 28 - 16, { compact: needsOf(soup, 55), keep });
+  assert.equal(small.fits, true);
+  assert.ok(byTitle(soup, small)["Simmer chicken"].height >= 2 * byTitle(soup, small)["Sauté onion"].height);
+  // On a phone (844 tall, under the header) one-line cards go below the
+  // 58 px full-width minimum, and the soup fits there too.
+  const phone = core.fit(items, [], needsOf(soup, 60), {}, 844 - 57 - 20, { compact: needsOf(soup, 40), keep });
+  assert.equal(phone.tier, 2);
+  assert.ok(byTitle(soup, phone)["Bloom spices"].height < core.MIN.wide);
+  assert.ok(byTitle(soup, phone)["Bloom spices"].height >= core.MIN.slim);
+});
+
+test("fill tiers 3 and 4: up to 2 hours at 8 px a minute with one-line cards; longer, 12 px a minute with breaks", () => {
+  // The 17-step workout at 1440 x 900: too many moves to fit, so 8 px a
+  // minute and one line a move (up next stays full); it scrolls.
   const workout = parse(read("example.routine.txt")),
     sections = workout.days.map((d, i) => ({ id: "s" + i, at: d.startSec })),
-    w = core.fit(itemsOf(workout), sections, needsOf(workout, 76), {}, 836);
+    upNext = String(workout.events.findIndex((e) => e.title === "Side plank L")),
+    w = core.fit(itemsOf(workout), sections, needsOf(workout, 76), {}, 856, { compact: needsOf(workout, 56), keep: [upNext] });
+  assert.equal(w.tier, 3);
   assert.equal(w.fits, false);
-  assert.equal(w.scale, core.PX);
-  assert.deepEqual(w.map, core.layout(itemsOf(workout), sections, needsOf(workout, 76)).map, "exactly the plain layout");
-  // A 2-hour braise: too long at the smallest scale, so its break is back.
+  assert.equal(w.scale, core.SCALE.proportional);
+  assert.equal(w.breaks, false);
+  assert.equal(w.boxes.get(upNext).height, 76, "up next is a full card");
+  assert.ok(workout.events.every((e, i) => isRest(e) || String(i) === upNext || w.boxes.get(String(i)).height >= 56));
+  // A 2-hour braise on a short view: tier 3, proportional, no break.
+  const braise = parse("title: Braise\n+15m | Brown the meat\n+1h35m | Braise\n+10m | Boil pasta"),
+    b = core.fit(itemsOf(braise), [], needsOf(braise, 76), {}, 500, { compact: needsOf(braise, 56) });
+  assert.equal(b.tier, 3);
+  assert.equal(byTitle(braise, b)["Braise"].brk, null);
+  assert.ok(Math.abs(byTitle(braise, b)["Braise"].height + core.GAP - 95 * 8) < 1, "95 minutes at 8 px a minute");
+  // Past 2 hours: today's 12 px a minute, the long step broken, full cards.
   const ragu = parse("title: Ragù\n+15m | Brown the meat\n+2h | Braise\n2:15:00 +10m | Boil pasta\n2:25:00 +5m | Toss and serve"),
-    rg = core.fit(itemsOf(ragu), [], needsOf(ragu, 76), {}, 836);
-  assert.equal(rg.fits, false);
+    rg = core.fit(itemsOf(ragu), [], needsOf(ragu, 76), {}, 500, { compact: needsOf(ragu, 56) });
+  assert.equal(rg.tier, 4);
+  assert.equal(rg.scale, core.PX);
   assert.notEqual(byTitle(ragu, rg)["Braise"].brk, null);
+  assert.deepEqual(rg.compact, []);
+  assert.deepEqual(rg.map, core.layout(itemsOf(ragu), [], needsOf(ragu, 76)).map, "exactly the plain layout");
+  // Under 2 hours but one step longer than two views at 8 px a minute: tier 4 too.
+  const long = parse("title: T\n+5m | Prep\n+1h50m | Proof");
+  assert.equal(core.fit(itemsOf(long), [], needsOf(long, 76), {}, 400, { compact: needsOf(long, 56) }).tier, 4);
   // No view to fit (a static copy): the plain layout.
   assert.equal(core.fit(itemsOf(ragu), [], {}, {}, 0).fits, false);
   // The scale option alone: 12 px a minute unless given, and breaks off on request.
@@ -107,11 +161,11 @@ test("a note part that reads as a sentence stays a line under the chips", () => 
   assert.deepEqual(config.lines, ["About 87 minutes including prep"]);
 });
 
-test("the icon guess knows Sauté and café (JavaScript's \\b does not)", () => {
-  const m = parse("title: T\n+8m | Sauté onion\n+2m | Stir-fry\n+5m | Café stop\n+1m | Plank\n+1m | Prep ingredients");
+test("the icon guess knows Sauté and café (JavaScript's \\b does not), and brown and sear are the pan", () => {
+  const m = parse("title: T\n+8m | Sauté onion\n+2m | Stir-fry\n+5m | Café stop\n+1m | Plank\n+1m | Prep ingredients\n+5m | Brown chicken\n+3m | Sear the steak");
   assert.deepEqual(
     m.events.map((e) => e.icon),
-    ["pot", "pot", "coffee", "dumbbell", "meal"],
+    ["pot", "pot", "coffee", "dumbbell", "meal", "pot", "pot"],
   );
   assert.match(render("title: T\n+8m | Sauté onion | Soft"), /<svg viewBox="0 0 40 40"><use href="#pot"\/><\/svg>/);
 });
@@ -170,8 +224,15 @@ test("the sheet on a wide screen: no width cap, sizes that scale, notes inline o
   assert.match(page, /body\.run-cols \.gl\{[^}]*font-size:clamp\(13px,calc\(\.75 \* var\(--vw,1vw\)\),15px\);/);
   // A wide card with notes carries them for printing in columns; the live one keeps them folded.
   assert.match(page, /<div class="cd w sage ly has-inl"[^>]*data-line="5"[^>]*>.*?<\/span><ul class="cd-inl"><li>1 onion, diced<\/li><li>4 garlic cloves, grated<\/li><li>2 carrots and 2 potatoes in chunks<\/li><\/ul><\/div>/);
-  assert.match(page, /body\.run-cols \.cd\.w\.has-inl:not\(\.live\)>\.cd-inl\{display:block;[^}]*columns:170px 3;/);
-  assert.match(page, /body\.run-cols \.cd\.w\.has-inl:not\(\.live\) \.step-notes\{display:none;\}/);
+  assert.match(page, /body\.run-cols \.cd\.w\.has-inl:not\(\.live\):not\(\.cp\)>\.cd-inl\{display:block;[^}]*columns:170px 3;/);
+  assert.match(page, /body\.run-cols \.cd\.w\.has-inl:not\(\.live\):not\(\.cp\) \.step-notes\{display:none;\}/);
+  // One-line cards (tier 2 and 3): title · description · length, a smaller picture;
+  // the page measures them one line and keeps the live step and up next full.
+  assert.match(page, /\.cd\.w\.cp>\.cd-row\{flex-wrap:nowrap;/);
+  assert.match(page, /\.cd\.w\.cp \.cd-d::before\{content:'· ';\}/);
+  assert.match(page, /--thc:clamp\(28px,min\(calc\(2\.6 \* var\(--vw,1vw\)\),calc\(4\.16 \* var\(--vh,1vh\)\)\),44px\);/);
+  assert.match(page, /keep = cards\.filter\(\(el\) => el\.classList\.contains\("live"\) \|\| el\.classList\.contains\("upnext"\)\)/);
+  assert.match(page, /core\.fit\(items, sections, needs, \{ liveRest \}, room, \{ compact, keep \}\)/);
   // A long step carries its length both on the break and on a chip (shown when drawn whole).
   const recipe = render(read("example.recipe.txt"));
   assert.match(recipe, /<div class="cd w sand ly bk"[^>]*><div class="cd-row"><h3 class="cd-t">Roast<\/h3><span class="dur">25 min<\/span>/);
